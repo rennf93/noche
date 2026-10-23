@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (ext-loaded, tabs-one, tabs-many-baseline)
+# usage: probe-engine.sh <check>...   (ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe. Check names are [a-z0-9-]+.
-# tabs-many-baseline reads CEF's own log, so it needs --enable-logging=stderr, which this script passes.
+# rss-20 waits a minute between samples, so it gets a 120s probe watchdog (set in main.mm) and a longer outer limit.
+# switch-latency needs frames, so run it with the screen unlocked.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
@@ -27,10 +28,11 @@ OUTF="$(mktemp)"
 trap 'kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$SITE" "$OUTF"' EXIT
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
 
-LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
 FAILED=0
 for CHECK in "$@"; do
   : > "$OUTF"
+  LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
+  [ "$CHECK" = rss-20 ] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
   (cd / && exec "$BIN" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
       --load-extension="$ROOT/Probes/fixtures/probe-extension" --enable-logging=stderr >"$OUTF") &
