@@ -2,7 +2,7 @@
 
 Pin: CEF 156.0.7 (Chromium 156), macOS arm64, spike target `SpikeChromeStyle` (`Spikes/ChromeStyle/main.mm`), built with
 `scripts/build-app.sh --product SpikeChromeStyle --app-name "Spike Chrome Style"`. Evidence (text files only; images and recordings are not committed) lives under `evidence/s1/`
-(text files only; images and recordings are not committed). Logs are the `[S1 <ms>]` lines the spike writes to stderr; screenshots are window-only captures.
+Screenshots are not committed. Logs are the `[S1 <ms>]` lines the spike writes to stderr; screenshots are window-only captures.
 
 Method notes that apply to every row:
 - Every browser view uses `GetBrowserRuntimeStyle() = CEF_RUNTIME_STYLE_CHROME` and `GetChromeToolbarType() = CEF_CTT_NONE`,
