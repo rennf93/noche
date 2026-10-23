@@ -12,6 +12,8 @@ scripts/smoke.sh build/Noche.app fixture
 scripts/run.sh
 ```
 
+`CEF_DIST=<distribution dir> scripts/fetch-cef.sh` vendors our own engine build (see `engine/`) instead of the download.
+
 `swift test` covers NocheCore only and needs no CEF, vendor/ or build/. `scripts/build-app.sh` opts the app, helper and bridge targets in
 (`NOCHE_APP=1`); the throwaway spike targets exist only with `NOCHE_SPIKES=1` (set by `build-app.sh --product Spike...`).
 
