@@ -25,11 +25,11 @@ test("side panel loads and the composer renders", async ({ context, extensionId 
   // Send stays disabled on an empty composer. The badge is filled by the
   // one-shot context round trip to the background (main.ts loadContext), so
   // the shipped default from src/settings/store.ts proves the background
-  // service worker answered: provider "Local fleet", model "North".
+  // service worker answered: provider "Local fleet", model "Ornith 1.5".
   await expect(page.locator("#send")).toBeDisabled();
   const badge = page.locator("#model-badge");
-  await expect(badge).toHaveText("North");
-  await expect(badge).toHaveAttribute("title", "Local fleet - North");
+  await expect(badge).toHaveText("Ornith 1.5");
+  await expect(badge).toHaveAttribute("title", "Local fleet - Ornith 1.5");
 
   // No cached extraction exists for the panel's own tab, so the context
   // round trip carries chip: null and the tab chip stays hidden.
