@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <map>
 #include <set>
 #include <string>
@@ -94,6 +95,7 @@ static void Eval(NSString* expr, std::function<void(NSString*)> cb) { EvalOn(g_b
 static std::vector<CefRefPtr<CefRegistration>> g_regs;
 static void CheckTabs(NSString* s);
 static void RunTabsCheck();
+static void RunRafHidden();
 
 // The content script fills dataset.nocheTabs from the service worker's answer. A view created before the
 // extension finished loading misses the script (spike S1, C4b), so reload once if it stays empty.
@@ -115,7 +117,7 @@ static void CheckTabs(NSString* s) {
   } else if ([g_check isEqualToString:@"ext-loaded"]) {
     Finish(true, [NSString stringWithFormat:@"service worker answered %@", s]);
   } else if (![g_check isEqualToString:@"tabs-one"]) {
-    RunTabsCheck();
+    if ([g_check isEqualToString:@"raf-hidden"]) RunRafHidden(); else RunTabsCheck();
   } else {  // tabs-one
     bool ok = [j[@"count"] intValue] == 1 && [j[@"ids"] count] == 1;
     Finish(ok, [NSString stringWithFormat:@"count=%@ ids=%@ activeId=%@", j[@"count"], [j[@"ids"] componentsJoinedByString:@","], j[@"activeId"]]);
@@ -132,6 +134,7 @@ class BVDelegate : public CefBrowserViewDelegate {
     if (!g_browser) g_browser = b;  // the first view; its callback can fire before CreateBrowserView returns
     g_regs.push_back(b->GetHost()->AddDevToolsMessageObserver(new Obs()));
   }
+#ifdef NOCHE_TABS_API
   void OnTabAdded(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab, bool active) override {
     g_tab_added++;
     Log(@"TAB_ADDED id=%d active=%d total=%d", tab->GetIdentifier(), (int)active, g_tab_added);
@@ -144,6 +147,7 @@ class BVDelegate : public CefBrowserViewDelegate {
   void OnTabClosed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab) override {
     Log(@"TAB_CLOSED id=%d", tab->GetIdentifier());
   }
+#endif
  private:
   IMPLEMENT_REFCOUNTING(BVDelegate);
 };
@@ -214,6 +218,7 @@ static double TreeRssMB(int* procs) {
   return kb * 1024.0 / 1e6;
 }
 
+#ifdef NOCHE_TABS_API
 static bool AddTabs(int n) {
   for (int i = 0; i < n; i++)
     if (!g_view->AddTab(g_url.UTF8String, nullptr, CefBrowserSettings(), nullptr, /*activate=*/false)) return false;
@@ -262,7 +267,7 @@ static void RunTabsCheck() {
         if (j[@"error"]) { Finish(false, [NSString stringWithFormat:@"chrome.tabs.create failed: %@", j[@"error"]]); return; }
         WaitFor([added0]{ return g_tab_added > added0; }, 5000, [before](bool added) {
           const int after = WindowCount();
-          Finish(added && before == 1 && after == 1, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d GetTabs=%zu", (int)added, before, after, Tabs().size()]);
+          Finish(added && after == before, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs=%zu", (int)added, before, after, Tabs().size()]);
         });
       });
     } else if ([g_check isEqualToString:@"ext-activate"]) {
@@ -281,15 +286,28 @@ static void RunTabsCheck() {
       if (tabs.size() != 20) { Finish(false, [NSString stringWithFormat:@"expected 20 tabs, GetTabs=%zu", tabs.size()]); return; }
       SwitchStep(tabs, {});
     } else {  // rss-20
-      int p1 = 0, p2 = 0;
+      int p1 = 0;
       double r1 = TreeRssMB(&p1);
       Log(@"RSS sample 1: %.1f MB, %d processes, %d loaded of %d", r1, p1, (int)g_loaded_ids.size(), total);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        int p2 = 0;
         double r2 = TreeRssMB(&p2);
         Finish(std::max(r1, r2) <= 3200, [NSString stringWithFormat:@"rss=%.1f MB then %.1f MB (%d then %d processes, %d loaded) limit=3200 MB (U6)", r1, r2, p1, p2, (int)g_loaded_ids.size()]);
       });
     }
   });
+}
+#else
+static void RunTabsCheck() { Finish(false, @"built without NOCHE_TABS_API (needs the B2 engine)"); }
+#endif
+
+// Needs only the stock API: tab 0 awaits one requestAnimationFrame. Settles whether a hidden window renders.
+static void RunRafHidden() {
+  EvalOn(g_browser, @"new Promise(r => requestAnimationFrame(() => r('raf')))", true, [](NSString* r) {
+    Finish(r.length > 0, [NSString stringWithFormat:@"requestAnimationFrame %@", r.length ? @"resolved" : @"returned nothing"]);
+  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(),
+                 ^{ Finish(false, @"requestAnimationFrame did not resolve in 10s while hidden"); });
 }
 
 class Client : public CefClient, public CefLoadHandler {
@@ -319,6 +337,9 @@ class WinDelegate : public CefWindowDelegate {
     NSWindow* nw = ((__bridge NSView*)w->GetWindowHandle()).window;
     nw.alphaValue = 0;
     nw.ignoresMouseEvents = YES;
+    // CefWindow::Show() ends in NSApp activateIgnoringOtherApps (native_widget_ns_window_bridge.mm, kShowAndActivateWindow),
+    // which is forbidden here. Ordering the NSWindow in directly never activates the app or makes the window key.
+    if (!getenv("NOCHE_PROBE_NO_ORDER") && [g_check isEqualToString:@"switch-latency"]) [nw orderFrontRegardless];
   }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return CefRect(120, 120, 1000, 700); }
@@ -357,7 +378,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"rss-20" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"rss-20", @"raf-hidden" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

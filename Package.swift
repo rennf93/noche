@@ -68,7 +68,8 @@ if withProbes {
         name: "EngineProbe",
         dependencies: ["CefBridge"],
         path: "Probes/EngineProbe",
-        cxxSettings: [.unsafeFlags(cefFlags)],
+        // NOCHE_TABS_API=1 compiles the tab checks, which need the engine with CefBrowserView::AddTab (task B2).
+        cxxSettings: [.unsafeFlags(cefFlags + (env["NOCHE_TABS_API"] == "1" ? ["-DNOCHE_TABS_API=1"] : []))],
         linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
     ))
 }

@@ -1,18 +1,18 @@
-From b175a781588d201a0d9e4aa56954ae864fd1fdbf Mon Sep 17 00:00:00 2001
+From e227306ec3d3dacd0a814001775155a6ab394467 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 00:39:40 +0200
 Subject: [PATCH] views: tabs inside a views-hosted chrome browser
 
 ---
- include/views/cef_browser_view.h              |  55 +++++-
- include/views/cef_browser_view_delegate.h     |  34 ++++
+ include/views/cef_browser_view.h              |  55 ++++-
+ include/views/cef_browser_view_delegate.h     |  38 ++++
  .../chrome/views/chrome_browser_view.cc       |  25 +++
  .../chrome/views/chrome_browser_view.h        |   8 +
- libcef/browser/views/browser_view_impl.cc     | 171 +++++++++++++++++-
- libcef/browser/views/browser_view_impl.h      |  23 +++
+ libcef/browser/views/browser_view_impl.cc     | 199 +++++++++++++++++-
+ libcef/browser/views/browser_view_impl.h      |  29 +++
  patch/patch.cfg                               |   5 +
- .../chrome_browser_navigator_tabs.patch       |  31 ++++
- 8 files changed, 344 insertions(+), 8 deletions(-)
+ .../chrome_browser_navigator_tabs.patch       |  22 ++
+ 8 files changed, 373 insertions(+), 8 deletions(-)
  create mode 100644 patch/patches/chrome_browser_navigator_tabs.patch
 
 diff --git a/include/views/cef_browser_view.h b/include/views/cef_browser_view.h
@@ -96,10 +96,10 @@ index 497eb16a4..a31e5b454 100644
  
  #endif  // CEF_INCLUDE_VIEWS_CEF_BROWSER_VIEW_H_
 diff --git a/include/views/cef_browser_view_delegate.h b/include/views/cef_browser_view_delegate.h
-index 441591cff..93180aa3c 100644
+index 441591cff..c7c51fc53 100644
 --- a/include/views/cef_browser_view_delegate.h
 +++ b/include/views/cef_browser_view_delegate.h
-@@ -75,6 +75,40 @@ class CefBrowserViewDelegate : public CefViewDelegate {
+@@ -75,6 +75,44 @@ class CefBrowserViewDelegate : public CefViewDelegate {
    virtual void OnBrowserDestroyed(CefRefPtr<CefBrowserView> browser_view,
                                    CefRefPtr<CefBrowser> browser) {}
  
@@ -108,7 +108,9 @@ index 441591cff..93180aa3c 100644
 +  /// Called after |tab| is added to |browser_view| as second or later tab,
 +  /// via CefBrowserView::AddTab(), chrome.tabs.create() or a Chrome command.
 +  /// |active| is true if |tab| became the active tab. OnBrowserCreated() is
-+  /// also called for every tab, before this method.
++  /// also called for every tab, before this method. This method is called
++  /// asynchronously (a later UI thread task), so it is safe to call AddTab()
++  /// or SetActiveTab() from it, and the active tab may have changed since.
 +  ///
 +  /*--cef(added=experimental)--*/
 +  virtual void OnTabAdded(CefRefPtr<CefBrowserView> browser_view,
@@ -118,9 +120,11 @@ index 441591cff..93180aa3c 100644
 +  ///
 +  /// Called when the active tab of |browser_view| changes, whether through
 +  /// CefBrowserView::SetActiveTab() or something else such as
-+  /// chrome.tabs.update(). |previous| is NULL if there was no previous active
-+  /// tab or it was closed. CefBrowserView::GetActiveTab() already returns
-+  /// |active|.
++  /// chrome.tabs.update(). This method is called asynchronously (a later UI
++  /// thread task), so CefBrowserView::GetActiveTab() already reflects the
++  /// change and may even have moved on. |previous| is NULL if the previous
++  /// tab had already been closed when the callback runs. Nothing is reported
++  /// for the first activation.
 +  ///
 +  /*--cef(added=experimental,optional_param=previous)--*/
 +  virtual void OnActiveTabChanged(CefRefPtr<CefBrowserView> browser_view,
@@ -203,7 +207,7 @@ index 2cf516fd7..cc88a89ef 100644
    ToolbarView* OverrideCreateToolbar() override;
    void WillDestroyToolbar() override;
 diff --git a/libcef/browser/views/browser_view_impl.cc b/libcef/browser/views/browser_view_impl.cc
-index d2713e126..e50f6280a 100644
+index d2713e126..b9b3438af 100644
 --- a/libcef/browser/views/browser_view_impl.cc
 +++ b/libcef/browser/views/browser_view_impl.cc
 @@ -4,18 +4,24 @@
@@ -231,31 +235,33 @@ index d2713e126..e50f6280a 100644
  #include "components/input/native_web_keyboard_event.h"
  #include "ui/content_accelerators/accelerator_util.h"
  
-@@ -167,14 +173,21 @@ CefBrowserViewImpl::~CefBrowserViewImpl() {
+@@ -167,14 +173,23 @@ CefBrowserViewImpl::~CefBrowserViewImpl() {
  
  void CefBrowserViewImpl::WebContentsCreated(
      content::WebContents* web_contents) {
 -  if (web_view()) {
 +  // Later tabs are shown by BrowserView when they become active. Forcing them
 +  // into the WebView here would display a background tab.
-+  if (web_view() && tabs_.empty()) {
++  if (web_view() && live_contents_ == 0) {
      web_view()->SetWebContents(web_contents);
    }
++  live_contents_++;
  }
  
  void CefBrowserViewImpl::WebContentsDestroyed(
      content::WebContents* web_contents) {
 -  // This will always be called before BrowserDestroyed().
-+  // This will always be called before BrowserDestroyed(). |tabs_| still holds
-+  // this tab, so more than one entry means other tabs keep the view in use.
-+  if (tabs_.size() > 1) {
++  // This will always be called before BrowserDestroyed(). |tabs_| shrinks
++  // later (BrowserDestroyed runs from a posted task), so count live contents.
++  DCHECK_GT(live_contents_, 0u);
++  if (live_contents_ > 0 && --live_contents_ > 0) {
 +    return;
 +  }
 +
    DisassociateFromWidget();
  
    if (web_view()) {
-@@ -185,17 +198,35 @@ void CefBrowserViewImpl::WebContentsDestroyed(
+@@ -185,17 +200,35 @@ void CefBrowserViewImpl::WebContentsDestroyed(
  void CefBrowserViewImpl::BrowserCreated(
      CefBrowserHostBase* browser,
      base::RepeatingClosure on_bounds_changed) {
@@ -296,7 +302,7 @@ index d2713e126..e50f6280a 100644
  }
  
  void CefBrowserViewImpl::RequestFocusSync() {
-@@ -267,6 +298,132 @@ cef_runtime_style_t CefBrowserViewImpl::GetRuntimeStyle() {
+@@ -267,6 +300,158 @@ cef_runtime_style_t CefBrowserViewImpl::GetRuntimeStyle() {
    return IsAlloyStyle() ? CEF_RUNTIME_STYLE_ALLOY : CEF_RUNTIME_STYLE_CHROME;
  }
  
@@ -394,7 +400,12 @@ index d2713e126..e50f6280a 100644
 +    return;
 +  }
 +  if (auto host = ChromeBrowserHostImpl::GetBrowserForContents(contents)) {
-+    delegate()->OnTabAdded(this, host, active);
++    // Not synchronous: TabStripModel CHECKs against re-entrant calls, so a
++    // delegate calling AddTab() or SetActiveTab() from here would crash.
++    CEF_POST_TASK(CEF_UIT,
++                  base::BindOnce(&CefBrowserViewImpl::NotifyTabAdded,
++                                 weak_ptr_factory_.GetWeakPtr(),
++                                 CefRefPtr<CefBrowserHostBase>(host), active));
 +  }
 +}
 +
@@ -411,26 +422,47 @@ index d2713e126..e50f6280a 100644
 +  CefRefPtr<CefBrowserHostBase> previous;
 +  if (old_contents) {
 +    previous = ChromeBrowserHostImpl::GetBrowserForContents(old_contents);
-+    // A tab that is already gone is reported as NULL.
-+    if (std::find(tabs_.begin(), tabs_.end(), previous) == tabs_.end()) {
-+      previous = nullptr;
-+    }
 +  }
 +
++  // GetActiveTab() reflects the change right away; the delegate call is async.
 +  browser_ = active;
 +
 +  // The very first activation has no previous tab and is covered by
 +  // OnBrowserCreated().
 +  if (previous && delegate() && CEF_API_IS_ADDED(CEF_EXPERIMENTAL)) {
-+    delegate()->OnActiveTabChanged(this, previous, active);
++    CEF_POST_TASK(CEF_UIT,
++                  base::BindOnce(&CefBrowserViewImpl::NotifyActiveTabChanged,
++                                 weak_ptr_factory_.GetWeakPtr(), previous,
++                                 CefRefPtr<CefBrowserHostBase>(active)));
 +  }
++}
++
++void CefBrowserViewImpl::NotifyTabAdded(CefRefPtr<CefBrowserHostBase> tab,
++                                        bool active) {
++  if (delegate() && std::find(tabs_.begin(), tabs_.end(), tab) != tabs_.end()) {
++    delegate()->OnTabAdded(this, tab, active);
++  }
++}
++
++void CefBrowserViewImpl::NotifyActiveTabChanged(
++    CefRefPtr<CefBrowserHostBase> previous,
++    CefRefPtr<CefBrowserHostBase> active) {
++  auto live = [this](const CefRefPtr<CefBrowserHostBase>& t) {
++    return std::find(tabs_.begin(), tabs_.end(), t) != tabs_.end();
++  };
++  if (!delegate() || !live(active)) {
++    return;
++  }
++  // A previous tab that was closed before this task ran is reported as NULL.
++  delegate()->OnActiveTabChanged(this, live(previous) ? previous : nullptr,
++                                 active);
 +}
 +
  void CefBrowserViewImpl::RequestFocus() {
    CEF_REQUIRE_VALID_RETURN_VOID();
    // Always execute asynchronously to work around issue #3040.
 diff --git a/libcef/browser/views/browser_view_impl.h b/libcef/browser/views/browser_view_impl.h
-index ebf3e7be1..9485cf3ef 100644
+index ebf3e7be1..a9bbe7b92 100644
 --- a/libcef/browser/views/browser_view_impl.h
 +++ b/libcef/browser/views/browser_view_impl.h
 @@ -7,6 +7,7 @@
@@ -452,7 +484,7 @@ index ebf3e7be1..9485cf3ef 100644
  class CefBrowserViewImpl
      : public CefViewImpl<views::View, CefBrowserView, CefBrowserViewDelegate>,
        public CefBrowserViewView::Delegate {
-@@ -64,6 +69,12 @@ class CefBrowserViewImpl
+@@ -64,6 +69,15 @@ class CefBrowserViewImpl
    void BrowserDestroyed(CefBrowserHostBase* browser);
    void RequestFocusSync();
  
@@ -461,11 +493,14 @@ index ebf3e7be1..9485cf3ef 100644
 +  void OnTabInserted(content::WebContents* contents, bool active);
 +  void OnActiveTabChanged(content::WebContents* old_contents,
 +                          content::WebContents* new_contents);
++  void NotifyTabAdded(CefRefPtr<CefBrowserHostBase> tab, bool active);
++  void NotifyActiveTabChanged(CefRefPtr<CefBrowserHostBase> previous,
++                              CefRefPtr<CefBrowserHostBase> active);
 +
    // Called to handle accelerators when the event is unhandled by the web
    // content and the browser client.
    bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event);
-@@ -73,6 +84,15 @@ class CefBrowserViewImpl
+@@ -73,6 +87,15 @@ class CefBrowserViewImpl
    CefRefPtr<CefView> GetChromeToolbar() override;
    void SetPreferAccelerators(bool prefer_accelerators) override;
    cef_runtime_style_t GetRuntimeStyle() override;
@@ -481,7 +516,7 @@ index ebf3e7be1..9485cf3ef 100644
  
    // CefView methods:
    CefRefPtr<CefBrowserView> AsBrowserView() override { return this; }
-@@ -142,7 +162,10 @@ class CefBrowserViewImpl
+@@ -142,7 +165,13 @@ class CefBrowserViewImpl
  
    std::unique_ptr<CefBrowserCreateParams> pending_browser_create_params_;
  
@@ -489,6 +524,9 @@ index ebf3e7be1..9485cf3ef 100644
 +  // tab of the Browser in creation order. With Alloy style |tabs_| is unused.
    CefRefPtr<CefBrowserHostBase> browser_;
 +  std::vector<CefRefPtr<CefBrowserHostBase>> tabs_;
++  // WebContents created and not yet destroyed (tabs_ lags: see
++  // WebContentsDestroyed).
++  size_t live_contents_ = 0;
  
    views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
    bool ignore_next_char_event_ = false;
@@ -509,34 +547,25 @@ index 6f8b8d663..52847485f 100644
  ]
 diff --git a/patch/patches/chrome_browser_navigator_tabs.patch b/patch/patches/chrome_browser_navigator_tabs.patch
 new file mode 100644
-index 000000000..6c6f78d4b
+index 000000000..a5bf8a998
 --- /dev/null
 +++ b/patch/patches/chrome_browser_navigator_tabs.patch
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,22 @@
 +diff --git chrome/browser/ui/navigator/browser_navigator.cc chrome/browser/ui/navigator/browser_navigator.cc
-+index 2486722112a44252997c7e8416178ca8078a8f23..faa62562c40ced5e143d25b25a54cade38435d38
++index 2486722112a44252997c7e8416178ca8078a8f23..9f122f1b42536899da3ee335f1b2c2273efc9bbc
 +--- chrome/browser/ui/navigator/browser_navigator.cc
 ++++ chrome/browser/ui/navigator/browser_navigator.cc
-+@@ -104,6 +104,10 @@
-+ #include "components/captive_portal/content/captive_portal_tab_helper.h"
-+ #endif
-+ 
-++#if BUILDFLAG(ENABLE_CEF)
-++#include "cef/libcef/browser/chrome/browser_delegate.h"
-++#endif
-++
-+ using content::GlobalRequestID;
-+ using content::NavigationController;
-+ using content::WebContents;
-+@@ -134,6 +138,15 @@ bool WindowCanOpenTabs(const NavigateParams& params) {
++@@ -134,6 +134,17 @@ bool WindowCanOpenTabs(const NavigateParams& params) {
 +     return false;
 +   }
 + 
 ++#if BUILDFLAG(ENABLE_CEF)
 ++  // A Views-hosted CEF Browser is a popup type without a tab strip but holds
-++  // many tabs. Allow them instead of opening a separate window.
+++  // many tabs. Allow them instead of opening a separate window. DevTools
+++  // browsers keep the default.
 ++  if (auto* cef_delegate = params.browser->cef_delegate();
-++      cef_delegate && cef_delegate->IsViewsHosted()) {
+++      cef_delegate && cef_delegate->IsViewsHosted() &&
+++      params.browser->GetType() != BrowserWindowInterface::TYPE_DEVTOOLS) {
 ++    return true;
 ++  }
 ++#endif
