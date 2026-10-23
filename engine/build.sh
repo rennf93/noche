@@ -43,6 +43,12 @@ if [ "$STEP" = "build" ] || [ "$STEP" = "checkout" ]; then
   fi
 fi
 
+# ANGLE compiles Metal shaders at build time, and this Xcode ships the Metal toolchain as a separate download.
+if [ "$STEP" = "build" ] && ! xcrun metal --version >/dev/null 2>&1; then
+  echo "Metal toolchain missing: run xcodebuild -downloadComponent MetalToolchain" >&2
+  exit 1
+fi
+
 # The build runs from chromium/src/cef, the copy automate-git.py makes of the download.
 CEF="${NOCHE_ENGINE_CEF_DIR:-$ROOT/chromium_git/chromium/src/cef}"
 SRC="$ROOT/chromium_git/chromium/src"

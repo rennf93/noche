@@ -53,6 +53,14 @@ case "$OUT" in "need 100000 GiB free, have "*) ;; *) fail "low_disk: $OUT" ;; es
 [ -z "$(ls -A "$ROOT")" ] || fail "low_disk: root not empty: $(ls -A "$ROOT")"
 ok low_disk
 
+# metal_missing: a build without Xcode's Metal toolchain stops before any log
+mkdir -p "$TMP/stubbin" && printf '#!/bin/sh\nexit 1\n' > "$TMP/stubbin/xcrun" && chmod +x "$TMP/stubbin/xcrun"
+run env PATH="$TMP/stubbin:$PATH" NOCHE_ENGINE_ROOT="$ROOT" NOCHE_ENGINE_MIN_FREE_GB=0 "$BUILD" build
+[ "$RC" -eq 1 ] || fail "metal_missing: exit $RC: $OUT"
+[ "$OUT" = "Metal toolchain missing: run xcodebuild -downloadComponent MetalToolchain" ] || fail "metal_missing: $OUT"
+[ -z "$(ls -A "$ROOT")" ] || fail "metal_missing: root not empty: $(ls -A "$ROOT")"
+ok metal_missing
+
 # throwaway CEF repo with one base commit
 CEF="$TMP/cef"
 git init -q "$CEF"
