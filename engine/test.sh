@@ -113,6 +113,24 @@ run "$BUILD" patch
 [ "$(git -C "$CEF" rev-parse HEAD)" = "$H1" ] || fail "patch_after_interrupt: HEAD differs"
 ok patch_after_interrupt
 
+# build_needs_patch: a build on a tree that does not match the series stops before any log
+mkdir -p "$TMP/okbin" && printf '#!/bin/sh\nexit 0\n' > "$TMP/okbin/xcrun" && chmod +x "$TMP/okbin/xcrun"
+build_refused() {
+  local before; before="$(ls "$ROOT/logs")"
+  run env PATH="$TMP/okbin:$PATH" NOCHE_ENGINE_MIN_FREE_GB=0 "$BUILD" build
+  [ "$RC" -eq 1 ] || fail "build_needs_patch $1: exit $RC: $OUT"
+  [ "$OUT" = "cef tree does not match engine/patches: run engine/build.sh patch first" ] || fail "build_needs_patch $1: $OUT"
+  [ "$(ls "$ROOT/logs")" = "$before" ] || fail "build_needs_patch $1: log created"
+}
+# wrong branch
+git -C "$CEF" checkout -q --detach
+build_refused branch
+# right branch, wrong commit count (series has one patch, tree has none)
+git -C "$CEF" checkout -q -B noche "$BASE"
+build_refused count
+git -C "$CEF" checkout -q --detach "$BASE"
+ok build_needs_patch
+
 # distrib_incomplete: a stub make_distrib that writes an empty distribution
 mkdir -p "$TMP/stubcef/tools"
 printf 'import os,sys\nd=[a for a in sys.argv if a.startswith("--output-dir=")][0].split("=",1)[1]\nos.makedirs(d+"/cef_binary_1_macosarm64_minimal")\n' > "$TMP/stubcef/tools/make_distrib.py"
@@ -135,6 +153,7 @@ PY
 rm -rf "$ROOT/distrib"
 run env NOCHE_ENGINE_ROOT="$ROOT" NOCHE_ENGINE_CEF_DIR="$TMP/okcef" "$BUILD" distrib
 [ "$RC" -eq 0 ] || fail "distrib_ok: exit $RC: $OUT"
+[ "$(printf '%s\n' "$OUT" | tail -1)" = "distrib: $ROOT/distrib/cef_binary_1_macosarm64_minimal" ] || fail "distrib_ok: last line: $OUT"
 ok distrib_ok
 
 # distrib_stale: a complete distribution from an earlier run must not pass for a run that wrote nothing

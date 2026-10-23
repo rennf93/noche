@@ -13,6 +13,11 @@ Everything lives under `NOCHE_ENGINE_ROOT` (default `/Volumes/K3Trunk/noche-engi
 
 `build` refuses to start with less than 40 GiB free (`NOCHE_ENGINE_MIN_FREE_GB`).
 
+## Requirements
+
+- Xcode's Metal toolchain, installed with `xcodebuild -downloadComponent MetalToolchain`. It is about 839 MB and lands on the internal disk under /System/Library/AssetsV2. `build` checks for it.
+- Launching an app built on the engine leaves macOS code-sign clones under `/var/folders/<id>/X/<bundle-id>.code_sign_clone/`. They are safe to delete when no app built on the engine is running.
+
 ## Commands
 
 Run in order, each logs to `$NOCHE_ENGINE_ROOT/logs/<step>-<UTC timestamp>.log`:

@@ -53,6 +53,19 @@ fi
 CEF="${NOCHE_ENGINE_CEF_DIR:-$ROOT/chromium_git/chromium/src/cef}"
 SRC="$ROOT/chromium_git/chromium/src"
 
+# A tree that was not reset by `patch` builds without the series; refuse it.
+if [ "$STEP" = "build" ]; then
+  shopt -s nullglob
+  PATCHES=("$PATCH_DIR"/*.patch)
+  shopt -u nullglob
+  BRANCH_NOW="$(git -C "$CEF" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  COMMITS="$(git -C "$CEF" rev-list --count "$PIN..HEAD" 2>/dev/null || echo -1)"
+  if [ "$BRANCH_NOW" != "noche" ] || [ "$COMMITS" != "${#PATCHES[@]}" ]; then
+    echo "cef tree does not match engine/patches: run engine/build.sh patch first" >&2
+    exit 1
+  fi
+fi
+
 export PATH="$ROOT/depot_tools:$PATH"
 export VPYTHON_VIRTUALENV_ROOT="$ROOT/.vpython-root"
 export CIPD_CACHE_DIR="$ROOT/.cipd-cache"
@@ -122,5 +135,6 @@ case "$STEP" in
       echo "distrib incomplete: ${DIST:-$ROOT/distrib}"
       exit 1
     fi
+    echo "distrib: $DIST"
     ;;
 esac

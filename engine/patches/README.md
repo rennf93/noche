@@ -7,3 +7,5 @@ Changes to Chromium itself go in as new files under CEF's `patch/patches/` plus 
 To regenerate a series: commit on the `noche` branch in `chromium/src/cef`, then `git format-patch <pinned commit>`.
 
 `engine/build.sh patch` resets `src/cef` with `checkout -f -B noche`, which loses uncommitted edits, so commit on `noche` and run `git format-patch` before re-running `patch`.
+
+CEF's patcher applies `cef/patch/patches/*.patch` to Chromium in place, and `engine/build.sh patch` only resets `src/cef`, so Chromium keeps those edits. Before dropping or editing a Chromium-side patch, revert it in Chromium with CEF's `tools/patch_updater.py` (its `--revert` option, optionally limited with `--patch <name>`), from `chromium/src/cef`: `python3 tools/patch_updater.py --revert --patch <name>`.
