@@ -45,9 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         w.delegate = self
         w.contentView = view
         w.center()
-        w.makeKeyAndOrderFront(nil)
         window = w
-        NSApp.activate()
+        if smoke == nil {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        } else {
+            // On screen so the page renders, but invisible, click-through and never key or active.
+            w.alphaValue = 0
+            w.ignoresMouseEvents = true
+            w.orderFrontRegardless()
+        }
 
         if let smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + smoke.timeout) { [weak self] in
