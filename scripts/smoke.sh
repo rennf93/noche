@@ -17,6 +17,11 @@ if [ "$URL" = fixture ]; then
   for _ in $(seq 1 50); do curl -s -o /dev/null "$URL" && break; sleep 0.1; done
 fi
 
+if [ "$URL" = closed-port ]; then
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+  URL="http://127.0.0.1:$PORT/"
+fi
+
 set +e
 OUT="$(cd / && "$APP/Contents/MacOS/Noche" --smoke-url "$URL" --smoke-timeout 30)"
 CODE=$?

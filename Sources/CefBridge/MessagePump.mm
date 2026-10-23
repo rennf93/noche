@@ -50,10 +50,13 @@ class NCApp : public CefApp, public CefBrowserProcessHandler {
  public:
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
-  // An unsigned build blocks on the keychain prompt for the cookie key, which stalls every
-  // request. Dev builds use a mock keychain; revisit when the app is signed.
+  // An ad-hoc signed build blocks on the keychain prompt for the cookie key, which stalls every
+  // request. Only builds marked NocheDevBuild (written by scripts/build-app.sh) use a mock keychain.
+  // shortcut: real keychain use needs a stable signing identity, remove the flag once builds are signed.
   void OnBeforeCommandLineProcessing(const CefString&, CefRefPtr<CefCommandLine> line) override {
-    line->AppendSwitch("use-mock-keychain");
+    if ([[NSBundle.mainBundle objectForInfoDictionaryKey:@"NocheDevBuild"] boolValue]) {
+      line->AppendSwitch("use-mock-keychain");
+    }
   }
 
   // May arrive on any thread.

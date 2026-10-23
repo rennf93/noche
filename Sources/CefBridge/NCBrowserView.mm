@@ -56,7 +56,9 @@ class NCClient : public CefClient, public CefLoadHandler, public CefDisplayHandl
   CefWindowInfo info;
   info.SetAsChild((__bridge CefWindowHandle)self, CefRect(0, 0, (int)b.size.width, (int)b.size.height));
   info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-  CefBrowserHost::CreateBrowserSync(info, _client, _url.UTF8String, CefBrowserSettings(), nullptr, nullptr);
+  if (!CefBrowserHost::CreateBrowserSync(info, _client, _url.UTF8String, CefBrowserSettings(), nullptr, nullptr)) {
+    NSLog(@"NOCHE CreateBrowserSync failed for %@", _url);
+  }
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
@@ -68,7 +70,12 @@ class NCClient : public CefClient, public CefLoadHandler, public CefDisplayHandl
 }
 
 - (void)close {
-  if (_client && _client->browser()) _client->browser()->GetHost()->CloseBrowser(false);
+  if (_client && _client->browser()) {
+    _client->browser()->GetHost()->CloseBrowser(false);
+  } else if (auto cb = self.onClosed) {  // no browser (creation failed or never attached): nothing to wait for
+    self.onClosed = nil;
+    cb();
+  }
 }
 
 @end

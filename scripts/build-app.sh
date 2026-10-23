@@ -37,6 +37,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
 cp "$BIN/$PRODUCT" "$APP/Contents/MacOS/$NAME"
 sed -e "s|@ID@|$ID|g" -e "s|@EXECUTABLE@|$NAME|g" -e "s|@NAME@|$NAME|g" \
   "$ROOT/Resources/App/Info.plist.template" > "$APP/Contents/Info.plist"
+# Dev builds only: lets NCApp use a mock keychain (see MessagePump.mm).
+/usr/libexec/PlistBuddy -c "Add :NocheDevBuild bool true" "$APP/Contents/Info.plist"
 ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 # helper suffix : bundle id suffix
