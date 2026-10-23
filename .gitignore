@@ -1,11 +1,9 @@
-node_modules/
-dist/
-.output/
-.wxt/
-coverage/
-test-results/
-playwright-report/
-*.log
+.build/
+build/
+vendor/
+.swiftpm/
+*.xcodeproj/
 .DS_Store
 .env
 .env.*
+*.log
