@@ -1,0 +1,6 @@
+a1-rest.png size 1100 700 card x 197 .. 1093 y 6 .. 693
+page sample (card centre) (59, 59, 59)
+TL outer px (33, 37, 40)  diag1 (33, 37, 40)  diag2 (34, 37, 40)  diag3 (45, 45, 45)  diag5 (59, 59, 59)
+TR outer px (32, 35, 42)  diag1 (32, 35, 42)  diag2 (33, 35, 42)  diag3 (49, 49, 49)  diag5 (124, 124, 124)
+BL outer px (32, 37, 54)  diag1 (32, 37, 54)  diag2 (33, 37, 52)  diag3 (45, 45, 45)  diag5 (59, 59, 59)
+BR outer px (32, 38, 50)  diag1 (32, 38, 50)  diag2 (33, 38, 50)  diag3 (48, 48, 48)  diag5 (66, 66, 66)

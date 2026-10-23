@@ -1,0 +1,4 @@
+frames per recording second: {0: 53, 1: 55, 2: 53, 3: 57, 4: 51, 5: 4, 6: 1}
+densest 3 s window from 1.41 s: 167 frames = 55.7 frames/s
+inter-frame ms: median 16.7 p95 30.0 max 53.3
+frames longer than 33.3 ms (below 30 fps): 4  longer than 16.7 ms (below 60 fps): 77

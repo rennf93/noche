@@ -1,0 +1,4 @@
+# source: build/spikes/s1/c4-windows-run.log (earlier run, screen unlocked); latency = SIDEBAR click log time to the next requestAnimationFrame CDP result for the newly shown tab
+# click lines in file: 10; tab/next control commands in file: 0
+n=10 values_ms=[24.3, 26.1, 24.3, 24.5, 31.4, 42.8, 28.0, 27.1, 25.5, 22.9]
+median=25.8 min=22.9 max=42.8

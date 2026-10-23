@@ -1,0 +1,5 @@
+M1 FAIL ERR NotSupportedError: Unsupported keySystem or supportedConfigurations.
+M4 FAIL callback=CefAudioHandler::OnAudioStreamStarted play_result=playing currentTime=2.15 started=0 packets=0 frames=0 rms=0.0000
+M5 PASS IsAudioMuted=1 unmuted_rms=0.0000 unmuted_packets=0 muted_rms=0.000000 muted_packets=0 stopped=0 video_paused=0 currentTime 2.15->0.61 (clip loops every 4 s, video kept playing) coreaudiod_audio-out unmuted=1 muted=0 (pmset-unmuted.txt, pmset-muted.txt) audio_handler=1
+M3 PASS misspelled=recieve editable=1 spellcheck_enabled=0 GetDictionarySuggestions=1 count=2 [receive,relieve,] menu_items=15
+M2 PASS OK 512x288 pictureInPictureElement=v enabled=true

@@ -1,0 +1,4 @@
+# source: build/spikes/s1/c4-hybrid-run.log (earlier run, screen unlocked); latency = SIDEBAR click log time to the next requestAnimationFrame CDP result for the newly shown tab
+# click lines in file: 10; tab/next control commands in file: 3
+n=10 values_ms=[9.3, 9.9, 9.6, 9.8, 9.8, 10.0, 9.7, 9.7, 9.7, 9.6]
+median=9.7 min=9.3 max=10.0

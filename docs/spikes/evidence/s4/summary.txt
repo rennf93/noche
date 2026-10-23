@@ -1,0 +1,5 @@
+D1 PASS nodes=10 input=(textbox,Name field) button=(button,Go)
+D2 PASS input center=(144.0,37.0) value=hello button center=(289.4,37.0) title=clicked:hello
+D3 PASS png=900x640 bytes=6454 view=900x640 pt scale=1.0 expected=900x640 page=900x640 dpr=1 vis=visible
+D4 PASS target= before=frame-button after=frame-clicked click dispatched via parent session
+D5 PASS timings written to d5-timings.tsv

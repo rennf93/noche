@@ -1,6 +1,6 @@
 # Spike S5: sandbox and hardened-runtime signing
 
-Pin: CEF 156.0.7 (Chromium 156), macOS arm64. Evidence under `build/spikes/s5/` (gitignored, local). The screen was locked, so no
+Pin: CEF 156.0.7 (Chromium 156), macOS arm64. Evidence (text files only) under `evidence/s5/`. The screen was locked, so no
 screenshots; checks use process arguments and exit codes only. Apps were launched by `scripts/smoke.sh` or by running the binary directly.
 
 | Criterion | Result | Evidence | Notes |

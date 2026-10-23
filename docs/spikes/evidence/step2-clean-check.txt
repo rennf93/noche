@@ -1,0 +1,15 @@
+Building for debugging...
+[Pre-planning 1 / 270]
+[Planning deferred tasks]
+[61 / 116]
+[71 / 117] NocheCore
+[78 / 153]
+[81 / 153]
+[86 / 153]
+[89 / 153]
+/Users/USER/Documents/GitHub/ZZZ/noche/Package.swift: NocheHelper-product: clang++: error: no such file or directory: '/Users/USER/Documents/GitHub/ZZZ/noche/build/cef/libcef_dll_wrapper.a'
+error: Ld /Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Products/Debug/NocheHelper normal failed with a nonzero exit code. Command line:     cd /Users/USER/Documents/GitHub/ZZZ/noche
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -Xlinker -reproducible -target arm64-apple-macos14.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Intermediates.noindex/EagerLinkingTBDs/Debug -L/Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Products/Debug -L/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F/Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Intermediates.noindex/EagerLinkingTBDs/Debug -F/Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Products/Debug -iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -filelist /Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Intermediates.noindex/Noche.build/Debug/NocheHelper-p.build/Objects-normal/arm64/NocheHelper.LinkFileList -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Intermediates.noindex/Noche.build/Debug/NocheHelper-p.build/Objects-normal/arm64/NocheHelper_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -dependency_info -Xlinker /Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Intermediates.noindex/Noche.build/Debug/NocheHelper-p.build/Objects-normal/arm64/NocheHelper_dependency_info.dat -fobjc-arc -fobjc-link-runtime -framework AppKit -lc++ /Users/USER/Documents/GitHub/ZZZ/noche/build/cef/libcef_dll_wrapper.a -Xlinker -no_adhoc_codesign -o /Users/USER/Documents/GitHub/ZZZ/noche/.build/out/Products/Debug/NocheHelper
+error: Build failed
+error: fatalError
+exit=1

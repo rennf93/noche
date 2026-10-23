@@ -1,0 +1,65 @@
+== build/Noche.app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/MacOS/Noche
+Identifier=dev.noche.browser
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1842 flags=0x10002(adhoc,runtime) hashes=47+7 location=embedded
+Signature=adhoc
+Info.plist entries=12
+TeamIdentifier=not set
+Runtime Version=14.0.0
+Sealed Resources version=2 rules=13 files=5
+Internal requirements count=0 size=12
+Total signatures=1
+Chosen signature=1
+== build/Noche.app/Contents/Frameworks/Noche Helper (Alerts).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (Alerts).app/Contents/MacOS/Noche Helper (Alerts)
+Identifier=dev.noche.browser.helper.alerts
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1600 flags=0x10002(adhoc,runtime) hashes=39+7 location=embedded
+Signature=adhoc
+Info.plist entries=15
+TeamIdentifier=not set
+Runtime Version=27.0.0
+Sealed Resources version=2 rules=13 files=0
+Internal requirements count=0 size=12
+Total signatures=1
+Chosen signature=1
+== build/Noche.app/Contents/Frameworks/Noche Helper (GPU).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (GPU).app/Contents/MacOS/Noche Helper (GPU)
+Identifier=dev.noche.browser.helper.gpu
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1597 flags=0x10002(adhoc,runtime) hashes=39+7 location=embedded
+Signature=adhoc
+Info.plist entries=15
+TeamIdentifier=not set
+Runtime Version=27.0.0
+Sealed Resources version=2 rules=13 files=0
+Internal requirements count=0 size=12
+Total signatures=1
+Chosen signature=1
+== build/Noche.app/Contents/Frameworks/Noche Helper (Renderer).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (Renderer).app/Contents/MacOS/Noche Helper (Renderer)
+Identifier=dev.noche.browser.helper.renderer
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1602 flags=0x10002(adhoc,runtime) hashes=39+7 location=embedded
+Signature=adhoc
+Info.plist entries=15
+TeamIdentifier=not set
+Runtime Version=27.0.0
+Sealed Resources version=2 rules=13 files=0
+Internal requirements count=0 size=12
+Total signatures=1
+Chosen signature=1
+== build/Noche.app/Contents/Frameworks/Noche Helper.app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper.app/Contents/MacOS/Noche Helper
+Identifier=dev.noche.browser.helper
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20500 size=1593 flags=0x10002(adhoc,runtime) hashes=39+7 location=embedded
+Signature=adhoc
+Info.plist entries=15
+TeamIdentifier=not set
+Runtime Version=27.0.0
+Sealed Resources version=2 rules=13 files=0
+Internal requirements count=0 size=12
+Total signatures=1
+Chosen signature=1

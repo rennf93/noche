@@ -1,7 +1,7 @@
 # Spike S4: agent loop over the DevTools protocol
 
 Pin: CEF 156.0.7 (Chromium 156), macOS arm64, Alloy-style browser, spike target `SpikeAgentCDP` (`Spikes/AgentCDP/main.mm`), built with
-`scripts/build-app.sh --product SpikeAgentCDP --app-name "Spike Agent CDP"`. Evidence lives under `build/spikes/s4/` (gitignored, local).
+`scripts/build-app.sh --product SpikeAgentCDP --app-name "Spike Agent CDP"`. Evidence (text files only; images and recordings are not committed) lives under `evidence/s4/`.
 
 Setup:
 - `CefBrowserHost::CreateBrowserSync` with `SetAsChild` on a 900x640 pt view, `runtime_style = ALLOY`, one `CefDevToolsMessageObserver`

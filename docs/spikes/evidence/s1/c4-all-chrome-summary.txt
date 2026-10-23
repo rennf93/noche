@@ -1,0 +1,5 @@
+[S1 1172407050.6] ENGINE up, cache=/Users/USER/Library/Application Support/Noche Spikes/s1 tabs=20
+[S1 1172407051.0] CreateBrowserView tab=0 alloy=0 -> 0x10409f60d30
+[S1 1172407051.0] CreateBrowserView tab=1 alloy=0 -> 0x10409f60c70
+[S1 1172407051.3] CreateBrowserView tab=19 alloy=0 -> 0x10409f62bf0
+[S1 1172407118.1] BROWSER_CREATED tab=0 id=1 alloy=0

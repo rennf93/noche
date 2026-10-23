@@ -3,9 +3,10 @@
 Pin for all five spikes: CEF 156.0.7 (Chromium 156), macOS arm64. Each row below takes its verdict and finding from the linked doc;
 every number is quoted from that doc.
 
-Evidence location: the per-spike evidence lives in `build/spikes/s1` to `s5` (gitignored). The full clean check (`rm -rf build`) wiped
-that folder, so a copy was saved first at `.superpowers/sdd/2026-10-23-m0-foundations-and-spikes/spike-evidence/` (also gitignored,
-local only), together with the clean check output (`step2-clean-check.txt`) and `verdict-df.txt`.
+Evidence location: the small text evidence (txt, tsv, log) the docs cite is committed under [evidence/](evidence/), one folder per spike
+(`evidence/s1` to `s5`), together with the clean check output (`evidence/step2-clean-check.txt`) and `evidence/verdict-df.txt`. Screenshots,
+recordings, and listings that could hold personal data (profile, dictionary and extension cache listings) were not committed; the home
+directory name in the committed files is replaced by `USER`. The full set originally lived in `build/spikes/s1` to `s5` (gitignored).
 
 | Spike | Verdict | Finding that matters most | Doc |
 |---|---|---|---|
@@ -67,7 +68,7 @@ https://chromium.googlesource.com/chromium/src/+/main/docs/mac_build_instruction
 The sibling page https://chromium.googlesource.com/chromium/src/+/main/docs/get_the_code.md only links to the per-platform pages and
 has no disk or time figure.
 
-This machine's free disk, from `df -h /` (saved in `verdict-df.txt` next to the evidence copy): size 460Gi, used 13Gi, available 28Gi,
+This machine's free disk, from `df -h /` (saved in `evidence/verdict-df.txt`): size 460Gi, used 13Gi, available 28Gi,
 capacity 31%. The documented git cache alone (~30 GB) is larger than the 28Gi available, before any source checkout or build output.
 
 ### Options (no recommendation acted on; the owner chooses)
@@ -104,6 +105,6 @@ capacity 31%. The documented git cache alone (~30 GB) is larger than the 28Gi av
 
 Command: `rm -rf build .build && scripts/build-cef-wrapper.sh && swift test && scripts/build-app.sh && scripts/smoke.sh build/Noche.app fixture`.
 Result: 5 tests, 0 failures; build-app succeeded; `NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture`; `exit=0`. Output:
-`.superpowers/sdd/2026-10-23-m0-foundations-and-spikes/spike-evidence/step2-variant-wrapper-first.txt`. The first attempt without the
-wrapper step failed and is kept as `step2-clean-check.txt` in the same folder.
+`evidence/step2-variant-wrapper-first.txt`. The first attempt without the
+wrapper step failed and is kept as `evidence/step2-clean-check.txt`.
 M1 item: `swift test` cannot run on a wiped tree without the wrapper step (`build/cef/libcef_dll_wrapper.a` is linked by Package.swift).

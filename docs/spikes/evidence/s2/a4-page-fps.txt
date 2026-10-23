@@ -1,0 +1,9 @@
+[S2 1188039931.6] TITLE tab=1 fps=139.6 maxframe=12.4ms n=69 y=624
+[S2 1188040431.2] TITLE tab=1 fps=136.0 maxframe=12.4ms n=68 y=1344
+[S2 1188040931.7] TITLE tab=1 fps=134.2 maxframe=12.4ms n=67 y=2064
+[S2 1188041431.6] TITLE tab=1 fps=133.9 maxframe=12.0ms n=67 y=2784
+[S2 1188041931.3] TITLE tab=1 fps=130.0 maxframe=12.1ms n=65 y=3504
+[S2 1188042431.8] TITLE tab=1 fps=128.1 maxframe=12.3ms n=64 y=4224
+[S2 1188042931.4] TITLE tab=1 fps=161.9 maxframe=11.9ms n=81 y=4944
+[S2 1188043431.6] TITLE tab=1 fps=170.1 maxframe=6.6ms n=85 y=5664
+[S2 1188043931.5] TITLE tab=1 fps=169.9 maxframe=6.7ms n=85 y=5736

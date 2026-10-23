@@ -1,0 +1,8 @@
+2026-10-23 12:43:47
+ioreg -n Root -d1 -a | grep -A1 ScreenIsLocked:
+<key>CGSSessionScreenIsLocked</key>
+<true/>
+HID idle seconds: 18076.5
+spike log lines showing document.visibilityState = hidden for the current tab (tab 0 and tab 10):
+[S1 1186736775.0] CDP tab=10 {"id":1045,"result":{"result":{"type":"string","value":"hidden"}}}
+[S1 1186747916.0] CDP tab=0 {"id":1047,"result":{"result":{"type":"string","value":"hidden"}}}

@@ -1,0 +1,3 @@
+2026-10-23 12:54:40.850 Noche[13359:270103136] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/dev.noche.browser.savedState
+NOCHE_SMOKE load_error code=-102
+exit=2

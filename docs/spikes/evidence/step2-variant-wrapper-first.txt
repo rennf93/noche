@@ -1,0 +1,106 @@
+libtool: warning: 'base_cef_lock.o' has no symbols
+libtool: warning: 'cpptoc_test_api_version_test_ref_ptr_client_child_cpptoc.o' has no symbols
+libtool: warning: 'cpptoc_test_api_version_test_scoped_client_child_cpptoc.o' has no symbols
+libtool: warning: 'ctocpp_test_api_version_test_ref_ptr_library_child_child_ctocpp.o' has no symbols
+libtool: warning: 'ctocpp_test_api_version_test_ref_ptr_library_child_child_v1_ctocpp.o' has no symbols
+libtool: warning: 'ctocpp_test_api_version_test_scoped_library_child_child_ctocpp.o' has no symbols
+libtool: warning: 'ctocpp_test_api_version_test_scoped_library_child_child_v1_ctocpp.o' has no symbols
+libtool: warning: 'wrapper_libcef_dll_wrapper2.o' has no symbols
+built /Users/USER/Documents/GitHub/ZZZ/noche/build/cef/libcef_dll_wrapper.a
+Building for debugging...
+[Pre-planning 1 / 270]
+[Planning deferred tasks]
+[61 / 116]
+[71 / 117] NocheCore
+[78 / 153]
+[81 / 153]
+[86 / 153]
+[88 / 153]
+[91 / 153] CefBridge
+[93 / 153] NocheHelper-product
+[93 / 153]
+[100 / 153] SpikeAgentCDP-product
+[107 / 153] SpikeMedia-product
+[111 / 153] SpikeChromeStyle-product
+[115 / 153]
+[118 / 153]
+[120 / 153]
+[121 / 153]
+[134 / 154] Noche-product
+[150 / 188]
+[155 / 188]
+[157 / 188]
+[160 / 188]
+[162 / 188] NocheCore
+[168 / 189]
+[169 / 189] NocheCoreTests-product
+[172 / 197]
+[173 / 197]
+[177 / 197]
+[179 / 197]
+[187 / 197] NocheCoreTests-product
+[189 / 197] NocheCoreTests-product
+[195 / 197] Noche-product
+Build complete! (9,54 secs)
+Test Suite 'All tests' started at 2026-10-23 13:29:05.744.
+Test Suite 'NocheCoreTests.xctest' started at 2026-10-23 13:29:05.746.
+Test Suite 'SmokeTests' started at 2026-10-23 13:29:05.746.
+Test Case '-[NocheCoreTests.SmokeTests testLinesAndExitCodes]' started.
+Test Case '-[NocheCoreTests.SmokeTests testLinesAndExitCodes]' passed (0.001 seconds).
+Test Case '-[NocheCoreTests.SmokeTests testNoSmokeFlagMeansNil]' started.
+Test Case '-[NocheCoreTests.SmokeTests testNoSmokeFlagMeansNil]' passed (0.000 seconds).
+Test Case '-[NocheCoreTests.SmokeTests testParsesTimeout]' started.
+Test Case '-[NocheCoreTests.SmokeTests testParsesTimeout]' passed (0.000 seconds).
+Test Case '-[NocheCoreTests.SmokeTests testParsesURLAndDefaultTimeout]' started.
+Test Case '-[NocheCoreTests.SmokeTests testParsesURLAndDefaultTimeout]' passed (0.000 seconds).
+Test Case '-[NocheCoreTests.SmokeTests testRejectsMissingOrBadValues]' started.
+Test Case '-[NocheCoreTests.SmokeTests testRejectsMissingOrBadValues]' passed (0.000 seconds).
+Test Suite 'SmokeTests' passed at 2026-10-23 13:29:05.748.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'NocheCoreTests.xctest' passed at 2026-10-23 13:29:05.748.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'All tests' passed at 2026-10-23 13:29:05.748.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.004) seconds
+􀟈  Test run started.
+􀄵  Testing Library Version: 2084
+􀄵  Target Platform: arm64e-apple-macos14.0
+􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.
+wrapper up to date
+Building for production...
+[Planning deferred tasks]
+[18 / 35]
+[23 / 36] NocheCore
+[34 / 71]
+[36 / 71]
+[41 / 71]
+[43 / 71] CefBridge
+[47 / 71]
+[49 / 71]
+[51 / 71]
+[53 / 71]
+[56 / 71]
+[58 / 71]
+[59 / 71]
+[60 / 71] NocheCore
+[67 / 72] Noche-product
+[82 / 104]
+[89 / 104]
+[91 / 104]
+[93 / 104]
+[96 / 104]
+[97 / 104]
+[98 / 104]
+[99 / 104]
+[100 / 104] Noche-product
+[102 / 104] Noche-product
+[103 / 104] Noche-product
+Build complete! (7,77 secs)
+Building for production...
+[3 / 7]
+[4 / 7] NocheHelper-product
+[6 / 7] NocheHelper-product
+Build complete! (0,97 secs)
+built /Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app
+2026-10-23 13:29:19.319 Noche[99819:270960680] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/dev.noche.browser.savedState
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+exit=0

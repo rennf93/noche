@@ -1,0 +1,9 @@
+# C4b: test extension (Spikes/fixtures/test-extension) loaded with --load-extension, hybrid mode: tab 0 Chrome style, tabs 1 and 2 Alloy, one request context
+# command: build/Spike Chrome Style.app/Contents/MacOS/Spike Chrome Style --ctl <f> --tabs 3 --port 8765 --hybrid --load-extension=$PWD/Spikes/fixtures/test-extension (plus the host-resolver flags)
+# result format: [location.href, dataset.nocheExt, dataset.nocheTabs]; first read right after load, second read after reload of every tab
+[S1 1186930684.0] CDP tab=0 {"id":1001,"result":{"result":{"type":"string","value":"[null,null]"}}}
+[S1 1186930684.1] CDP tab=1 {"id":1002,"result":{"result":{"type":"string","value":"[\"1\",\"{\\\"count\\\":1,\\\"urls\\\":[\\\"http://127.0.0.1:8765/many/01.html\\\"],\\\"sender\\\":\\\"http://127.0.0.1:8765/many/02.html\\\"}\"]"}}}
+[S1 1186930684.1] CDP tab=2 {"id":1003,"result":{"result":{"type":"string","value":"[\"1\",\"{\\\"count\\\":1,\\\"urls\\\":[\\\"http://127.0.0.1:8765/many/01.html\\\"],\\\"sender\\\":\\\"http://127.0.0.1:8765/many/03.html\\\"}\"]"}}}
+[S1 1186944684.4] CDP tab=2 {"id":1006,"result":{"result":{"type":"string","value":"[\"http://127.0.0.1:8765/many/03.html\",\"1\",\"{\\\"count\\\":1,\\\"urls\\\":[\\\"http://127.0.0.1:8765/many/01.html\\\"],\\\"sender\\\":\\\"http://127.0.0.1:8765/many/03.html\\\"}\"]"}}}
+[S1 1186944684.5] CDP tab=1 {"id":1005,"result":{"result":{"type":"string","value":"[\"http://127.0.0.1:8765/many/02.html\",\"1\",\"{\\\"count\\\":1,\\\"urls\\\":[\\\"http://127.0.0.1:8765/many/01.html\\\"],\\\"sender\\\":\\\"http://127.0.0.1:8765/many/02.html\\\"}\"]"}}}
+[S1 1186944684.5] CDP tab=0 {"id":1004,"result":{"result":{"type":"string","value":"[\"http://127.0.0.1:8765/many/01.html\",\"1\",\"{\\\"count\\\":1,\\\"urls\\\":[\\\"http://127.0.0.1:8765/many/01.html\\\"],\\\"sender\\\":\\\"http://127.0.0.1:8765/many/01.html\\\"}\"]"}}}

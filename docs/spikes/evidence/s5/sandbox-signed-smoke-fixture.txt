@@ -1,0 +1,9 @@
+2026-10-23 12:54:51.434 Noche[15100:270106976] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/dev.noche.browser.savedState
+NOCHE-HELPER pid=15335 sandbox-initialize=1
+NOCHE-HELPER pid=15342 sandbox-initialize=1
+NOCHE-HELPER pid=15341 sandbox-initialize=1
+NOCHE-HELPER pid=15332 sandbox-initialize=1
+NOCHE-HELPER pid=15349 sandbox-initialize=1
+NOCHE-HELPER pid=15348 sandbox-initialize=1
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+exit=0

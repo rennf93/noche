@@ -1,0 +1,54 @@
+== build/Noche.app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/MacOS/Noche
+[Dict]
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+== build/Noche.app/Contents/Frameworks/Noche Helper (Alerts).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (Alerts).app/Contents/MacOS/Noche Helper (Alerts)
+[Dict]
+	[Key] com.apple.security.cs.allow-jit
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.allow-unsigned-executable-memory
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+== build/Noche.app/Contents/Frameworks/Noche Helper (GPU).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (GPU).app/Contents/MacOS/Noche Helper (GPU)
+[Dict]
+	[Key] com.apple.security.cs.allow-jit
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.allow-unsigned-executable-memory
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+== build/Noche.app/Contents/Frameworks/Noche Helper (Renderer).app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper (Renderer).app/Contents/MacOS/Noche Helper (Renderer)
+[Dict]
+	[Key] com.apple.security.cs.allow-jit
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.allow-unsigned-executable-memory
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true
+== build/Noche.app/Contents/Frameworks/Noche Helper.app
+Executable=/Users/USER/Documents/GitHub/ZZZ/noche/build/Noche.app/Contents/Frameworks/Noche Helper.app/Contents/MacOS/Noche Helper
+[Dict]
+	[Key] com.apple.security.cs.allow-jit
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.allow-unsigned-executable-memory
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.cs.disable-library-validation
+	[Value]
+		[Bool] true

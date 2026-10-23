@@ -1,8 +1,8 @@
 # Spike S2: rounded Alloy card over vibrancy
 
 Pin: CEF 156.0.7 (Chromium 156), macOS arm64, spike target `SpikeAlloyCard` (`Spikes/AlloyCard/main.mm`), built with
-`scripts/build-app.sh --product SpikeAlloyCard --app-name "Spike Alloy Card"` (`build/spikes/s2/build.log`). Evidence lives under
-`build/spikes/s2/` (gitignored, local). Logs are the `[S2 <ms>]` lines the spike writes to stderr (`run1.log`, `run2.log`).
+`scripts/build-app.sh --product SpikeAlloyCard --app-name "Spike Alloy Card"` (`evidence/s2/build.log`). Evidence lives under
+`evidence/s2/`. Logs are the `[S2 <ms>]` lines the spike writes to stderr (`run1.log`, `run2.log`).
 
 Layout under test: a titled, full-size-content, transparent-titlebar `NSWindow` (1100x700, clear background) whose content view is an
 `NSVisualEffectView` (material `.sidebar`, behind-window blending, active). A 197 pt sidebar region on the left, and a card view

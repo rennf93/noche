@@ -1,7 +1,7 @@
 # Spike S3: media and platform features
 
 Pin: CEF 156.0.7 (Chromium 156), macOS arm64, spike target `SpikeMedia` (`Spikes/Media/main.mm`), built with
-`scripts/build-app.sh --product SpikeMedia --app-name "Spike Media"`. Evidence lives under `build/spikes/s3/` (gitignored, local):
+`scripts/build-app.sh --product SpikeMedia --app-name "Spike Media"`. Evidence (text files only; images and recordings are not committed) lives under `evidence/s3/`:
 `crx-cache-ls.txt`, `profile-listing.txt`, `dictionaries-listing.txt`; `alloy/`, `chrome/`, `alloy-noaudio/` each hold `run.log` (the `[S3 <style> <ms>]` lines), `summary.txt`, `loaded.png`, `pip.png`,
 `pmset-unmuted.txt`, `pmset-muted.txt`; plus `build.log`, `screen-lock-state.txt`, `cache-widevine-contents.txt`.
 

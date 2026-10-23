@@ -1,0 +1,2 @@
+2026-10-23 12:52:58.771 Noche[96988:270068783] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/dev.noche.browser.savedState
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
