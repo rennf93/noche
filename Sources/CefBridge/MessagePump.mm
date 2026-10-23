@@ -57,6 +57,11 @@ class NCApp : public CefApp, public CefBrowserProcessHandler {
     if ([[NSBundle.mainBundle objectForInfoDictionaryKey:@"NocheDevBuild"] boolValue]) {
       line->AppendSwitch("use-mock-keychain");
     }
+    // Chromium clones the whole app bundle into /var/folders on every launch (code_sign_clone_manager.mm),
+    // about 700 MB each; Noche does not swap its bundle while running, so the clone buys nothing.
+    std::string features = line->GetSwitchValue("disable-features").ToString();
+    line->AppendSwitchWithValue("disable-features",
+                                features.empty() ? "MacAppCodeSignClone" : features + ",MacAppCodeSignClone");
   }
 
   // May arrive on any thread.
