@@ -17,7 +17,7 @@ local only), together with the clean check output (`step2-clean-check.txt`) and 
 
 ## Decision per design section 13 item 1
 
-The rule, quoted from the approved design: the reference product's exact look, many tabs running fast, and Chrome Web Store extensions
+Decision rule (approved design, section 13, paraphrased with the product name removed): the reference product's exact look, many tabs running fast, and Chrome Web Store extensions
 are ranked equally by the owner, so no trade-off is pre-approved. If Spike 1 shows CEF can host many tabs with extensions (including
 toolbar icons and popups, implemented by Noche if CEF has no API) beside Noche's own chrome, M1 proceeds on CEF. Anything less: stop and
 bring the owner measured numbers (what failed, disk and build time for the alternative) for the route that keeps all three, a Chromium
@@ -74,14 +74,14 @@ capacity 31%. The documented git cache alone (~30 GB) is larger than the 28Gi av
 
 1. Proceed on CEF with the hybrid layout and accept the extension limits. Cost: `chrome.tabs` only knows the Chrome-style tab (one
    active tab at a time), extension toolbar actions are popups in a side window that resolve the current tab from that window, the
-   install flow needs the UA brand override and opens a Chrome window to hide, and only one Chrome-style view per window is allowed.
+   install flow was only shown to work under a UA brand override (install without it was not tested) and opens a Chrome window to hide, and only one Chrome-style view per window is allowed.
    Gain: many tabs at a median 9.7 ms switch with Noche's own chrome intact, and no new build infrastructure.
 2. Proceed on CEF and implement the missing extension pieces in Noche. What that would take per the S1 findings: build the toolbar icon
    and popup host ourselves (side window, since `NSPopover` renders blank), feed popups the right current tab (the popup does not honour
    `popup.html?tabId=`), bridge tab enumeration for Alloy tabs (`chrome.tabs.query` does not list them; `sendMessage` and `activeTab`
    against an Alloy tab are untested), and suppress the install flow's Chrome window. Whether `chrome.tabs` can be made to see Alloy tabs
    at all is not shown by S1; it is a risk, not a measured cost.
-3. Switch to a Chromium build that owns its extension system. Keeps look, many tabs and extensions together by construction, but the
+3. Switch to a Chromium build that owns its extension system. The design expects it to keep all three, because the build would own its extension system; no spike tested this. The
    documented cost is a ~30 GB git cache, 30 minutes or more of checkout time, and an undocumented (not measured here) build time, on a
    machine with 28Gi free. It changes the cost of the whole project, which is why it is the owner's call.
 
