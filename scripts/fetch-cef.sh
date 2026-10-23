@@ -23,8 +23,8 @@ if [ -n "${CEF_DIST:-}" ]; then
   fi
   LOCAL_PATH="$(cd "$CEF_DIST" && pwd)"
   if [ -f "$VENDOR/cef/include/cef_app.h" ] && [ -f "$RECEIPT" ] \
-    && grep -q "^source=local\$" "$RECEIPT" && grep -q "^path=$LOCAL_PATH\$" "$RECEIPT" \
-    && grep -q "^cef_version=$LOCAL_VERSION\$" "$RECEIPT"; then
+    && grep -qxF "source=local" "$RECEIPT" && grep -qxF "path=$LOCAL_PATH" "$RECEIPT" \
+    && grep -qxF "cef_version=$LOCAL_VERSION" "$RECEIPT"; then
     echo "CEF already vendored"
     exit 0
   fi
