@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Noche engine probe extension",
+  "version": "1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs+9tqcWsBhzPkyLtm6KGBkAxkM5scQuLf9wSp6gjTPM3H4ZMxnTGep4Iir2BdFt2+xJcwYwZHbGoybdaCHDml81rK26R0wyKMEtKWbtTi06qqxucF5aoZ+03082mZbb4+u8bgcB39hMBtlQsmVkZObu9gFR16fICV6iHwXuw6yOKosbKWQBK8b1gaECE8UPqDR9xlwOV/jKmBMgiYrbSe3z/H457GyMPXEjhgzxu+vOyxpXBZMTmXIKhh3IGWZ328ZHa0g2tII79twSe3sZRkts+ikGSgJuttDpm2Umuw8We/H21YqW67cxsGj4PFyHrtRMa9/jRBH6oaanFnvXYVQIDAQAB",
+  "permissions": ["tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_popup": "popup.html", "default_icon": "icon.png" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start" }
+  ]
+}

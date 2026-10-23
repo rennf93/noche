@@ -5,9 +5,10 @@ import Foundation
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let env = ProcessInfo.processInfo.environment
 // NocheCore and its tests build with no CEF present. The app and helper need vendor/cef and the wrapper,
-// so scripts/build-app.sh opts in with NOCHE_APP=1; the spike targets also need NOCHE_SPIKES=1.
+// so scripts/build-app.sh opts in with NOCHE_APP=1; the spike targets also need NOCHE_SPIKES=1 and the engine probe NOCHE_PROBES=1.
 let withSpikes = env["NOCHE_SPIKES"] == "1"
-let withApp = env["NOCHE_APP"] == "1" || withSpikes
+let withProbes = env["NOCHE_PROBES"] == "1"
+let withApp = env["NOCHE_APP"] == "1" || withSpikes || withProbes
 // The CEF sandbox is on by default; NOCHE_NO_SANDBOX=1 opts out (no helper sandbox init, no_sandbox=true).
 let sandboxFlags = env["NOCHE_NO_SANDBOX"] == "1" ? [] : ["-DNOCHE_SANDBOX=1"]
 // NOCHE_TESTHOOKS=1 compiles test-only hooks (forcing the shutdown watchdog) into the app.
@@ -59,6 +60,17 @@ if withSpikes {
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
         ))
     }
+}
+
+if withProbes {
+    products.append(.executable(name: "EngineProbe", targets: ["EngineProbe"]))
+    targets.append(.executableTarget(
+        name: "EngineProbe",
+        dependencies: ["CefBridge"],
+        path: "Probes/EngineProbe",
+        cxxSettings: [.unsafeFlags(cefFlags)],
+        linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
+    ))
 }
 
 let package = Package(

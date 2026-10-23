@@ -28,3 +28,5 @@ Run the app with `scripts/run.sh`, not `open build/Noche.app`: it copies the bun
 ## Engine
 
 Noche's engine is CEF 156 built from source on an external volume; see [engine/README.md](engine/README.md).
+
+Engine probes (`scripts/probe-engine.sh <check>...`) build and run `Probes/EngineProbe` against the vendored CEF; see the header of that script.
