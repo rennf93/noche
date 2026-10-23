@@ -81,6 +81,15 @@ run env NOCHE_ENGINE_ROOT="$ROOT" NOCHE_ENGINE_CEF_DIR="$TMP/stubcef" "$BUILD" d
 case "$OUT" in *"distrib incomplete: $ROOT/distrib/cef_binary_1_macosarm64_minimal"*) ;; *) fail "distrib_incomplete: $OUT" ;; esac
 ok distrib_incomplete
 
+# distrib_stale: a complete distribution from an earlier run must not pass for a run that wrote nothing
+rm -rf "$ROOT/distrib" && mkdir -p "$ROOT/distrib/cef_binary_0_macosarm64_minimal/Release/Chromium Embedded Framework.framework"
+touch -t 200001010000 "$ROOT/distrib/cef_binary_0_macosarm64_minimal"
+printf 'pass\n' > "$TMP/stubcef/tools/make_distrib.py"
+run env NOCHE_ENGINE_ROOT="$ROOT" NOCHE_ENGINE_CEF_DIR="$TMP/stubcef" "$BUILD" distrib
+[ "$RC" -eq 1 ] || fail "distrib_stale: exit $RC: $OUT"
+case "$OUT" in *"distrib incomplete: $ROOT/distrib"*) ;; *) fail "distrib_stale: $OUT" ;; esac
+ok distrib_stale
+
 # usage
 unset NOCHE_ENGINE_ROOT
 for args in "" "bogus"; do

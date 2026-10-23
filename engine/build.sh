@@ -92,7 +92,8 @@ case "$STEP" in
       --ninja-build --arm64-build --minimal \
       --no-docs --no-symbols --no-archive
     # Strict make_distrib still exits 0 on a missing build; check the output.
-    DIST="$(ls -d "$ROOT"/distrib/cef_binary_*_macosarm64_minimal 2>/dev/null | tail -1 || true)"
+    # Only a dir created by this run counts (make_distrib.py:90-91 recreates it), so an older distrib cannot pass.
+    DIST="$(find "$ROOT/distrib" -maxdepth 1 -name 'cef_binary_*_macosarm64_minimal' -newer "$LOG" 2>/dev/null | head -1)"
     if [ -z "$DIST" ] || [ ! -d "$DIST/Release/Chromium Embedded Framework.framework" ]; then
       echo "distrib incomplete: ${DIST:-$ROOT/distrib}"
       exit 1
