@@ -9,7 +9,7 @@ Noche runs on CEF 8078 (Chromium 156.0.8078.48) built from source, not the downl
 
 ## Root
 
-Everything lives under `NOCHE_ENGINE_ROOT` (default `/Volumes/K3Trunk/noche-engine`): `chromium_git`, `depot_tools`, `automate`, `distrib`, `logs`, and the vpython and CIPD caches. Nothing lands on the internal disk. If the root is missing, every command exits 1 with `engine root missing: <path>`. Override with `NOCHE_ENGINE_ROOT=/other/path`.
+Everything lives under `NOCHE_ENGINE_ROOT` (default `/Volumes/K3Trunk/noche-engine`): `chromium_git`, `depot_tools`, `automate`, `distrib`, `logs`, and the vpython and CIPD caches. Nothing lands on the internal disk. If the root is missing, every command exits 1 with `engine root missing: <path>`. Override with `NOCHE_ENGINE_ROOT=/other/path`, which must be on an external volume: the scripts refuse the internal disk (`engine root is on the internal disk: <path>`).
 
 `build` refuses to start with less than 40 GiB free (`NOCHE_ENGINE_MIN_FREE_GB`).
 

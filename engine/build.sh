@@ -6,7 +6,7 @@ ROOT="${NOCHE_ENGINE_ROOT:-/Volumes/K3Trunk/noche-engine}"
 MIN_FREE_GB="${NOCHE_ENGINE_MIN_FREE_GB:-40}"
 
 BRANCH="8078"
-# NOCHE_ENGINE_CEF_PIN, NOCHE_ENGINE_CEF_DIR and NOCHE_ENGINE_PATCH_DIR are test-only.
+# NOCHE_ENGINE_CEF_PIN, NOCHE_ENGINE_CEF_DIR, NOCHE_ENGINE_PATCH_DIR and NOCHE_ENGINE_ALLOW_INTERNAL are test-only.
 PIN="${NOCHE_ENGINE_CEF_PIN:-426920c33ef22551e0b8f48cf343d623ac25642d}"
 PATCH_DIR="${NOCHE_ENGINE_PATCH_DIR:-$REPO/engine/patches}"
 GN_DEFINES_VALUE="is_official_build=false symbol_level=0 blink_symbol_level=0 v8_symbol_level=0 proprietary_codecs=true ffmpeg_branding=Chrome"
@@ -24,7 +24,18 @@ if [ ! -d "$ROOT" ]; then
   exit 1
 fi
 
-if [ "$STEP" = "build" ]; then
+# The engine never lives on the internal disk; a stale folder after an unplug resolves to it.
+MOUNT="$(df -P "$ROOT" | awk 'NR==2 { print $6 }')"
+if [ -z "${NOCHE_ENGINE_ALLOW_INTERNAL:-}" ] && { [ "$MOUNT" = "/" ] || [ "$MOUNT" = "/System/Volumes/Data" ]; }; then
+  echo "engine root is on the internal disk: $ROOT" >&2
+  exit 1
+fi
+
+case "$MIN_FREE_GB" in
+  ''|*[!0-9]*) echo "NOCHE_ENGINE_MIN_FREE_GB must be a whole number of GiB" >&2; exit 2 ;;
+esac
+
+if [ "$STEP" = "build" ] || [ "$STEP" = "checkout" ]; then
   FREE_GB="$(df -k "$ROOT" | awk 'NR==2 { print int($4 / 1048576) }')"
   if [ "$FREE_GB" -lt "$MIN_FREE_GB" ]; then
     echo "need $MIN_FREE_GB GiB free, have $FREE_GB" >&2
@@ -52,11 +63,14 @@ patch_series() {
   cd "$CEF"
   # Fixed committer identity and date so a re-run reproduces the same commits.
   export GIT_COMMITTER_NAME="Noche Engine" GIT_COMMITTER_EMAIL="engine@noche.invalid"
+  # An interrupted run can leave a half-done am; clear it (rm covers an empty stray dir).
+  git am --abort >/dev/null 2>&1 || true
+  rm -rf .git/rebase-apply
   git checkout -q -f -B noche "$PIN"
   local p
   for p in "$PATCH_DIR"/*.patch; do
     [ -e "$p" ] || break
-    if ! git -c commit.gpgsign=false am -q --3way --committer-date-is-author-date "$p"; then
+    if ! git -c core.hooksPath=/dev/null -c commit.gpgsign=false am -q --3way --committer-date-is-author-date "$p"; then
       git am --abort || true
       git reset -q --hard "$PIN"
       echo "patch failed: $(basename "$p")"
@@ -88,13 +102,17 @@ case "$STEP" in
   distrib)
     # make_distrib.py takes the framework from the cefclient app in out/Release_GN_arm64.
     cd "$CEF/tools"
+    # Not the log: tee bumps its mtime on every output line.
+    MARKER="$ROOT/logs/.distrib-start"
+    touch "$MARKER"
     caffeinate -is python3 make_distrib.py --output-dir="$ROOT/distrib" \
       --ninja-build --arm64-build --minimal \
       --no-docs --no-symbols --no-archive
     # Strict make_distrib still exits 0 on a missing build; check the output.
     # Only a dir created by this run counts (make_distrib.py:90-91 recreates it), so an older distrib cannot pass.
-    DIST="$(find "$ROOT/distrib" -maxdepth 1 -name 'cef_binary_*_macosarm64_minimal' -newer "$LOG" 2>/dev/null | head -1)"
-    if [ -z "$DIST" ] || [ ! -d "$DIST/Release/Chromium Embedded Framework.framework" ]; then
+    DIST="$(find "$ROOT/distrib" -maxdepth 1 -name 'cef_binary_*_macosarm64_minimal' -newer "$MARKER" 2>/dev/null | head -1)"
+    rm -f "$MARKER"
+    if [ -z "$DIST" ] || [ ! -f "$DIST/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework" ]; then
       echo "distrib incomplete: ${DIST:-$ROOT/distrib}"
       exit 1
     fi
