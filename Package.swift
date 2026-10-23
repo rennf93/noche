@@ -3,8 +3,15 @@ import PackageDescription
 import Foundation
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-// NOCHE_SANDBOX=1 turns the CEF sandbox on (helper init, no_sandbox=false).
-let sandboxFlags = ProcessInfo.processInfo.environment["NOCHE_SANDBOX"] == "1" ? ["-DNOCHE_SANDBOX=1"] : []
+let env = ProcessInfo.processInfo.environment
+// NocheCore and its tests build with no CEF present. The app and helper need vendor/cef and the wrapper,
+// so scripts/build-app.sh opts in with NOCHE_APP=1; the spike targets also need NOCHE_SPIKES=1.
+let withSpikes = env["NOCHE_SPIKES"] == "1"
+let withApp = env["NOCHE_APP"] == "1" || withSpikes
+// The CEF sandbox is on by default; NOCHE_NO_SANDBOX=1 opts out (no helper sandbox init, no_sandbox=true).
+let sandboxFlags = env["NOCHE_NO_SANDBOX"] == "1" ? [] : ["-DNOCHE_SANDBOX=1"]
+// NOCHE_TESTHOOKS=1 compiles test-only hooks (forcing the shutdown watchdog) into the app.
+let testHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS")] : []
 let cefFlags = sandboxFlags + [
     "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-fno-strict-aliasing",
     "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-fobjc-call-cxx-cdtors",
@@ -13,60 +20,51 @@ let cefFlags = sandboxFlags + [
 ]
 let wrapper = "\(root)/build/cef/libcef_dll_wrapper.a"
 
-let package = Package(
-    name: "Noche",
-    platforms: [.macOS(.v14)],
-    products: [
+var products: [Product] = []
+var targets: [Target] = [
+    .target(name: "NocheCore"),
+    .testTarget(name: "NocheCoreTests", dependencies: ["NocheCore"]),
+]
+
+if withApp {
+    products += [
         .executable(name: "Noche", targets: ["Noche"]),
         .executable(name: "NocheHelper", targets: ["NocheHelper"]),
-        .executable(name: "SpikeChromeStyle", targets: ["SpikeChromeStyle"]),
-        .executable(name: "SpikeAlloyCard", targets: ["SpikeAlloyCard"]),
-        .executable(name: "SpikeAgentCDP", targets: ["SpikeAgentCDP"]),
-        .executable(name: "SpikeMedia", targets: ["SpikeMedia"]),
-    ],
-    targets: [
-        .target(name: "NocheCore"),
-        .testTarget(name: "NocheCoreTests", dependencies: ["NocheCore"]),
+    ]
+    targets += [
         .target(
             name: "CefBridge",
             publicHeadersPath: "include",
             cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore")]
         ),
-        .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"]),
+        .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"], swiftSettings: testHookSettings),
         .executableTarget(
             name: "NocheHelper",
             cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
         ),
-        .executableTarget(
-            name: "SpikeChromeStyle",
+    ]
+}
+
+if withSpikes {
+    for (name, path) in [("SpikeChromeStyle", "ChromeStyle"), ("SpikeAlloyCard", "AlloyCard"),
+                         ("SpikeAgentCDP", "AgentCDP"), ("SpikeMedia", "Media")] {
+        products.append(.executable(name: name, targets: [name]))
+        targets.append(.executableTarget(
+            name: name,
             dependencies: ["CefBridge"],
-            path: "Spikes/ChromeStyle",
+            path: "Spikes/\(path)",
             cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
-        ),
-        .executableTarget(
-            name: "SpikeAlloyCard",
-            dependencies: ["CefBridge"],
-            path: "Spikes/AlloyCard",
-            cxxSettings: [.unsafeFlags(cefFlags)],
-            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
-        ),
-        .executableTarget(
-            name: "SpikeAgentCDP",
-            dependencies: ["CefBridge"],
-            path: "Spikes/AgentCDP",
-            cxxSettings: [.unsafeFlags(cefFlags)],
-            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
-        ),
-        .executableTarget(
-            name: "SpikeMedia",
-            dependencies: ["CefBridge"],
-            path: "Spikes/Media",
-            cxxSettings: [.unsafeFlags(cefFlags)],
-            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
-        ),
-    ],
+        ))
+    }
+}
+
+let package = Package(
+    name: "Noche",
+    platforms: [.macOS(.v14)],
+    products: products,
+    targets: targets,
     cxxLanguageStandard: .cxx20
 )
