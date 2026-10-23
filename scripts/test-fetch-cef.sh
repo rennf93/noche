@@ -46,6 +46,15 @@ run env CEF_DIST="$FAKE" "$FETCH"
 grep -q 'chromium-8.8.8.8$' "$R" || fail "local_skip: receipt not rewritten"
 ok local_skip
 
+# local_rebuilt_same_version: same path and version, new framework binary, must re-vendor
+printf 'rebuilt' > "$FAKE/$FW/Chromium Embedded Framework"
+run env CEF_DIST="$FAKE" "$FETCH"
+[ "$RC" -eq 0 ] && [ "$OUT" != "CEF already vendored" ] || fail "local_rebuilt_same_version: skipped: $OUT"
+grep -qxF "framework=$(stat -f '%z-%m' "$FAKE/$FW/Chromium Embedded Framework")" "$R" || fail "local_rebuilt_same_version: receipt fingerprint"
+run env CEF_DIST="$FAKE" "$FETCH"
+[ "$OUT" = "CEF already vendored" ] || fail "local_rebuilt_same_version: unchanged not skipped: $OUT"
+ok local_rebuilt_same_version
+
 # local_bad_dir
 S1="$(snap "$NOCHE_VENDOR")"
 run env CEF_DIST=/nonexistent "$FETCH"

@@ -24,9 +24,11 @@ if [ -n "${CEF_DIST:-}" ]; then
     exit 1
   fi
   LOCAL_PATH="$(cd "$CEF_DIST" && pwd)"
+  # An engine rebuild keeps the version string, so the binary itself must match too.
+  FINGERPRINT="$(stat -f '%z-%m' "$LOCAL_PATH/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework")"
   if [ -f "$VENDOR/cef/include/cef_app.h" ] && [ -f "$RECEIPT" ] \
     && grep -qxF "source=local" "$RECEIPT" && grep -qxF "path=$LOCAL_PATH" "$RECEIPT" \
-    && grep -qxF "cef_version=$LOCAL_VERSION" "$RECEIPT"; then
+    && grep -qxF "cef_version=$LOCAL_VERSION" "$RECEIPT" && grep -qxF "framework=$FINGERPRINT" "$RECEIPT"; then
     echo "CEF already vendored"
     exit 0
   fi
@@ -44,6 +46,7 @@ if [ -n "${CEF_DIST:-}" ]; then
 source=local
 cef_version=$LOCAL_VERSION
 path=$LOCAL_PATH
+framework=$FINGERPRINT
 fetched=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOR
   echo "CEF vendored at $VENDOR/cef"
