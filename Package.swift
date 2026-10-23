@@ -17,6 +17,7 @@ let package = Package(
     products: [
         .executable(name: "Noche", targets: ["Noche"]),
         .executable(name: "NocheHelper", targets: ["NocheHelper"]),
+        .executable(name: "SpikeChromeStyle", targets: ["SpikeChromeStyle"]),
     ],
     targets: [
         .target(name: "NocheCore"),
@@ -25,11 +26,18 @@ let package = Package(
             name: "CefBridge",
             publicHeadersPath: "include",
             cxxSettings: [.unsafeFlags(cefFlags)],
-            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
+            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore")]
         ),
         .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"]),
         .executableTarget(
             name: "NocheHelper",
+            cxxSettings: [.unsafeFlags(cefFlags)],
+            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
+        ),
+        .executableTarget(
+            name: "SpikeChromeStyle",
+            dependencies: ["CefBridge"],
+            path: "Spikes/ChromeStyle",
             cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
         ),
