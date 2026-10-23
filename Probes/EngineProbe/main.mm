@@ -155,7 +155,7 @@ class WinDelegate : public CefWindowDelegate {
   void OnWindowCreated(CefRefPtr<CefWindow> w) override {
     g_window = w;
     w->AddChildView(g_view);
-    // Invisible and inert: never Show()/Activate(); the NSWindow exists already, so hide it before anything draws.
+    // Invisible and inert: never shown or activated; the NSWindow exists already, so hide it before anything draws.
     NSWindow* nw = ((__bridge NSView*)w->GetWindowHandle()).window;
     nw.alphaValue = 0;
     nw.ignoresMouseEvents = YES;

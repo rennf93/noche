@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # usage: probe-engine.sh <check>...   (ext-loaded, tabs-one, tabs-many-baseline)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
-# exits 0 only if every check printed "pass". Profile: ~/Library/Application Support/Noche Probe.
+# exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
+# Profile: ~/Library/Application Support/Noche Probe. Check names are [a-z0-9-]+.
+# tabs-many-baseline reads CEF's own log, so it needs --enable-logging=stderr, which this script passes.
+# Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ $# -gt 0 ] || { echo "usage: probe-engine.sh <check>..." >&2; exit 2; }
 
-NOCHE_PROBES=1 "$ROOT/scripts/build-app.sh" --product EngineProbe --app-name "Noche Probe" >&2
+for C in "$@"; do
+  [[ "$C" =~ ^[a-z0-9-]+$ ]] || { echo "bad check name: $C" >&2; exit 2; }
+done
 APP="$ROOT/build/Noche Probe.app"
+BIN="$APP/Contents/MacOS/Noche Probe"
+if [ -n "${NOCHE_PROBE_STUB_BIN:-}" ]; then BIN="$NOCHE_PROBE_STUB_BIN"
+else NOCHE_PROBES=1 "$ROOT/scripts/build-app.sh" --product EngineProbe --app-name "Noche Probe" >&2; fi
 
 SITE="$(mktemp -d)"
 echo '<!doctype html><title>probe</title><p>probe page' > "$SITE/index.html"
@@ -24,7 +32,7 @@ FAILED=0
 for CHECK in "$@"; do
   : > "$OUTF"
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
-  (cd / && exec "$APP/Contents/MacOS/Noche Probe" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
+  (cd / && exec "$BIN" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
       --load-extension="$ROOT/Probes/fixtures/probe-extension" --enable-logging=stderr >"$OUTF") &
   APP_PID=$!
   WATCHDOG=0
@@ -33,14 +41,20 @@ for CHECK in "$@"; do
     sleep 0.1
   done
   if kill -0 "$APP_PID" 2>/dev/null; then
-    if ps -p "$APP_PID" -o command= | grep -qF "$APP/Contents/MacOS/Noche Probe"; then
+    if ps -p "$APP_PID" -o command= | grep -qF "$BIN"; then
       WATCHDOG=1
-      kill -KILL "$APP_PID"
+      kill -TERM "$APP_PID"  # the one verified PID, then the same PID hard after 5s
+      for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
+      kill -0 "$APP_PID" 2>/dev/null && kill -KILL "$APP_PID"
     fi
   fi
-  wait "$APP_PID" 2>/dev/null || true
+  set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
   [ "$WATCHDOG" = 1 ] && echo "PROBE $CHECK fail watchdog" >> "$OUTF"
   grep '^PROBE ' "$OUTF" || echo "PROBE $CHECK fail no-output"
-  grep -q "^PROBE $CHECK pass" "$OUTF" || FAILED=1
+  grep -qxE "PROBE $CHECK pass( .*)?" "$OUTF" || FAILED=1
+  if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then FAILED=1; echo "PROBE $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"; fi
+  sleep 1  # let helpers exit
+  LEFT="$( (pgrep -f "$APP/Contents/Frameworks" || true) | wc -l | tr -d ' ')"
+  if [ "$LEFT" != 0 ]; then FAILED=1; echo "PROBE leftover-helpers fail $LEFT"; fi
 done
 exit "$FAILED"
