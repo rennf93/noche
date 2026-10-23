@@ -16,8 +16,10 @@ RECEIPT="$VENDOR/CEF-VERSION.txt"
 # CEF_DIST: vendor our own engine's distribution dir instead of downloading.
 if [ -n "${CEF_DIST:-}" ]; then
   # Check before touching anything: a bad dir must leave the current vendor/cef alone.
-  LOCAL_VERSION="$(sed -n 's/^CEF Version: *//p' "$CEF_DIST/README.txt" 2>/dev/null | head -n 1)" || true
-  if [ ! -f "$CEF_DIST/include/cef_app.h" ] || [ -z "$LOCAL_VERSION" ]; then
+  LOCAL_VERSION="$(cat "$CEF_DIST/README.txt" 2>/dev/null | tr -d '\r' | sed -n '/^CEF Version:/{s/^CEF Version:[[:space:]]*//;s/[[:space:]]*$//;p;q;}')" || true
+  if [ ! -f "$CEF_DIST/include/cef_app.h" ] || [ ! -d "$CEF_DIST/libcef_dll" ] \
+    || [ ! -f "$CEF_DIST/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework" ] \
+    || [ -z "$LOCAL_VERSION" ]; then
     echo "not a CEF distribution: $CEF_DIST" >&2
     exit 1
   fi
@@ -33,6 +35,8 @@ if [ -n "${CEF_DIST:-}" ]; then
   trap 'rm -rf "$TMP"' EXIT
   # ditto keeps the framework's symlinks and signature intact.
   ditto "$LOCAL_PATH" "$TMP/cef"
+  # No receipt while vendor/cef is in flux, so an interrupted run re-vendors next time.
+  rm -f "$RECEIPT"
   rm -rf "$VENDOR/cef"
   mv "$TMP/cef" "$VENDOR/cef"
   # Always rewrite the receipt: the wrapper build rebuilds when it is newer than the archive.
@@ -72,6 +76,8 @@ if [ "$ACTUAL" != "$SHA1" ]; then
 fi
 
 tar -xjf "$ARCHIVE" -C "$TMP"
+# No receipt while vendor/cef is in flux, so an interrupted run re-vendors next time.
+rm -f "$RECEIPT"
 rm -rf "$VENDOR/cef"
 mv "$TMP/$NAME" "$VENDOR/cef"
 
