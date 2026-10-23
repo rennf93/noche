@@ -22,6 +22,7 @@ let package = Package(
         .executable(name: "SpikeChromeStyle", targets: ["SpikeChromeStyle"]),
         .executable(name: "SpikeAlloyCard", targets: ["SpikeAlloyCard"]),
         .executable(name: "SpikeAgentCDP", targets: ["SpikeAgentCDP"]),
+        .executable(name: "SpikeMedia", targets: ["SpikeMedia"]),
     ],
     targets: [
         .target(name: "NocheCore"),
@@ -56,6 +57,13 @@ let package = Package(
             name: "SpikeAgentCDP",
             dependencies: ["CefBridge"],
             path: "Spikes/AgentCDP",
+            cxxSettings: [.unsafeFlags(cefFlags)],
+            linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
+        ),
+        .executableTarget(
+            name: "SpikeMedia",
+            dependencies: ["CefBridge"],
+            path: "Spikes/Media",
             cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
         ),

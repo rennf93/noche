@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>media-fixture</title>
+<body style="margin:20px;font:16px sans-serif">
+<button id="wv" style="width:200px;height:32px" onclick="wv()">Widevine</button>
+<pre id="wvres"></pre>
+<video id="v" src="clip.webm" loop width="320" height="180"></video><br>
+<button id="play" style="width:100px;height:32px" onclick="v.muted=false;v.play().then(()=>play_res.textContent='playing',e=>play_res.textContent='ERR '+e)">Play</button>
+<button id="pip" style="width:100px;height:32px" onclick="pip()">PiP</button>
+<pre id="play_res"></pre>
+<pre id="pipres"></pre>
+<div id="ce" contenteditable="true" spellcheck="true" style="border:1px solid #888;width:300px;height:40px;font-size:24px">recieve</div>
+<script>
+function wv(){
+  navigator.requestMediaKeySystemAccess('com.widevine.alpha',[{initDataTypes:['cenc','webm'],
+    videoCapabilities:[{contentType:'video/webm; codecs="vp9"'}]}]).then(
+    a=>wvres.textContent='OK keySystem='+a.keySystem,
+    e=>wvres.textContent='ERR '+e.name+': '+e.message);
+}
+function pip(){
+  v.requestPictureInPicture().then(w=>pipres.textContent='OK '+w.width+'x'+w.height,
+    e=>pipres.textContent='ERR '+e.name+': '+e.message);
+}
+</script>
