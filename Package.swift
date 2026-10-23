@@ -3,7 +3,9 @@ import PackageDescription
 import Foundation
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-let cefFlags = [
+// NOCHE_SANDBOX=1 turns the CEF sandbox on (helper init, no_sandbox=false).
+let sandboxFlags = ProcessInfo.processInfo.environment["NOCHE_SANDBOX"] == "1" ? ["-DNOCHE_SANDBOX=1"] : []
+let cefFlags = sandboxFlags + [
     "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-fno-strict-aliasing",
     "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-fobjc-call-cxx-cdtors",
     "-fstack-protector", "-funwind-tables", "-arch", "arm64", "-mmacosx-version-min=14.0",

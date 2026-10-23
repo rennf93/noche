@@ -28,7 +28,11 @@ static BOOL Fail(NSError** error, NSString* step) {
                                                 NSBundle.mainBundle.privateFrameworksPath, name, name];
 
   CefSettings settings;
-  settings.no_sandbox = true;  // sandbox arrives with the signing task
+#ifdef NOCHE_SANDBOX
+  settings.no_sandbox = false;
+#else
+  settings.no_sandbox = true;
+#endif
   settings.external_message_pump = true;
   CefString(&settings.root_cache_path) = path.fileSystemRepresentation;
   CefString(&settings.cache_path) = path.fileSystemRepresentation;
