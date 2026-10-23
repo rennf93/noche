@@ -1,45 +1,5 @@
-2026-10-23 13:23:23 +0200 
-Assertion status system-wide:
-   BackgroundTask                 0
-   ApplePushServiceTask           0
-   UserIsActive                   1
-   PreventUserIdleDisplaySleep    1
-   SoftwareUpdateTask             0
-   PreventSystemSleep             0
-   PreventSystemSleepSecurityIndicator 0
-   ExternalMedia                  1
-   InternalPreventDisplaySleep    1
-   PreventUserIdleSystemSleep     1
-   NetworkClientActive            0
-Listed by owning process:
-   pid 36281(caffeinate): [0x001224c80001a215] 00:01:36 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
-	Details: caffeinate asserting for 300 secs
-	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
-	Timeout will fire in 204 secs Action=TimeoutActionRelease
+# trimmed to the coreaudiod audio-out and Spike Media assertion lines
    pid 22592(coreaudiod): [0x001225250001a2a9] 00:00:03 PreventUserIdleSystemSleep named: "com.apple.audio.BuiltInHeadphoneOutputDevice.context.preventuseridlesleep"  
-	Created for PID: 46504. 
 	Resources: audio-out BuiltInHeadphoneOutputDevice 
-   pid 21825(caffeinate): [0x001224430001a1d8] 00:03:49 PreventUserIdleSystemSleep named: "caffeinate command-line tool"  
-	Details: caffeinate asserting for 300 secs
-	Localized=THE CAFFEINATE TOOL IS PREVENTING SLEEP.
-	Timeout will fire in 71 secs Action=TimeoutActionRelease
-   pid 605(powerd): [0x000000a200018009] 330:16:33 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"  
-   pid 605(powerd): [0x000000a100088000] 330:16:34 ExternalMedia named: "com.apple.powermanagement.externalmediamounted"  
-   pid 605(powerd): [0x000000a20009800a] 330:16:33 UserIsActive named: "com.apple.powerd.ws.initialize"  
-   pid 605(powerd): [0x001224b500108482] 00:00:06 InternalPreventDisplaySleep named: "com.apple.powermanagement.delayDisplayOff"  
-	Timeout will fire in 293 secs Action=TimeoutActionTurnOff
    pid 46491(Spike Media): [0x001225260001a2ae] 00:00:02 NoIdleSleepAssertion named: "Playing audio"  
    pid 46491(Spike Media): [0x001225260005a2ad] 00:00:02 NoDisplaySleepAssertion named: "Video Wake Lock"  
-   pid 662(WindowServer): [0x000000c7000981fd] 00:01:14 UserIsActive named: "com.apple.iohideventsystem.queue.tickle serviceID:1000010a6 service:AppleUserHIDEventService product:MADCATZ R.A.T. 6+ gaming mouse eventType:17"  
-Kernel Assertions: 0x104=USB,MAGICWAKE
-   id=556  level=255 0x4=USB creat=09/10/2026, 19:13 description=com.apple.usb.externaldevice.00100000 owner=4-Port USB 2.0 Hub
-   id=557  level=255 0x4=USB creat=09/10/2026, 19:13 description=com.apple.usb.externaldevice.00200000 owner=4-Port USB 3.0 Hub
-   id=560  level=255 0x4=USB creat=09/10/2026, 19:06 description=com.apple.usb.externaldevice.00240000 owner=USB3.0 Hub
-   id=562  level=255 0x4=USB creat=09/10/2026, 19:08 description=com.apple.usb.externaldevice.00110000 owner=MADCATZ R.A.T. 6+ gaming mouse
-   id=563  level=255 0x4=USB creat=09/10/2026, 19:09 description=com.apple.usb.externaldevice.00140000 owner=USB2.0 Hub
-   id=565  level=255 0x4=USB creat=09/10/2026, 19:16 description=com.apple.usb.externaldevice.00243000 owner=USB3.0 Card Reader
-   id=566  level=255 0x4=USB creat=09/10/2026, 19:20 description=com.apple.usb.externaldevice.08300000 owner=GMMKPRO-WB
-   id=567  level=255 0x4=USB creat=09/10/2026, 19:08 description=com.apple.usb.externaldevice.00220000 owner=RTL9210B-CG
-   id=570  level=255 0x100=MAGICWAKE creat=09/10/2026, 19:06 description=en0 owner=en0
-   id=574  level=255 0x100=MAGICWAKE creat=09/10/2026, 19:11  mod=20/10/2026, 08:23 description=en1 owner=IOSkywalkNetworkBSDClient
-   id=874  level=255 0x4=USB creat=20/10/2026, 01:12 description=com.apple.usb.externaldevice.03100000 owner=Insta360 Link 2
