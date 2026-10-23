@@ -62,16 +62,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // CEF re-sends performClose: to the window from CloseBrowser(false); let that one through.
-        if closing { return true }
-        beginShutdown()
-        return false
+        // The window may close only after CEF called DoClose (its performClose: re-send lands here again).
+        if let browser, !browser.mayClose {
+            beginShutdown()
+            return false
+        }
+        return true
     }
 
     func windowWillClose(_ notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.browser?.subviews.forEach { $0.removeFromSuperview() } }
-        }
+        // Window closed without a browser to wait for, or by a CEF initiated close: make sure we exit.
+        beginShutdown()
     }
 
     private func checkLoaded() {
@@ -86,11 +87,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if closeBrowser { beginShutdown() } else { exit(exitCode) }
     }
 
+    /// Seconds to wait for OnBeforeClose after CloseBrowser before exiting anyway.
+    private static let shutdownWatchdog: TimeInterval = 5
+
     private var closing = false
     private func beginShutdown() {
         guard !closing else { return }
         closing = true
         finished = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.shutdownWatchdog) { [weak self] in
+            MainActor.assumeIsolated {
+                FileHandle.standardError.write(Data("NOCHE shutdown watchdog: browser did not close\n".utf8))
+                self?.browserClosed()
+            }
+        }
+#if NOCHE_TESTHOOKS
+        // Test-only: never ask CEF to close, so the watchdog path above is the only way out.
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_SKIP_CLOSE"] == "1" { return }
+#endif
         if let browser { browser.close() } else { browserClosed() }
     }
 

@@ -19,14 +19,17 @@ class NCClient : public CefClient, public CefLoadHandler, public CefDisplayHandl
                    const CefString&) override;
   void OnTitleChange(CefRefPtr<CefBrowser>, const CefString& title) override;
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { browser_ = browser; }
+  bool DoClose(CefRefPtr<CefBrowser>) override;
   void OnBeforeClose(CefRefPtr<CefBrowser>) override;
 
   CefRefPtr<CefBrowser> browser() const { return browser_; }
+  bool may_close() const { return may_close_; }
 
  private:
   // Strong until OnBeforeClose: the window can release the view before CEF finishes closing.
   NCBrowserView* view_;
   CefRefPtr<CefBrowser> browser_;
+  bool may_close_ = false;
   IMPLEMENT_REFCOUNTING(NCClient);
 };
 
@@ -69,6 +72,26 @@ class NCClient : public CefClient, public CefLoadHandler, public CefDisplayHandl
   }
 }
 
+- (BOOL)mayClose {
+  return !_client || !_client->browser() || _client->may_close();
+}
+
+// Edit menu targets (nil-target actions reach this view through the responder chain when the CEF child
+// view does not take them itself); they act on the focused frame of the browser.
+#define NC_FRAME_ACTION(sel, call) \
+  -(void)sel:(id)sender {          \
+    if (_client && _client->browser()) {                                  \
+      if (auto f = _client->browser()->GetFocusedFrame()) f->call();      \
+    }                                                                     \
+  }
+NC_FRAME_ACTION(undo, Undo)
+NC_FRAME_ACTION(redo, Redo)
+NC_FRAME_ACTION(cut, Cut)
+NC_FRAME_ACTION(copy, Copy)
+NC_FRAME_ACTION(paste, Paste)
+NC_FRAME_ACTION(selectAll, SelectAll)
+#undef NC_FRAME_ACTION
+
 - (void)close {
   if (_client && _client->browser()) {
     _client->browser()->GetHost()->CloseBrowser(false);
@@ -95,6 +118,17 @@ void NCClient::OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, Err
 
 void NCClient::OnTitleChange(CefRefPtr<CefBrowser>, const CefString& title) {
   if (auto cb = view_.onTitleChange) cb(@(title.ToString().c_str()));
+}
+
+// CEF's documented close flow (cef_life_span_handler.h): CloseBrowser(false) runs unload handlers, then
+// DoClose. Returning false makes CEF send performClose: to the top-level window, which may now close;
+// OnBeforeClose follows right before the browser is destroyed. The window must not close before this.
+// The browser's own child view must leave the hierarchy for the close to complete, so detach it here.
+bool NCClient::DoClose(CefRefPtr<CefBrowser> browser) {
+  may_close_ = true;
+  NSView* child = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+  [child removeFromSuperview];
+  return false;
 }
 
 void NCClient::OnBeforeClose(CefRefPtr<CefBrowser>) {

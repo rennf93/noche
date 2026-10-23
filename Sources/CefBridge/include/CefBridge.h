@@ -22,6 +22,9 @@ NC_EXPORT
 - (instancetype)initWithFrame:(NSRect)frameRect NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
 - (void)close;
+/// YES once CEF has called DoClose for this browser (or when there is no browser): only then may the
+/// host window close. Until then the window must ask the browser to close instead.
+@property(nonatomic, readonly) BOOL mayClose;
 @property(nonatomic, copy, nullable) void (^onLoadEnd)(NSInteger status);
 @property(nonatomic, copy, nullable) void (^onLoadError)(NSInteger code);
 @property(nonatomic, copy, nullable) void (^onTitleChange)(NSString *title);
