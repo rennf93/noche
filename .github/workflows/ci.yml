@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CEF_SHA1: 038a6ce70a814181f6a507d40155c81e80b328e3
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vendored CEF
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: cef-vendor-${{ env.CEF_SHA1 }}
+
+      - name: Fetch CEF
+        run: scripts/fetch-cef.sh
+
+      - name: Cache CEF wrapper
+        uses: actions/cache@v4
+        with:
+          path: build/cef
+          key: cef-wrapper-${{ env.CEF_SHA1 }}-${{ hashFiles('scripts/build-cef-wrapper.sh') }}
+
+      - name: Build CEF wrapper
+        run: scripts/build-cef-wrapper.sh
+
+      - name: Test
+        run: swift test
+
+      - name: Build app
+        run: scripts/build-app.sh
+
+      - name: Smoke (fixture)
+        run: scripts/smoke.sh build/Noche.app fixture
+
+      - name: Smoke (closed port, exit 2 expected)
+        run: |
+          set +e
+          scripts/smoke.sh build/Noche.app closed-port
+          code=$?
+          [ "$code" -eq 2 ] || { echo "expected exit 2, got $code"; exit 1; }
