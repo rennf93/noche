@@ -4,8 +4,12 @@ on:
   push:
   pull_request:
 
-env:
-  CEF_SHA1: 038a6ce70a814181f6a507d40155c81e80b328e3
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -18,21 +22,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor
-          key: cef-vendor-${{ env.CEF_SHA1 }}
+          key: cef-vendor-${{ hashFiles('scripts/fetch-cef.sh') }}
 
       - name: Fetch CEF
         run: scripts/fetch-cef.sh
+
+      - name: Xcode version
+        id: xcode
+        run: |
+          xcodebuild -version
+          echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
       - name: Cache CEF wrapper
         uses: actions/cache@v4
         with:
           path: build/cef
-          key: cef-wrapper-${{ env.CEF_SHA1 }}-${{ hashFiles('scripts/build-cef-wrapper.sh') }}
+          key: cef-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh', 'scripts/build-cef-wrapper.sh') }}
 
       - name: Build CEF wrapper
         run: scripts/build-cef-wrapper.sh
 
-      - name: Test
+      - name: Test (NocheCore only, no CEF needed)
         run: swift test
 
       - name: Build app
@@ -47,3 +57,6 @@ jobs:
           scripts/smoke.sh build/Noche.app closed-port
           code=$?
           [ "$code" -eq 2 ] || { echo "expected exit 2, got $code"; exit 1; }
+
+      - name: Sandbox check (seatbelt client on the renderer)
+        run: scripts/check-sandbox.sh build/Noche.app
