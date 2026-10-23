@@ -5,3 +5,5 @@ Noche's engine patches are `git format-patch` output against the pinned CEF comm
 Changes to Chromium itself go in as new files under CEF's `patch/patches/` plus an entry in `patch/patch.cfg`, all inside a Noche patch. CEF's own patcher then applies them during `build`.
 
 To regenerate a series: commit on the `noche` branch in `chromium/src/cef`, then `git format-patch <pinned commit>`.
+
+`engine/build.sh patch` resets `src/cef` with `checkout -f -B noche`, which loses uncommitted edits, so commit on `noche` and run `git format-patch` before re-running `patch`.

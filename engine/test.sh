@@ -73,6 +73,14 @@ case "$OUT" in *"patch failed: 0002-bad.patch"*) ;; *) fail "patch_fails_loud: $
 [ ! -d "$CEF/.git/rebase-apply" ] || fail "patch_fails_loud: am left running"
 ok patch_fails_loud
 
+# distrib_incomplete: a stub make_distrib that writes an empty distribution
+mkdir -p "$TMP/stubcef/tools"
+printf 'import os,sys\nd=[a for a in sys.argv if a.startswith("--output-dir=")][0].split("=",1)[1]\nos.makedirs(d+"/cef_binary_1_macosarm64_minimal")\n' > "$TMP/stubcef/tools/make_distrib.py"
+run env NOCHE_ENGINE_ROOT="$ROOT" NOCHE_ENGINE_CEF_DIR="$TMP/stubcef" "$BUILD" distrib
+[ "$RC" -eq 1 ] || fail "distrib_incomplete: exit $RC: $OUT"
+case "$OUT" in *"distrib incomplete: $ROOT/distrib/cef_binary_1_macosarm64_minimal"*) ;; *) fail "distrib_incomplete: $OUT" ;; esac
+ok distrib_incomplete
+
 # usage
 unset NOCHE_ENGINE_ROOT
 for args in "" "bogus"; do

@@ -39,6 +39,8 @@ SRC="$ROOT/chromium_git/chromium/src"
 export PATH="$ROOT/depot_tools:$PATH"
 export VPYTHON_VIRTUALENV_ROOT="$ROOT/.vpython-root"
 export CIPD_CACHE_DIR="$ROOT/.cipd-cache"
+# Keep the toolchain fixed during a build; only checkout updates depot_tools.
+[ "$STEP" = "checkout" ] || export DEPOT_TOOLS_UPDATE=0
 
 mkdir -p "$ROOT/logs"
 LOG="$ROOT/logs/$STEP-$(date -u +%Y%m%dT%H%M%SZ).log"
@@ -87,7 +89,13 @@ case "$STEP" in
     # make_distrib.py takes the framework from the cefclient app in out/Release_GN_arm64.
     cd "$CEF/tools"
     caffeinate -is python3 make_distrib.py --output-dir="$ROOT/distrib" \
-      --ninja-build --arm64-build --minimal --allow-partial \
+      --ninja-build --arm64-build --minimal \
       --no-docs --no-symbols --no-archive
+    # Strict make_distrib still exits 0 on a missing build; check the output.
+    DIST="$(ls -d "$ROOT"/distrib/cef_binary_*_macosarm64_minimal 2>/dev/null | tail -1 || true)"
+    if [ -z "$DIST" ] || [ ! -d "$DIST/Release/Chromium Embedded Framework.framework" ]; then
+      echo "distrib incomplete: ${DIST:-$ROOT/distrib}"
+      exit 1
+    fi
     ;;
 esac
