@@ -22,3 +22,7 @@ The mock keychain (`use-mock-keychain`) is for dev builds only: `scripts/build-a
 `scripts/build-app.sh --release` leaves it out, so a release build uses the real keychain.
 
 Run the app with `scripts/run.sh`, not `open build/Noche.app`: it copies the bundle to `~/Applications/Noche Dev/` first, because macOS asks for Documents access on every ad-hoc build launched from under `~/Documents`.
+
+## Engine
+
+Noche's engine is CEF 156 built from source on an external volume; see [engine/README.md](engine/README.md).
