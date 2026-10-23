@@ -32,4 +32,13 @@ Run in order, each logs to `$NOCHE_ENGINE_ROOT/logs/<step>-<UTC timestamp>.log`:
 
 ## Baseline numbers
 
-(Filled in after the first full build.)
+Unpatched build of the pins above, 2026-10-23, on an Apple M2 Pro (12 cores, 32 GB) with the root on an external USB SSD.
+
+- Checkout: about 17 minutes; `chromium_git` is 32 GB.
+- Build: about 86,760 steps, 9,364 seconds of build time in total over four runs. The first stopped after 60 seconds on the missing Metal toolchain (now a preflight check), and two were stopped to free the machine. Each restart resumed where the previous run stopped.
+- `out/Release_GN_arm64`: 9.1 GB. Re-running `build` after a finished build: 21 seconds, `ninja: no work to do`.
+- `distrib`: 51 seconds; the minimal distribution is 711 MB (`cef_binary_156.0.8+g426920c+chromium-156.0.8078.48_macosarm64_minimal`).
+- Free space on the root volume: 103 GiB before the build, 94 GiB after the distribution.
+- A full build uses every core for hours. Run it when the machine is free, or stop it with SIGINT to the `siso` process and run `build` again later.
+
+Noche on this engine passes the M0 checks: `docs/engine/evidence/task3-m0-checks.txt`.

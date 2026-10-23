@@ -1,0 +1,45 @@
+== 2026-10-23T21:56:55Z head=9220bf1 (smoke hidden-mode change uncommitted in main.swift/AppDelegate.swift)
+== fetch
+CEF vendored at USER/Documents/GitHub/ZZZ/noche/vendor/cef
+source=local
+cef_version=156.0.8+g426920c+chromium-156.0.8078.48
+== wrapper
+built USER/Documents/GitHub/ZZZ/noche/build/cef/libcef_dll_wrapper.a
+== swift test
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.004) seconds
+== build-app
+Build complete! (1,05 secs)
+built USER/Documents/GitHub/ZZZ/noche/build/Noche.app
+== smoke fixture run 1
+[86061:10678891:1023/235735.902294:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[86061:10678891:1023/235735.911381:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[86061:10675906:1023/235736.279859:ERROR:base/process/kill_posix.cc:33] waitpid(87094): No child processes (10)
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+fixture=0
+== smoke fixture run 2
+[87171:10679522:1023/235736.648810:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87171:10679522:1023/235736.655150:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87171:10679358:1023/235736.920881:ERROR:base/process/kill_posix.cc:33] waitpid(87236): No child processes (10)
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+fixture=0
+== smoke fixture run 3
+[87291:10679948:1023/235737.242898:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87291:10679948:1023/235737.248903:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87291:10679918:1023/235737.513846:ERROR:base/process/kill_posix.cc:33] waitpid(87299): No child processes (10)
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+fixture=0
+== smoke closed-port
+[87337:10680294:1023/235737.763409:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87337:10680294:1023/235737.769025:ERROR:chrome/browser/mac/code_sign_clone_manager.mm:98] error removing quarantine attribute "/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/X/"
+[87337:10680251:1023/235738.010771:ERROR:base/process/kill_posix.cc:33] waitpid(87346): No child processes (10)
+[87360:10680480:1023/235738.029181:ERROR:base/apple/mach_port_rendezvous_mac.cc:256] bootstrap_look_up dev.noche.browser.MachPortRendezvousServer.87337: Unknown service name (1102)
+[87360:10680480:1023/235738.029455:ERROR:base/memory/shared_memory_switch.cc:261] No rendezvous client, terminating process (parent died?)
+NOCHE_SMOKE load_error code=-102
+== sandbox
+sandbox check ok: --seatbelt-client=70
+== exit codes (rerun, smoke output filtered to NOCHE_ lines)
+fixture run 1 exit=0 NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture 0 teardown-watchdog lines
+fixture run 2 exit=0 NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture 0 teardown-watchdog lines
+fixture run 3 exit=0 NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture 0 teardown-watchdog lines
+closed-port exit=2 NOCHE_SMOKE load_error code=-102
+sandbox exit=0 sandbox check ok: --seatbelt-client=70
