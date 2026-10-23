@@ -52,10 +52,11 @@ shell/scripts/fetch-cef.sh
 #    (cached under shell/build/cef-build; wipe shell/build to force), compiles
 #    Sources/shim/cef_bridge.mm + helper_main.mm, links the Swift target with
 #    -import-objc-header Sources/shim/cef_bridge.h, assembles Noche.app with
-#    the CEF framework (versioned layout) and four Noche Helper*.app bundles,
-#    and signs inside-out (Libraries dylibs, framework, helpers, app).
-#    Stub mode (no deps): compiles cef_bridge_stub.mm; the app runs with the
-#    placeholder browser region.
+#    the CEF framework copied flat and verbatim from the distribution (no
+#    Versions/ layout, no re-signing; see the layout-rules comment in
+#    build.sh step 9) and four Noche Helper*.app bundles. Stub mode (no
+#    deps): compiles cef_bridge_stub.mm; the app runs with the placeholder
+#    browser region.
 shell/scripts/build.sh
 
 # 3. Run.
@@ -73,6 +74,16 @@ Environment switches for smoke runs (read by the app at startup):
 - `NOCHE_CEF_IPC_TIMEOUT` - when set, passed to CEF children as
   `--ipc-connection-timeout` so stalled children stay alive for sampling
   instead of self-terminating at 15 s (debug aid, see Status below).
+- `NOCHE_CACHE_ROOT` - overrides the cache root passed to CefInitialize; an
+  empty value disables the on-disk cache entirely (cefclient's default).
+- `NOCHE_NO_UA_OVERRIDE` - when set, skips the `user_agent_product` override
+  so CEF settings match cefclient defaults exactly.
+- `NOCHE_NO_CHILD_FLAGS` - when set, `OnBeforeChildProcessLaunch` stops
+  appending `--enable-logging=stderr --v=1` so children launch with the exact
+  command lines cefclient would produce.
+
+The last three are cefclient-equivalence switches used while isolating the
+utility-process stall; see the Status section for the bisection record.
 
 CEF cache/profile lives in `~/Library/Application Support/Noche/CEF`; the CEF
 log is `~/Library/Application Support/Noche/cef.log`.
@@ -141,17 +152,26 @@ An entry never changes the pin by itself; a kept bump is a separate commit.
   identically, so this is the known utility-process blocker, not a regression
   of a bump. No pin change resulted, so there was nothing to revert. The
   drill's pass criteria stay unmet until the utility-process handshake is
-  unblocked (resume pointers in the status section).
+  unblocked (resume pointers in the status section). Resolved later the same
+  day: the stall was the missing CEF/NSApplication message-pump integration
+  in the host shell, not a bump issue; the render gate now passes (see the
+  status section).
 
 ## Notarization
 
-Local dev builds are ad-hoc signed (`codesign --force --deep --sign -`). For
-distributable artifacts:
+Local dev builds carry no codesign seal at all: every Mach-O in the bundle
+(main binary, helper binaries, framework dylibs) keeps the ad-hoc linker
+signature applied at link time, which is exactly the signing state of the
+official prebuilt cefclient bundle and verified sufficient on arm64 (a full
+`codesign --force --sign -` pass over the bundle was one of the suspects
+investigated during the utility-process stall; it is no longer applied - see
+the layout-rules comment in build.sh step 9). For distributable artifacts,
+sign inside-out with hardened runtime:
 
 ```sh
 # 1. Sign with hardened runtime. Sign inside-out: the CEF framework's
 #    Libraries dylibs, the framework, each Noche Helper*.app, then the app
-#    (build.sh already applies this order with an ad-hoc identity).
+#    (build.sh applies no signing locally; the distribution order matters).
 codesign --force --options runtime \
   --entitlements shell/packaging/noche.entitlements \
   --sign "Developer ID Application: <NAME> (<TEAMID>)" \
@@ -175,78 +195,86 @@ at minimum (standard for Chromium/CEF apps):
 - `com.apple.security.cs.allow-unsigned-executable-memory`
 - `com.apple.security.cs.disable-library-validation`
 
-## Status of the CEF integration pass (2026-10-23)
+## Status of the CEF integration pass (2026-10-23, render gate passes)
 
 Executed and verified in this pass, on arm64 / macOS 27.0.1 / Xcode Swift 6.4,
-against CEF `156.0.7+g47dbc1d+chromium-156.0.8078.17` (minimal, macosarm64):
+against CEF `156.0.7+g47dbc1d+chromium-156.0.8078.17` (minimal, macosarm64).
+
+The render gate that blocked the morning rebase drill now passes. Smoke run
+(`NOCHE_SMOKE_HOOK` set exactly as documented, nothing else): the hook file
+fires at ~5 s with `Noche CEF smoke fixture	<fixture url>`, the shim logs
+`OnLoadEnd status=200 title="Noche CEF smoke fixture"`, five helper processes
+(gpu, renderer, network, storage, notifications) stay up for the full 35 s
+observation with zero `child_thread_impl.cc` handshake failures, then the app
+is killed cleanly.
 
 Working end to end:
 
-- `scripts/build.sh` CEF mode: builds the `libcef_dll` wrapper static library
-  (211 sources, `clang++ -std=c++20 -fno-rtti -fno-exceptions -DWRAPPING_CEF_SHARED`,
-  cached at `build/cef-build/libcef_dll_wrapper.a`), compiles the ObjC++ shim
-  and the helper executable, links the Swift target via
-  `-import-objc-header Sources/shim/cef_bridge.h` (`-lc++ -framework IOSurface`
-  for the wrapper), assembles `Noche.app` (327 MB) with the CEF framework in
-  the versioned layout from the distribution's `cmake/cef_macros.cmake`, four
-  helper bundles (`Noche Helper.app`, `Noche Helper (Alerts|GPU|Renderer).app`;
-  the per-type names match what libcef composes at runtime - the `(Alerts)`
-  one is requested verbatim in child command lines), and signs inside-out.
-  Stub mode still builds and compiles (verified with a direct clang++ pass on
-  `cef_bridge_stub.mm`).
-- The app launches, `noche_cef_execute_process` returns -1 (browser path),
-  `CefInitialize` succeeds, the window opens, and the GPU helper process
-  launches, loads the framework via `CefScopedLibraryLoader::LoadInHelper`,
-  applies its seatbelt (`--seatbelt-client=N` in its args) and CONNECTS.
+- `scripts/build.sh` CEF mode: wrapper static library (cached), ObjC++ shim,
+  helper executable, Swift target, app assembly with the framework copied
+  FLAT and verbatim from the distribution and NO codesign pass (see below),
+  four helper bundles. Stub mode unchanged.
+- `CefInitialize`, browser creation (`OnAfterCreated`), real page load and
+  render (`OnLoadEnd`), and the smoke hook, on both `file://` fixture pages
+  and the default startup flow.
 
-NOT working (blocked, precise state):
+What was wrong, with the evidence trail (root cause last; it was not the
+bundle layout):
 
-- The browser's utility subprocesses (network + storage + notifications) are
-  launched with correct command lines and bundles, apply their sandbox, load
-  the framework, and then never complete the mojo channel handshake: each
-  prints `content/child/child_thread_impl.cc:931 Terminating current process
-  after 15 seconds with no connection.` and self-terminates. Because browser
-  startup waits on the network service, `OnContextInitialized` never fires,
-  so `CreateBrowser`/`OnAfterCreated` never run and no page renders yet (the
-  smoke hook stays absent). Sampled the child main thread at +4 s: it sits in
-  `cef_execute_process` internals pumping an NSRunLoop - a Chromium child
-  waiting for its mojo invitation/ping that the browser side never completes
-  (GPU children complete the same handshake fine, which is the puzzling
-  asymmetry).
+1. Forensic diff vs the working prebuilt cefclient bundle (read-only
+   reference at /tmp/cef-bisect, same CEF build; libcef shasum identical):
+   the reference ships the framework FLAT (dylib at the framework root, no
+   `Versions/`, no symlinks) and carries NO codesign seal anywhere - every
+   Mach-O is linker-signed, no sealed resources. Our bundle re-wrapped the
+   framework into `Versions/A` + symlinks and sealed everything with
+   `codesign --force --sign -`. Helper Info.plists also lacked
+   CFBundleDisplayName / CFBundleSignature / LSEnvironment /
+   LSFileQuarantineEnabled / NSSupportsAutomaticGraphicsSwitching and used a
+   boolean LSUIElement. build.sh now reproduces the reference layout exactly
+   (flat copy, no signing, plist key parity; naming stays Noche).
+2. Rebuilding with the reference layout did NOT fix the stall (same three
+   utilities dying at the 15 s watchdog). The layout parity is kept - it
+   removes the unexplained deltas - but the search moved to the host.
+3. CefSettings bisection (empty cache path, no user_agent_product, children
+   launched with cefclient's exact command lines via the NOCHE_* equivalence
+   switches documented above): no change. Settings ruled out.
+4. Executable bisection with minimal hosts placed INSIDE Noche.app (each host
+   gets matching `<name> Helper.app` clones, because CEF composes the helper
+   name as `<main executable basename> Helper[ (TYPE)].app` - hosts named
+   anything else fail to spawn children at all with launch error 1003):
+   - minhost (plain C++/ObjC, raw CEF calls, `CefRunMessageLoop`): all
+     children connect. Bundle, helpers, wrapper, signing all exonerated.
+   - minhost2 (same but driving our shim `cef_bridge.mm` verbatim): all
+     children connect. Shim exonerated.
+   - minhost3 (same shim, but `[NSApp run]` owns the loop and CEF is
+     initialized from `applicationDidFinishLaunching`, exactly like the Swift
+     shell): REPRODUCES the stall 1:1 - three utilities starve, GPU lives.
+5. Root cause: the Swift shell never integrated CEF's message pump with
+   NSApplication. With NSApp owning the main loop and
+   `settings.external_message_pump` unset, CEF expects its own
+   `CefRunMessageLoop` - nobody services CEF's UI-thread task queue, so
+   browser-side work that completes child mojo channels never runs. GPU and
+   (once a browser exists) renderer children complete their handshake on
+   other threads and survive; the network/storage/notifications utilities
+   sit in `EnsureConnectivity` until the 15 s watchdog kills them, and
+   `OnContextInitialized` never fires, which is why no browser could be
+   created before. The fix in `cef_bridge.mm`: `external_message_pump = 1`
+   plus `OnScheduleMessagePumpWork` arming a repeating 2 ms heartbeat timer
+   on the main run loop that calls `CefDoMessageLoopWork()` (a schedule-only
+   one-shot timer variant was tried first and was NOT sufficient - minhost3
+   still starved its utilities with it; continuous servicing matches
+   `CefRunMessageLoop` semantics and does connect them).
 
-Tried and ruled out this pass (all with the same result):
+Probe artifacts (`minhost*.mm` live under gitignored `shell/build/`; rebuild
+with the clang++ line from build.sh step 3c plus `build/cef-build/
+cef_bridge.o` and the wrapper archive) are wiped by every rebuild - the
+recipes above are the durable record.
 
-- `CefSettings.no_sandbox = 1` vs default sandbox on with
-  `CefScopedSandboxContext::Initialize` in `helper_main.mm` (both configs).
-- Single `Noche Helper.app` vs the full per-type bundle set (no change).
-- Children with `--v=1 --enable-logging=stderr` (propagated via
-  `CefApp::OnBeforeChildProcessLaunch`, verified present in child args): the
-  children log NOTHING before the terminating line.
-- `--ipc-connection-timeout=180`: children stay alive (sandboxed, idle) for
-  minutes but the handshake never completes.
-- Chromium source check (`content/child/child_thread_impl.cc`, main): the
-  timeout fires only after `ChildThreadImpl::Init` ran, i.e. the child got
-  past rendezvous-invitation recovery; what is missing is the browser side
-  completing/pinging the channel for utility-type children.
+Next slices, in order:
 
-Resume pointers for the next session (in order of suspicion):
-
-1. Build the OFFICIAL cefclient/cefsimple from this same distribution
-   (cmake out of `shell/deps/cef_binary_*/`) and run it on this machine. If
-   it reproduces, the blocker is environmental (machine/OS/CEF 156 bug) and
-   belongs upstream; if it works, diff its app bundle against ours
-   (`ls -laR` both, plus `codesign -dv` each) - the delta is the bug.
-2. The main binary links the wrapper and loads the framework at runtime, and
-   the main executable is Swift/ARC - compare how the browser-side
-   `ChildProcessLauncher` behaves with a plain C++ host binary for the main
-   process (minimal repro: strip our AppKit layer, keep the shim).
-3. Check Console.app for `AMFI`/`sandbox`/`RunningBoard` denials scoped to
-   the helper processes at launch time.
-
-Not done yet (next slices, in order):
-
-1. Unblock the utility-process handshake above; only then does the page
-   render and the smoke hook fire.
-2. Real tab strip backed by a tab model, wired to browser lifetime.
+1. Real tab strip backed by a tab model, wired to browser lifetime.
+2. Refine the pump: replace the fixed 2 ms heartbeat with cefclient's
+   run-loop-source scheme if profiling shows idle CPU cost.
 3. Rebase drill automation: the manual procedure above stays the source of
-   truth until the gates (WPT, Speedometer) exist.
+   truth until the gates (WPT, Speedometer) exist; the render gate part of
+   the drill now passes.

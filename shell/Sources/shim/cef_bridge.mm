@@ -47,6 +47,57 @@
 
 #include "cef_bridge.h"
 
+// ---------------------------------------------------------------------------
+// Message pump integration. The shell runs NSApplication.run(); CEF must not
+// own the main loop. With settings.external_message_pump = 1, CEF calls
+// OnScheduleMessagePumpWork(delay_ms) from any thread whenever it has queued
+// UI-thread work, and we service it with CefDoMessageLoopWork() on the main
+// thread via a one-shot run-loop timer. Without this, browser-side UI-thread
+// tasks never run while NSApp pumps: CefInitialize still returns and the GPU
+// child still connects, but the utility subprocesses never get their mojo
+// channel completed and starve to death at the 15 s watchdog
+// (child_thread_impl.cc:931 "no connection") - reproduced 1:1 in
+// shell/build/minhost3.mm, which differs from the working minhost2 only in
+// owning the loop with NSApp vs CefRunMessageLoop.
+
+@interface NochePumpScheduler : NSObject
+// Main thread only. Ensures CefDoMessageLoopWork() is being serviced from the
+// NSApp run loop. |delayMs| is honored lazily: the heartbeat interval is far
+// below any delay CEF schedules with, so work always runs within its deadline.
+- (void)schedulePumpWithDelayMs:(int64_t)delayMs;
+@end
+
+static NochePumpScheduler* g_pump_scheduler = nil;
+
+@implementation NochePumpScheduler {
+  NSTimer* _heartbeat;
+}
+
+- (void)schedulePumpWithDelayMs:(int64_t)delayMs {
+  if (_heartbeat) {
+    return;
+  }
+  // A repeating heartbeat is the pragmatic equivalent of letting
+  // CefRunMessageLoop own the loop: one CefDoMessageLoopWork() call per
+  // 2 ms run-loop pass. A schedule-only one-shot timer proved NOT sufficient
+  // (utility children still starved at the 15 s watchdog in shell/build/
+  // minhost3.mm with the scheduled-only variant), because channel-completion
+  // tasks do not always arrive through OnScheduleMessagePumpWork before their
+  // consumers need them drained.
+  _heartbeat = [NSTimer timerWithTimeInterval:0.002
+                                       target:self
+                                     selector:@selector(pump:)
+                                     userInfo:nil
+                                      repeats:YES];
+  [[NSRunLoop mainRunLoop] addTimer:_heartbeat forMode:NSRunLoopCommonModes];
+}
+
+- (void)pump:(NSTimer*)timer {
+  CefDoMessageLoopWork();
+}
+
+@end
+
 namespace {
 
 // Globals used by the client handlers; declared before NocheClient so the
@@ -85,6 +136,23 @@ class NocheApp : public CefApp,
     return this;
   }
 
+  // External message pump contract (see the pump-integration comment above):
+  // CEF tells us when UI-thread work is waiting; service it from NSApp's run
+  // loop. May be called from any thread, so always hop to main.
+  void OnScheduleMessagePumpWork(int64_t delay_ms) override {
+    if (!g_pump_scheduler) {
+      g_pump_scheduler = [NochePumpScheduler new];
+    }
+    NochePumpScheduler* scheduler = g_pump_scheduler;
+    if ([NSThread isMainThread]) {
+      [scheduler schedulePumpWithDelayMs:delay_ms];
+    } else {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [scheduler schedulePumpWithDelayMs:delay_ms];
+      });
+    }
+  }
+
   // Debug aid while the subprocess wiring is young: dump every child command
   // line, force child processes to log verbosely to stderr, and (when
   // NOCHE_CEF_IPC_TIMEOUT is set) extend the child connection watchdog so
@@ -98,6 +166,12 @@ class NocheApp : public CefApp,
       std::fprintf(stderr, " %s", arg.ToString().c_str());
     }
     std::fprintf(stderr, "\n");
+    // NOCHE_NO_CHILD_FLAGS skips the debug flags below so children launch with
+    // the exact command lines cefclient would use. Debug aid for isolating the
+    // utility-process handshake stall.
+    if (std::getenv("NOCHE_NO_CHILD_FLAGS")) {
+      return;
+    }
     command_line->AppendSwitchWithValue("enable-logging", "stderr");
     command_line->AppendSwitchWithValue("v", "1");
     const char* ipcTimeout = std::getenv("NOCHE_CEF_IPC_TIMEOUT");
@@ -237,10 +311,24 @@ int noche_cef_initialize(const char* cacheRoot, const char* logFile) {
   CefSettings settings;
   // Sandbox stays enabled (default): helper processes apply their own
   // seatbelt profile via CefScopedSandboxContext in helper_main.mm.
+  // NSApplication.run() owns the main loop, so CEF must not: work is
+  // delivered through OnScheduleMessagePumpWork -> CefDoMessageLoopWork.
+  settings.external_message_pump = true;
+  // NOCHE_CACHE_ROOT overrides the cache root; an empty value disables the
+  // on-disk cache entirely (cefclient's default configuration). Debug aid for
+  // isolating the utility-process handshake stall.
+  const char* cacheOverride = std::getenv("NOCHE_CACHE_ROOT");
+  if (cacheOverride) {
+    cacheRoot = cacheOverride;
+    std::fprintf(stderr, "[noche cef] NOCHE_CACHE_ROOT override: \"%s\"\n",
+                 cacheRoot);
+  }
   CefString(&settings.cache_path) = cacheRoot;
   CefString(&settings.log_file) = logFile;
   settings.log_severity = LOGSEVERITY_INFO;
-  CefString(&settings.user_agent_product) = "Noche/0.1.0";
+  if (!std::getenv("NOCHE_NO_UA_OVERRIDE")) {
+    CefString(&settings.user_agent_product) = "Noche/0.1.0";
+  }
   settings.background_color = CefColorSetARGB(255, 26, 26, 28);
 
   if (!CefInitialize(MainArgs(), settings, g_app, nullptr)) {

@@ -10,7 +10,8 @@
 #               scripts/fetch-cef.sh). Builds the libcef_dll wrapper, the
 #               ObjC++ shim, the helper subprocess executable, links the main
 #               binary, and assembles the full app bundle: CEF framework in
-#               Contents/Frameworks (versioned layout) plus "Noche Helper.app".
+#               Contents/Frameworks (flat, verbatim from the distribution)
+#               plus "Noche Helper.app" per-type bundles.
 #   Stub mode - no deps/. Swift target builds against cef_bridge_stub.mm; the
 #               app runs with the placeholder browser region.
 set -euo pipefail
@@ -153,8 +154,25 @@ if [[ -f "${SHELL_DIR}/deps/CEF-VERSION.txt" ]]; then
   cp "${SHELL_DIR}/deps/CEF-VERSION.txt" "${CONTENTS}/Resources/CEF-VERSION.txt"
 fi
 
-# 9. CEF mode: assemble the framework (versioned layout per the distribution's
-#    cmake/cef_macros.cmake COPY_MAC_FRAMEWORK) and the helper app bundles.
+# 9. CEF mode: assemble the framework and the helper app bundles.
+#
+# Layout rules (reverse-engineered from the official cefclient.app built from
+# this same distribution, which renders on this machine while our earlier
+# versioned-layout bundle stalled its utility subprocesses at the mojo
+# handshake):
+#   - The CEF framework is copied FLAT, byte-for-byte as the distribution ships
+#     it (no Versions/, no top-level symlinks; the dylib sits at the framework
+#     root). The distribution's framework is flat and linker-signed; rewriting
+#     it into Versions/A + codesign is what build.sh used to do and is the one
+#     material layout delta versus the working reference bundle.
+#   - Helper Info.plist carries the same key set cefclient uses
+#     (CFBundleDisplayName/CFBundleSignature/LSEnvironment/
+#     LSFileQuarantineEnabled/NSSupportsAutomaticGraphicsSwitching, LSUIElement
+#     as the string "1", no NSHighResolutionCapable).
+#   - No codesign pass at all: every Mach-O we link gets its ad-hoc linker
+#     signature automatically on arm64, and the shipped framework/Libraries
+#     dylibs are already linker-signed. This reproduces the reference bundle's
+#     signing state (linker-signed Mach-Os, no sealed-resource signatures).
 write_helper_plist() {
   # $1 = executable/bundle display name, $2 = bundle-id suffix.
   cat <<EOF
@@ -164,6 +182,8 @@ write_helper_plist() {
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>$1</string>
 	<key>CFBundleExecutable</key>
 	<string>$1</string>
 	<key>CFBundleIdentifier</key>
@@ -176,13 +196,22 @@ write_helper_plist() {
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSEnvironment</key>
+	<dict>
+		<key>MallocNanoZone</key>
+		<string>0</string>
+	</dict>
+	<key>LSFileQuarantineEnabled</key>
+	<true/>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
-	<true/>
-	<key>NSHighResolutionCapable</key>
+	<string>1</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 </dict>
 </plist>
@@ -200,13 +229,9 @@ make_helper_app() {
 
 if [[ "${CEF_MODE}" -eq 1 ]]; then
   FRAMEWORK_DIR="${CONTENTS}/Frameworks/Chromium Embedded Framework.framework"
-  mkdir -p "${FRAMEWORK_DIR}/Versions/A"
-  echo "Bundling CEF framework (versioned layout) ..."
-  cp -R "${CEF_FRAMEWORK_SRC}/" "${FRAMEWORK_DIR}/Versions/A/"
-  ln -sfn "Versions/A/Chromium Embedded Framework" "${FRAMEWORK_DIR}/Chromium Embedded Framework"
-  ln -sfn "Versions/A/Libraries" "${FRAMEWORK_DIR}/Libraries"
-  ln -sfn "Versions/A/Resources" "${FRAMEWORK_DIR}/Resources"
-  ln -sfn "A" "${FRAMEWORK_DIR}/Versions/Current"
+  mkdir -p "${CONTENTS}/Frameworks"
+  echo "Bundling CEF framework (flat layout, verbatim from the distribution) ..."
+  cp -R "${CEF_FRAMEWORK_SRC}" "${FRAMEWORK_DIR}"
 
   # Per-type helper bundles. libcef composes "<exe> Helper[( TYPE)].app" per
   # subprocess kind (observed at runtime: base + (Alerts); the binary also
@@ -218,21 +243,10 @@ if [[ "${CEF_MODE}" -eq 1 ]]; then
   make_helper_app "${CONTENTS}/Frameworks/${HELPER_NAME} (Renderer).app" "${HELPER_NAME} (Renderer)" ".renderer"
 fi
 
-# 10. Ad-hoc sign, inside-out: framework Libraries dylibs, framework, helper
-#     app, then the outer app. Real identity signing and notarization are
-#     documented in README.md.
-sign() { codesign --force --sign - "$@" >/dev/null; echo "  signed: $1"; }
-if [[ "${CEF_MODE}" -eq 1 ]]; then
-  for dylib in "${CONTENTS}/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/"*.dylib; do
-    sign "${dylib}"
-  done
-  sign "${CONTENTS}/Frameworks/Chromium Embedded Framework.framework"
-  sign "${CONTENTS}/Frameworks/${HELPER_NAME}.app"
-  sign "${CONTENTS}/Frameworks/${HELPER_NAME} (Alerts).app"
-  sign "${CONTENTS}/Frameworks/${HELPER_NAME} (GPU).app"
-  sign "${CONTENTS}/Frameworks/${HELPER_NAME} (Renderer).app"
-fi
-sign "${APP_DIR}"
+# 10. No codesign pass: see the layout-rules comment at step 9. Everything
+#     Mach-O in the bundle carries its linker signature already; real identity
+#     signing and notarization are documented in README.md.
+echo "Signing: none (linker-signed Mach-Os only, matching the reference bundle)"
 
 echo
 echo "Built ${APP_DIR}"
