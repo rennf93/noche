@@ -1,0 +1,4 @@
+# Vendored CEF binary distribution and the built app bundle. Both are
+# reproducible from scripts/fetch-cef.sh and scripts/build.sh.
+deps/
+build/
