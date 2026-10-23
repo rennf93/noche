@@ -34,9 +34,13 @@ if [ "${NOCHE_NO_SANDBOX:-}" = 1 ]; then echo "sandbox: off (NOCHE_NO_SANDBOX=1)
 
 "$ROOT/scripts/build-cef-wrapper.sh"
 cd "$ROOT"
+BIN="$(swift build -c release --show-bin-path)"
+# SwiftPM does not track the wrapper archive, so a rebuilt wrapper needs a forced relink.
+for b in "$PRODUCT" NocheHelper; do
+  [ ! "$ROOT/build/cef/libcef_dll_wrapper.a" -nt "$BIN/$b" ] || rm -f "$BIN/$b"
+done
 swift build -c release --product "$PRODUCT"
 swift build -c release --product NocheHelper
-BIN="$(swift build -c release --show-bin-path)"
 
 APP="$ROOT/build/$NAME.app"
 rm -rf "$APP"
