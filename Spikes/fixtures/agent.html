@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>agent-fixture</title>
+<body style="margin:20px;font:16px sans-serif">
+<input id="name" type="text" aria-label="Name field" style="width:240px;height:28px">
+<button id="go" onclick="document.title='clicked:'+document.getElementById('name').value">Go</button>
+<p></p>
+<iframe id="f" width="400" height="120" style="border:1px solid #888"></iframe>
+<script>
+// ?frame=<absolute url of frame.html on the second fixture server>
+document.getElementById('f').src = new URLSearchParams(location.search).get('frame');
+</script>
+</body>
