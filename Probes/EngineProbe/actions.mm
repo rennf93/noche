@@ -19,6 +19,7 @@ bool RunActionsCheck(NSString* check, const ActionsHost& host) {
 namespace {
 
 using H = std::shared_ptr<const ActionsHost>;
+void Crumb(const char* what) { fprintf(stderr, "[PROBE] CRUMB %s\n", what); fflush(stderr); }
 int g_added = 0, g_updated = 0;  // observer counters; counts only, never an action reference
 NSButton* g_button = nil;
 id g_hide = nil;  // the NSNotificationCenter observer token
@@ -38,7 +39,9 @@ void Done(const H& h, bool ok, NSString* detail) {
   h->finish(ok, detail);
 }
 
-void WaitFor(const H& h, int timeoutMs, std::function<bool()> cond, std::function<void(bool)> done) {
+// |h| is by value: the dispatch block below must copy it. A block that captures a reference parameter keeps the
+// reference, which dangled after the caller returned (SEGV in WaitFor, found in the B5 run).
+void WaitFor(H h, int timeoutMs, std::function<bool()> cond, std::function<void(bool)> done) {
   if (h->done()) return;
   if (cond()) { done(true); return; }
   if (timeoutMs <= 0) { done(false); return; }
@@ -97,6 +100,7 @@ void OpenPopup(const H& h, std::function<void(NSString* err, NSRect button, NSWi
   NSRect btn;
   CefRect r = ButtonRect(w, &btn);
   auto a = Find(h);
+  Crumb("popup: Execute");
   if (!a || !a->Execute(r, /*activate=*/false)) { cb(@"Execute returned false (action missing or disabled)", btn, nil); return; }
   WaitFor(h, 10000, [h, w] { auto a = Find(h); return a && a->IsShowingPopup() && w.childWindows.count && w.childWindows.lastObject.isVisible; },
           [h, w, cb, btn](bool up) { cb(up ? nil : @"popup window did not appear in 10s", btn, up ? w.childWindows.lastObject : nil); });
@@ -146,10 +150,15 @@ void ActionsList(const H& h) {
   // The icon can load after the action is listed: wait for non-transparent pixels.
   auto detail = std::make_shared<NSString*>(@"");
   WaitFor(h, 10000, [h, detail] {
+    Crumb("list: Find");
     auto a = Find(h);
     if (!a) return false;
     int pw = 0, ph = 0;
-    int n = NonTransparentPixels(a->GetIcon(nullptr, 16), &pw, &ph);
+    Crumb("list: GetIcon");
+    auto icon = a->GetIcon(nullptr, 16);
+    Crumb(icon ? "list: got icon" : "list: icon NULL");
+    int n = NonTransparentPixels(icon, &pw, &ph);
+    Crumb("list: pixels counted");
     *detail = [NSString stringWithFormat:@"id=%s name=%s title=\"%s\" enabled=%d pinned=%d icon=%dx%d px with alpha=%d", a->GetId().ToString().c_str(), a->GetName().ToString().c_str(), a->GetTitle(nullptr).ToString().c_str(), (int)a->IsEnabled(nullptr), (int)a->IsPinned(), pw, ph, n];
     return n > 0 && a->GetTitle(nullptr).ToString() == "Noche probe action";
   }, [h, detail](bool ok) { Done(h, ok, ok ? *detail : [@"title or icon never became right: " stringByAppendingString:*detail]); });
@@ -178,7 +187,8 @@ void PopupState(const H& h, std::function<bool(NSDictionary*)> ready, int timeou
     h->extCmd(@{@"what" : @"popupTab"}, [=](NSDictionary* r) {
       *last = r;
       if (ready(r) || left <= 0) { auto f = cb; auto l = *last; *step = nullptr; f(l); return; }
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{ (*step)(left - 200); });
+      auto again = step;  // a block inside a temporary closure would capture the closure, not the shared_ptr
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{ (*again)(left - 200); });
     });
   };
   (*step)(timeoutMs);
@@ -229,8 +239,10 @@ void PopupCloses(const H& h) {
     OpenPopup(h, [h](NSString* err, NSRect, NSWindow*) {
       if (err) { Done(h, false, err); return; }
       NSWindow* w = h->window();
+      H hh = h;  // local copy for the block (see WaitFor)
       // Control: the popup must survive a second with no tab change, or "closed" below proves nothing.
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        const H& h = hh;
         auto a = Find(h);
         if (!a || !a->IsShowingPopup() || w.childWindows.count == 0) { Done(h, false, @"control failed: the popup closed by itself within 1 s, before any tab change"); return; }
         std::vector<CefRefPtr<CefBrowser>> tabs;

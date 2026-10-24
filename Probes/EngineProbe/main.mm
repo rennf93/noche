@@ -13,6 +13,8 @@
 #include <signal.h>
 #include <unistd.h>
 #include <crt_externs.h>
+#include <execinfo.h>
+#include <sys/ucontext.h>
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
@@ -46,10 +48,16 @@ static int g_client_created[2] = {0, 0}, g_client_id[2] = {-1, -1};  // per-tab-
 static std::map<int, std::function<void(NSDictionary*)>> g_pending;
 
 // A crash must not reach macOS (.ips report, Problem Reporter window): print one line and leave with 128+signal.
-static void CrashHandler(int sig) {
+static void CrashHandler(int sig, siginfo_t* si, void* uc) {
   char b[] = "PROBE crash signal=00\n";
   b[19] = '0' + sig / 10; b[20] = '0' + sig % 10;
   write(1, b, sizeof b - 1);
+  char d[160];  // fault address and registers: tells a null call (pc=0) from a bad read
+  ucontext_t* c = (ucontext_t*)uc;
+  int n = snprintf(d, sizeof d, "PROBE crash fault_addr=%p pc=0x%llx lr=0x%llx\n", si->si_addr, (unsigned long long)c->uc_mcontext->__ss.__pc, (unsigned long long)c->uc_mcontext->__ss.__lr);
+  write(1, d, n);
+  void* frames[48];  // not strictly async-signal-safe, but the process is about to die anyway
+  backtrace_symbols_fd(frames, backtrace(frames, 48), 1);
   _exit(128 + sig);
 }
 static void InstallCrashHandlers() {
@@ -58,8 +66,8 @@ static void InstallCrashHandlers() {
   stack_t ss = {.ss_sp = altstack, .ss_size = sizeof altstack, .ss_flags = 0};
   sigaltstack(&ss, nullptr);
   struct sigaction sa = {};
-  sa.sa_handler = CrashHandler;
-  sa.sa_flags = SA_ONSTACK;
+  sa.sa_sigaction = CrashHandler;
+  sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
   for (int sig : {SIGABRT, SIGTRAP, SIGSEGV, SIGBUS, SIGILL}) sigaction(sig, &sa, nullptr);
 }
@@ -86,13 +94,21 @@ static void (*orig_orderFront)(id, SEL, id);
 static void (*orig_orderBack)(id, SEL, id);
 static void (*orig_orderFrontRegardless)(id, SEL);
 static void (*orig_makeKeyAndOrderFront)(id, SEL, id);
-static void GuardWindow(id w) { g_guard_calls++; orig_setAlpha(w, @selector(setAlphaValue:), 0); [(NSWindow*)w setIgnoresMouseEvents:YES]; }
+static void GuardWindow(id w, const char* sel) {
+  g_guard_calls++;
+  const double before = [(NSWindow*)w alphaValue];
+  orig_setAlpha(w, @selector(setAlphaValue:), 0);
+  [(NSWindow*)w setIgnoresMouseEvents:YES];
+  // One line per order-in: which selector, which window class, alpha before and after (proof that nothing shows at alpha 1).
+  fprintf(stderr, "[PROBE] GUARD %s class=%s alpha before=%.2f after=%.2f children=%lu parent=%d\n", sel, class_getName([w class]), before, [(NSWindow*)w alphaValue], (unsigned long)[(NSWindow*)w childWindows].count, [(NSWindow*)w parentWindow] != nil);
+  fflush(stderr);
+}
 static void swz_setAlpha(id self, SEL c, CGFloat) { g_guard_calls++; orig_setAlpha(self, c, 0); }
-static void swz_orderWindow(id self, SEL c, NSWindowOrderingMode m, NSInteger r) { GuardWindow(self); orig_orderWindow(self, c, m, r); }
-static void swz_orderFront(id self, SEL c, id a) { GuardWindow(self); orig_orderFront(self, c, a); }
-static void swz_orderBack(id self, SEL c, id a) { GuardWindow(self); orig_orderBack(self, c, a); }
-static void swz_orderFrontRegardless(id self, SEL c) { GuardWindow(self); orig_orderFrontRegardless(self, c); }
-static void swz_makeKeyAndOrderFront(id self, SEL c, id a) { GuardWindow(self); orig_makeKeyAndOrderFront(self, c, a); }
+static void swz_orderWindow(id self, SEL c, NSWindowOrderingMode m, NSInteger r) { GuardWindow(self, "orderWindow:relativeTo:"); orig_orderWindow(self, c, m, r); }
+static void swz_orderFront(id self, SEL c, id a) { GuardWindow(self, "orderFront:"); orig_orderFront(self, c, a); }
+static void swz_orderBack(id self, SEL c, id a) { GuardWindow(self, "orderBack:"); orig_orderBack(self, c, a); }
+static void swz_orderFrontRegardless(id self, SEL c) { GuardWindow(self, "orderFrontRegardless"); orig_orderFrontRegardless(self, c); }
+static void swz_makeKeyAndOrderFront(id self, SEL c, id a) { GuardWindow(self, "makeKeyAndOrderFront:"); orig_makeKeyAndOrderFront(self, c, a); }
 template <typename F> static void Swizzle(SEL sel, F** orig, F* repl) {
   Method m = class_getInstanceMethod(NSWindow.class, sel);
   *orig = (F*)method_getImplementation(m);
