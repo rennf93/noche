@@ -63,6 +63,7 @@ final class ShortcutsTests: XCTestCase {
     ] + (1...9).map { "Window|tabs.switchProfile.\($0)|Switch to Profile \($0)|⌃\($0)" } + [
         "Window|window.openProfileSwitcher*|Open Profile Switcher|⇧⌘P",
         "Window|window.mergeAllWindows|Merge All Windows|-",
+        "Help|help.checkForUpdates|Check for Updates...|-",
         "Help|help.copyDiagnostics|Copy Diagnostics|-",
     ]
 
@@ -208,8 +209,15 @@ final class ShortcutsTests: XCTestCase {
         o.set("file.share", Chord("y", Chord.cmd | Chord.opt), at: 1)
         o.set("bogus.action", Chord("b", Chord.cmd), at: 1)
         var r = ShortcutRegistry()
-        let unknown = r.importOverrides(o)
-        XCTAssertEqual(unknown, ["bogus.action"])
+        o.set("file.print", Chord("p", 0), at: 1)                          // invalid
+        o.set("file.closeTab", Chord("q", Chord.cmd), at: 1)               // reserved
+        o.set("file.openCommandBar", Chord("t", Chord.cmd), at: 1)         // conflicts with New Tab
+        let report = r.importOverrides(o)
+        XCTAssertEqual(report.unknown, ["bogus.action"])
+        XCTAssertEqual(report.rejected, ["file.closeTab", "file.print"])
+        XCTAssertEqual(report.conflicts, [["file.newTab", "file.openCommandBar"]])
+        XCTAssertEqual(r.effective("file.print"), Chord("p", Chord.cmd))
+        XCTAssertEqual(r.effective("file.closeTab"), Chord("w", Chord.cmd))
         XCTAssertEqual(r.effective("file.share"), Chord("y", Chord.cmd | Chord.opt))
         XCTAssertNil(r.overrides.entries["bogus.action"])
     }
@@ -230,5 +238,49 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertTrue(r.search("", filter: .customized).isEmpty)
         XCTAssertTrue(r.search("", filter: .conflicts).isEmpty)
         XCTAssertEqual(r.search("", filter: .all).count, ShortcutDefaults.table.count)
+    }
+
+    func testShiftedSymbolsCanonical() {
+        let plus = Chord("=", Chord.cmd | Chord.shift)
+        XCTAssertEqual(Chord("+", Chord.cmd), plus)
+        XCTAssertEqual(Chord("+", Chord.cmd | Chord.shift), plus)
+        XCTAssertEqual(plus.glyphs, "⌘+")
+        XCTAssertEqual(plus.spoken, "cmd +")
+        let r = ShortcutRegistry()
+        XCTAssertEqual(r.action(matching: Chord("+", Chord.cmd | Chord.shift)), "view.zoomIn")
+        XCTAssertEqual(r.action(matching: Chord("=", Chord.cmd | Chord.shift)), "view.zoomIn")
+        XCTAssertEqual(r.action(matching: Chord("+", Chord.ctrl | Chord.shift)), "view.openSplitPane")
+        XCTAssertEqual(r.action(matching: Chord("\"", Chord.ctrl | Chord.shift)), "view.focusNextSplitPane")
+        XCTAssertEqual(r.action(matching: Chord(":", Chord.ctrl | Chord.shift)), "view.focusPreviousSplitPane")
+        XCTAssertEqual(Chord("!", Chord.cmd), Chord("1", Chord.cmd | Chord.shift))
+        let data = try! JSONEncoder().encode(Chord("+", Chord.cmd))
+        XCTAssertEqual(try! JSONDecoder().decode(Chord.self, from: data), plus)
+        let legacy = #"{"key":"+","mods":1}"#.data(using: .utf8)!
+        XCTAssertEqual(try! JSONDecoder().decode(Chord.self, from: legacy), plus)
+    }
+
+    func testSpokenTokensAnyOrder() {
+        let r = ShortcutRegistry()
+        XCTAssertTrue(r.search("cmd shift t").map(\.id).contains("file.reopenClosedTab"))
+        XCTAssertTrue(r.search("shift cmd t").map(\.id).contains("file.reopenClosedTab"))
+        XCTAssertFalse(r.search("cmd shift t").map(\.id).contains("file.newTab"))
+    }
+
+    func testMilestoneCaptions() {
+        func m(_ id: String) -> String? { ShortcutDefaults.table.first { $0.id == id }?.milestone }
+        for id in ["tabs.previousProfile", "tabs.nextProfile", "window.openProfileSwitcher"] { XCTAssertEqual(m(id), "Arrives in M1.7") }
+        for id in ["tabs.switcherForward", "tabs.switcherBackward", "tabs.resetPinnedTab"] { XCTAssertEqual(m(id), "Arrives in M1.6") }
+        XCTAssertEqual(m("file.newChat"), "Arrives in M2")
+        XCTAssertEqual(m("file.sendChatPromptNow"), "Arrives in M2")
+        XCTAssertEqual(m("file.openDailyBrief"), "Arrives in M3")
+        XCTAssertNil(m("help.checkForUpdates"))
+    }
+
+    func testResetWithoutEntryLeavesNoTombstone() {
+        var r = ShortcutRegistry()
+        r.reset("file.newTab")
+        XCTAssertTrue(r.overrides.entries.isEmpty)
+        r.clear("file.newTab"); r.reset("file.newTab")
+        XCTAssertEqual(r.overrides.entries["file.newTab"]?.reset, true)
     }
 }

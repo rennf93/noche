@@ -8,7 +8,23 @@ public struct Chord: Codable, Hashable, Sendable {
 
     public let key: String
     public let mods: UInt8
-    public init(_ key: String, _ mods: UInt8 = 0) { self.key = key.lowercased(); self.mods = mods }
+    /// Canonical form: a shifted US symbol becomes its base key plus the shift bit, so a real event (Cmd+Shift+= or
+    /// Cmd+Shift+"+") and a recorded chord compare equal.
+    public init(_ key: String, _ mods: UInt8 = 0) {
+        let k = key.lowercased()
+        if let base = Chord.shiftedBase[k] { self.key = base; self.mods = mods | Chord.shift } else { self.key = k; self.mods = mods }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(try c.decode(String.self, forKey: .key), try c.decode(UInt8.self, forKey: .mods))
+    }
+
+    private static let shiftedBase: [String: String] = {
+        var m = ["+": "=", "\"": "'", ":": ";", "<": ",", ">": ".", "?": "/", "{": "[", "}": "]", "|": "\\", "_": "-", "~": "`"]
+        for (s, d) in zip("!@#$%^&*()", "1234567890") { m[String(s)] = String(d) }
+        return m
+    }()
 
     private static let arrows: Set<String> = ["left", "right", "up", "down"]
     private static let keyGlyphs = ["return": "↩", "tab": "⇥", "left": "←", "right": "→", "up": "↑", "down": "↓",
@@ -23,22 +39,26 @@ public struct Chord: Codable, Hashable, Sendable {
     }
 
     /// Standard macOS order: Ctrl, Opt, Shift, Cmd, then the key.
+    /// Shift+"=" is shown as the user-facing "+" with no shift glyph ("⌘+"); every other shifted key keeps "⇧" and the base key.
+    private var isPlus: Bool { key == "=" && mods & Chord.shift != 0 }
+
     public var glyphs: String {
         var s = ""
         if mods & Chord.ctrl != 0 { s += "⌃" }
         if mods & Chord.opt != 0 { s += "⌥" }
-        if mods & Chord.shift != 0 { s += "⇧" }
+        if mods & Chord.shift != 0 && !isPlus { s += "⇧" }
         if mods & Chord.cmd != 0 { s += "⌘" }
-        return s + (Chord.keyGlyphs[key] ?? key.uppercased())
+        return s + (isPlus ? "+" : Chord.keyGlyphs[key] ?? key.uppercased())
     }
+
 
     public var spoken: String {
         var p: [String] = []
         if mods & Chord.ctrl != 0 { p.append("ctrl") }
         if mods & Chord.opt != 0 { p.append("opt") }
-        if mods & Chord.shift != 0 { p.append("shift") }
+        if mods & Chord.shift != 0 && !isPlus { p.append("shift") }
         if mods & Chord.cmd != 0 { p.append("cmd") }
-        return (p + [key]).joined(separator: " ")
+        return (p + [isPlus ? "+" : key]).joined(separator: " ")
     }
 }
 
@@ -53,9 +73,8 @@ public struct ShortcutAction: Hashable, Sendable {
 }
 
 public enum ShortcutDefaults {
-    static func action(_ section: String, _ id: String, _ title: String, _ chord: Chord?, ref: Bool = false) -> ShortcutAction {
-        ShortcutAction(id: id, section: section, title: title, defaultChord: chord,
-                       milestone: ref ? "Arrives in M2/M3" : nil, referenceOnly: ref)
+    static func action(_ section: String, _ id: String, _ title: String, _ chord: Chord?, milestone: String? = nil) -> ShortcutAction {
+        ShortcutAction(id: id, section: section, title: title, defaultChord: chord, milestone: milestone, referenceOnly: milestone != nil)
     }
 }
 
@@ -75,7 +94,7 @@ public struct ShortcutOverrides: Codable, Equatable, Sendable {
 
     public mutating func set(_ id: String, _ chord: Chord?, at: Double) { entries[id] = Entry(chord: chord, updatedAt: at) }
     public mutating func reset(_ id: String, at: Double) { entries[id] = Entry(chord: nil, updatedAt: at, reset: true) }
-    mutating func remove(_ id: String) { entries[id] = nil }
+    mutating func put(_ id: String, _ e: Entry) { entries[id] = e }
 
     /// Last write wins per action id; ties keep the local entry.
     public mutating func merge(_ other: ShortcutOverrides) {
@@ -127,6 +146,7 @@ public struct ShortcutRegistry: Sendable {
         table.first { $0.id != id && effective($0.id) == chord }?.id
     }
 
+    /// Reports `.conflict` for any other holder of the chord, reference-only actions included.
     public mutating func set(_ id: String, _ chord: Chord, at: Double? = nil) -> SetResult {
         if let bad = check(id, chord) { return bad }
         if let other = owner(of: chord, except: id) { return .conflict(other) }
@@ -151,6 +171,7 @@ public struct ShortcutRegistry: Sendable {
     public mutating func clear(_ id: String, at: Double? = nil) { write(id, nil, at: at) }
 
     public mutating func reset(_ id: String, at: Double? = nil) {
+        guard overrides.entries[id] != nil else { return }  // no entry, nothing to propagate
         overrides.reset(id, at: at ?? now()); changeCount += 1
     }
 
@@ -164,16 +185,25 @@ public struct ShortcutRegistry: Sendable {
         overrides.set(id, chord, at: at ?? now()); changeCount += 1
     }
 
-    /// Merges imported overrides for known ids; returns the ids that were ignored.
-    public mutating func importOverrides(_ other: ShortcutOverrides) -> [String] {
+    public struct ImportReport: Equatable, Sendable {
+        public var unknown: [String] = [], rejected: [String] = [], conflicts: [[String]] = []
+    }
+
+    /// Merges imported overrides through the same validity and reserved checks as `set`. Unknown ids are ignored,
+    /// invalid or reserved chords are rejected, and chords clashing with another action are applied (first in table
+    /// order wins at dispatch) and reported as conflict groups.
+    public mutating func importOverrides(_ other: ShortcutOverrides) -> ImportReport {
         let known = Set(table.map(\.id))
-        var accepted = ShortcutOverrides()
-        var unknown: [String] = []
+        var report = ImportReport(), accepted = ShortcutOverrides()
         for (id, e) in other.entries.sorted(by: { $0.key < $1.key }) {
-            if known.contains(id) { accepted.set(id, e.chord, at: e.updatedAt); if e.reset { accepted.reset(id, at: e.updatedAt) } } else { unknown.append(id) }
+            if !known.contains(id) { report.unknown.append(id); continue }
+            if !e.reset, let c = e.chord, check(id, c) != nil { report.rejected.append(id); continue }
+            accepted.put(id, e)
         }
         overrides.merge(accepted); changeCount += 1
-        return unknown
+        let touched = Set(accepted.entries.keys)
+        report.conflicts = conflicts().filter { !touched.isDisjoint(with: $0) }
+        return report
     }
 
     /// Groups of ids sharing an effective chord, in table order.
@@ -194,7 +224,7 @@ public struct ShortcutRegistry: Sendable {
     private static func fold(_ s: String) -> String { s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
 
     public func search(_ text: String, filter: ShortcutFilter = .all) -> [ShortcutAction] {
-        let q = ShortcutRegistry.fold(text.trimmingCharacters(in: .whitespaces))
+        let tokens = ShortcutRegistry.fold(text).split(whereSeparator: \.isWhitespace).map(String.init)
         let conflicted = Set(conflicts().joined())
         return table.filter { a in
             switch filter {
@@ -204,9 +234,9 @@ public struct ShortcutRegistry: Sendable {
             case .noShortcut: if effective(a.id) != nil { return false }
             case .referenceOnly: if !a.referenceOnly { return false }
             }
-            if q.isEmpty { return true }
             let c = effective(a.id)
-            return [a.title, a.section, c?.spoken ?? "", c?.glyphs ?? ""].contains { ShortcutRegistry.fold($0).contains(q) }
+            let hay = ShortcutRegistry.fold([a.title, a.section, c?.spoken ?? "", c?.glyphs ?? ""].joined(separator: "\n"))
+            return tokens.allSatisfy { hay.contains($0) }
         }
     }
 }
