@@ -109,7 +109,7 @@ final class ListUpdaterTests: XCTestCase {
 
     func testSizeBounds() async {
         let strict = ListUpdater(root: dir, engines: engines, fetcher: fetcher,
-                                 gates: [.ads: ListIntegrity(list: .ads, minBytes: 1_000, maxBytes: 5_000, minRules: 3, titleToken: "Fixture")], now: { Date() })
+                                 gates: [.ads: ListIntegrity(list: .ads, minBytes: 1_000, maxBytes: 5_000, minRules: 3, title: "Fixture Ads")], now: { Date() })
         fetcher.enqueue(ok(Fixtures.generated(rules: 3)))
         let small = await strict.update(.ads)
         guard case .failed(.badSize) = small else { return XCTFail("\(small)") }
@@ -173,6 +173,85 @@ final class ListUpdaterTests: XCTestCase {
         XCTAssertGreaterThan(g.minRules, 20_000)
         XCTAssertGreaterThan(ListIntegrity.standard(.trackers).minRules, 0)
         XCTAssertGreaterThan(ListIntegrity.standard(.cookies).minRules, 0)
+    }
+
+    func testTitlesAreExactNotSubstring() {
+        let cookie = Data("[Adblock Plus 2.0]\n! Title: Easylist Cookie List\n||a.test^\n||b.test^\n||c.test^\n".utf8)
+        let ads = Data("[Adblock Plus 2.0]\n! Title: EasyList\n||a.test^\n||b.test^\n||c.test^\n".utf8)
+        let priv = Data("[Adblock Plus 2.0]\n! TITLE:  easyprivacy \n||a.test^\n||b.test^\n||c.test^\n".utf8)
+        func gate(_ l: BlockList) -> ListIntegrity { ListIntegrity(list: l, minBytes: 0, maxBytes: 1_000_000, minRules: 3, title: l.title) }
+        XCTAssertEqual(gate(.ads).validate(cookie, previousRuleCount: nil), .failure(.badHeader))
+        XCTAssertEqual(gate(.cookies).validate(ads, previousRuleCount: nil), .failure(.badHeader))
+        XCTAssertEqual(gate(.trackers).validate(ads, previousRuleCount: nil), .failure(.badHeader))
+        XCTAssertNotNil(try? gate(.ads).validate(ads, previousRuleCount: nil).get())
+        XCTAssertNotNil(try? gate(.cookies).validate(cookie, previousRuleCount: nil).get())
+        XCTAssertNotNil(try? gate(.trackers).validate(priv, previousRuleCount: nil).get(), "key and value are case-insensitive and trimmed")
+    }
+
+    func testAllowlistPredicate() {
+        let yes = ["https://easylist.to/easylist/easylist.txt", "https://EasyList.TO/x", "https://secure.fanboy.co.nz/a.txt", "https://easylist.to:443/x"]
+        let no = ["https://evil.test/x", "http://easylist.to/x", "https://easylist.to@evil.test/", "https://user@easylist.to/x",
+                  "https://easylist.to.evil.test/", "https://evil-easylist.to/", "https://easylist.to:8443/x", "ftp://easylist.to/x"]
+        for u in yes { XCTAssertTrue(ListUpdater.isAllowed(URL(string: u)!), u) }
+        for u in no { XCTAssertFalse(ListUpdater.isAllowed(URL(string: u)!), u) }
+    }
+
+    func testRefusedRedirectIsReportedAsHostNotAllowed() async { let u = updater(); await seed(u)
+        fetcher.enqueue(.failure(RedirectRefused(host: "evil.example")))
+        await assertKept(u, .hostNotAllowed("evil.example")) }
+
+    func testTruncatedEngineBinRebuildsNeverCrashes() async throws {
+        let u = updater(); await seed(u)
+        let binURL = dir.appendingPathComponent("ads/engine.bin")
+        let bin = try Data(contentsOf: binURL)
+        try bin.prefix(bin.count / 2).write(to: binURL)
+        let e2 = BlockEngineSet()
+        let how = await ListUpdater(root: dir, engines: e2, fetcher: fetcher, gates: [.ads: Fixtures.gate()], now: { Date() }).loadFromDisk(.ads)
+        XCTAssertEqual(how, .rebuilt)
+        XCTAssertTrue(e2.isBlocked(url: "https://h3.fixture.test/x", sourceURL: "", type: "script", enabled: [.ads]))
+        // The rebuild rewrote a valid engine.bin and meta.
+        let again = await ListUpdater(root: dir, engines: BlockEngineSet(), fetcher: fetcher, gates: [:], now: { Date() }).loadFromDisk(.ads)
+        XCTAssertEqual(again, .serialized)
+    }
+
+    func testSlowLaunchRebuildNeverOverwritesNewerUpdate() async throws {
+        let u = updater()
+        fetcher.enqueue(ok(Fixtures.generated(rules: 6, prefix: "old")))
+        _ = await u.update(.ads)
+        let metaURL = dir.appendingPathComponent("ads/meta.json")
+        var meta = try JSONDecoder().decode(ListMeta.self, from: Data(contentsOf: metaURL))
+        meta.crateVersion = "stale"
+        try JSONEncoder().encode(meta).write(to: metaURL)
+
+        let e = BlockEngineSet()
+        let entered = ManagedFlag(), release = ManagedFlag()
+        let u2 = ListUpdater(root: dir, engines: e, fetcher: fetcher, gates: [.ads: Fixtures.gate()], now: { Date() })
+        await u2.setBeforeLaunchSwap { entered.set(); while !release.isSet { try? await Task.sleep(for: .milliseconds(5)) } }
+        let load = Task { await u2.loadFromDisk(.ads) }
+        while !entered.isSet { try await Task.sleep(for: .milliseconds(5)) }
+        fetcher.enqueue(ok(Fixtures.generated(rules: 6, prefix: "new")))
+        let r = await u2.update(.ads)
+        XCTAssertEqual(r, .updated(ruleCount: 6))
+        release.set()
+        _ = await load.value
+        func b(_ h: String) -> Bool { e.isBlocked(url: "https://\(h).fixture.test/x", sourceURL: "", type: "script", enabled: [.ads]) }
+        XCTAssertTrue(b("new0"), "newer update stays")
+        XCTAssertFalse(b("old0"), "stale rebuild did not swap in")
+        let text = try String(contentsOf: dir.appendingPathComponent("ads/list.txt"), encoding: .utf8)
+        XCTAssertTrue(text.contains("new0"))
+        let m = try JSONDecoder().decode(ListMeta.self, from: Data(contentsOf: metaURL))
+        XCTAssertEqual(m.crateVersion, BlockEngine.crateVersion)
+    }
+
+    func testCrateVersionMatchesCargoFiles() throws {
+        let crate = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Native/noche_adblock")
+        let toml = try String(contentsOf: crate.appendingPathComponent("Cargo.toml"), encoding: .utf8)
+        let lock = try String(contentsOf: crate.appendingPathComponent("Cargo.lock"), encoding: .utf8)
+        let tomlV = try XCTUnwrap(toml.range(of: #"adblock\s*=\s*\{\s*version\s*=\s*"=?([0-9.]+)""#, options: .regularExpression).map { String(toml[$0]) })
+        let lockV = try XCTUnwrap(lock.range(of: #"name = "adblock"\nversion = "([0-9.]+)""#, options: .regularExpression).map { String(lock[$0]) })
+        XCTAssertTrue(tomlV.contains("\"=" + BlockEngine.crateVersion.dropFirst("adblock-".count) + "\""), tomlV)
+        XCTAssertTrue(lockV.contains("version = \"" + BlockEngine.crateVersion.dropFirst("adblock-".count) + "\""), lockV)
     }
 }
 

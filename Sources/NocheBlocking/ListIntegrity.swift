@@ -24,10 +24,10 @@ public struct ListIntegrity: Sendable {
     public var minBytes: Int
     public var maxBytes: Int
     public var minRules: Int
-    public var titleToken: String
+    public var title: String
 
-    public init(list: BlockList, minBytes: Int, maxBytes: Int, minRules: Int, titleToken: String) {
-        self.list = list; self.minBytes = minBytes; self.maxBytes = maxBytes; self.minRules = minRules; self.titleToken = titleToken
+    public init(list: BlockList, minBytes: Int, maxBytes: Int, minRules: Int, title: String) {
+        self.list = list; self.minBytes = minBytes; self.maxBytes = maxBytes; self.minRules = minRules; self.title = title
     }
 
     /// Real-list gate. EasyList over 20,000 rules (stated by the note); the other minimums sit well under today's counts.
@@ -38,17 +38,17 @@ public struct ListIntegrity: Sendable {
         case .trackers: minRules = 5_000
         case .cookies: minRules = 1_000
         }
-        return ListIntegrity(list: list, minBytes: 100 * 1024, maxBytes: 20 * 1024 * 1024, minRules: minRules, titleToken: list.titleToken)
+        return ListIntegrity(list: list, minBytes: 100 * 1024, maxBytes: 20 * 1024 * 1024, minRules: minRules, title: list.title)
     }
 
     public func validate(_ body: Data, previousRuleCount: Int?) -> Result<ListStats, UpdateFailure> {
         guard body.count >= minBytes, body.count <= maxBytes else { return .failure(.badSize(body.count)) }
         guard let text = String(data: body, encoding: .utf8) else { return .failure(.badHeader) }
         let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        let token = titleToken.lowercased()
+        let want = title.lowercased()
         let headerOK = lines.prefix(50).contains {
-            let l = $0.lowercased()
-            return l.hasPrefix("! title:") && l.contains(token)
+            let l = $0.trimmingCharacters(in: .whitespaces).lowercased()
+            return l.hasPrefix("! title:") && l.dropFirst(8).trimmingCharacters(in: .whitespaces) == want
         }
         guard headerOK else { return .failure(.badHeader) }
         var rules = 0, errors = 0

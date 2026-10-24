@@ -11,12 +11,12 @@ public enum BlockList: String, CaseIterable, Sendable, Hashable {
         case .cookies: URL(string: "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt")!
         }
     }
-    /// Substring the list's `! Title:` header must contain (case-insensitive).
-    public var titleToken: String {
+    /// The list's `! Title:` header value, matched case-insensitively and exactly (the cookie list calls itself "Easylist Cookie List").
+    public var title: String {
         switch self {
         case .ads: "EasyList"
         case .trackers: "EasyPrivacy"
-        case .cookies: "Cookie"
+        case .cookies: "Easylist Cookie List"
         }
     }
 }

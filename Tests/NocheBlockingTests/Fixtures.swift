@@ -39,8 +39,8 @@ enum Fixtures {
         "[Adblock Plus 2.0]\n! Title: \(title)\n" + (0..<rules).map { "||\(prefix)\($0).fixture.test^" }.joined(separator: "\n") + "\n"
     }
 
-    static func gate(_ list: BlockList = .ads, minRules: Int = 3, token: String = "Fixture") -> ListIntegrity {
-        ListIntegrity(list: list, minBytes: 0, maxBytes: 20_000_000, minRules: minRules, titleToken: token)
+    static func gate(_ list: BlockList = .ads, minRules: Int = 3, title: String? = nil) -> ListIntegrity {
+        ListIntegrity(list: list, minBytes: 0, maxBytes: 20_000_000, minRules: minRules, title: title ?? "Fixture Ads")
     }
 
     static func tempDir() -> URL {

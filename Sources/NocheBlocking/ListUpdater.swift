@@ -27,6 +27,8 @@ public struct ListMeta: Codable, Equatable, Sendable {
     public var fetchedAt: Double
     public var ruleCount: Int
     public var crateVersion: String
+    /// sha256 of engine.bin, verified before deserializing (nil or mismatch means rebuild from list.txt).
+    public var engineSHA256: String?
 }
 
 public enum UpdateOutcome: Equatable, Sendable {
@@ -41,6 +43,18 @@ public enum LoadSource: Equatable, Sendable { case serialized, rebuilt, none }
 /// Any failure keeps the old file and engine.
 public actor ListUpdater {
     public static let allowedHosts: Set<String> = ["easylist.to", "secure.fanboy.co.nz"]
+
+    /// The one allowlist rule: https, no userinfo, default port, host exactly on the list (case-insensitive).
+    public static func isAllowed(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.user == nil && url.password == nil
+            && (url.port == nil || url.port == 443) && allowedHosts.contains(url.host?.lowercased() ?? "")
+    }
+
+    private static func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+    private var generation: [BlockList: Int] = [:]
+    /// Test hook: runs after a launch rebuild finishes and before it swaps in.
+    var beforeLaunchSwap: (@Sendable () async -> Void)?
+    func setBeforeLaunchSwap(_ h: (@Sendable () async -> Void)?) { beforeLaunchSwap = h }
 
     private let root: URL
     private let engines: BlockEngineSet
@@ -67,16 +81,24 @@ public actor ListUpdater {
         let meta = readMeta(list)
         if let meta, meta.crateVersion == BlockEngine.crateVersion,
            let bin = try? Data(contentsOf: d.appendingPathComponent("engine.bin")),
+           meta.engineSHA256 == Self.sha(bin),
            let e = BlockEngine(serialized: bin) {
             engines.set(e, for: list)
             return .serialized
         }
         guard let text = try? String(contentsOf: d.appendingPathComponent("list.txt"), encoding: .utf8) else { return .none }
-        guard let e = await Task.detached(priority: .utility, operation: { BlockEngine(lists: [text]) }).value else { return .none }
+        let startGen = generation[list, default: 0]
+        guard let (e, bin) = await Task.detached(priority: .utility, operation: { () -> (BlockEngine, Data)? in
+            BlockEngine(lists: [text]).map { ($0, $0.serialize()) }
+        }).value else { return .none }
+        await beforeLaunchSwap?()
+        // An update that finished while this rebuild ran is newer: never swap or write over it (actor reentrancy).
+        guard generation[list, default: 0] == startGen else { return .none }
         engines.set(e, for: list)
         if var meta {
             meta.crateVersion = BlockEngine.crateVersion
-            if let enc = try? JSONEncoder().encode(meta), let bin = Optional(e.serialize()) {
+            meta.engineSHA256 = Self.sha(bin)
+            if let enc = try? JSONEncoder().encode(meta) {
                 try? writeAtomic(bin, "engine.bin", list)
                 try? writeAtomic(enc, "meta.json", list)
             }
@@ -92,11 +114,11 @@ public actor ListUpdater {
 
         let resp: FetchResponse
         do { resp = try await fetcher.fetch(url: list.url, etag: conditional?.etag, lastModified: conditional?.lastModified) }
+        catch let r as RedirectRefused { return .failed(.hostNotAllowed(r.host)) }
         catch { return .failed(.network) }
 
         guard resp.finalURL.scheme?.lowercased() == "https" else { return .failed(.notHTTPS) }
-        let host = resp.finalURL.host?.lowercased() ?? ""
-        guard Self.allowedHosts.contains(host) else { return .failed(.hostNotAllowed(host)) }
+        guard Self.isAllowed(resp.finalURL) else { return .failed(.hostNotAllowed(resp.finalURL.host?.lowercased() ?? "")) }
 
         if resp.status == 304, var meta = conditional {
             meta.fetchedAt = now().timeIntervalSince1970
@@ -121,26 +143,36 @@ public actor ListUpdater {
         guard let (engine, bin) = built else { return .failed(.engineBuildFailed) }
 
         let meta = ListMeta(url: list.url.absoluteString, etag: resp.etag, lastModified: resp.lastModified,
-                            sha256: SHA256.hash(data: resp.body).map { String(format: "%02x", $0) }.joined(),
-                            fetchedAt: now().timeIntervalSince1970, ruleCount: stats.ruleCount, crateVersion: BlockEngine.crateVersion)
+                            sha256: Self.sha(resp.body),
+                            fetchedAt: now().timeIntervalSince1970, ruleCount: stats.ruleCount, crateVersion: BlockEngine.crateVersion,
+                            engineSHA256: Self.sha(bin))
         do {
             // meta last: it is the commit marker (a crash before it leaves the old etag, so the next run refetches).
             try writeAtomic(resp.body, "list.txt", list)
             try writeAtomic(bin, "engine.bin", list)
             try writeAtomic(try JSONEncoder().encode(meta), "meta.json", list)
         } catch { return .failed(.writeFailed) }
+        generation[list, default: 0] += 1
         engines.set(engine, for: list)
         return .updated(ruleCount: stats.ruleCount)
     }
 }
 
-/// Production fetcher: conditional GET over HTTPS; a redirect off the allowlist is refused.
-public final class URLSessionFetcher: NSObject, HTTPFetching, URLSessionTaskDelegate, @unchecked Sendable {
-    private var session: URLSession!
-    public override init() {
-        super.init()
-        session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+struct RedirectRefused: Error { let host: String }
+
+/// Refuses any redirect off the allowlist; kept apart from the fetcher so the session does not retain the fetcher.
+private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(request.url.map(ListUpdater.isAllowed) == true ? request : nil)
     }
+}
+
+/// Production fetcher: conditional GET over HTTPS; a redirect off the allowlist is refused and reported as such.
+public final class URLSessionFetcher: HTTPFetching, @unchecked Sendable {
+    private let session = URLSession(configuration: .ephemeral, delegate: RedirectGuard(), delegateQueue: nil)
+    public init() {}
+    deinit { session.invalidateAndCancel() }
 
     public func fetch(url: URL, etag: String?, lastModified: String?) async throws -> FetchResponse {
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
@@ -148,16 +180,14 @@ public final class URLSessionFetcher: NSObject, HTTPFetching, URLSessionTaskDele
         if let lastModified { req.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since") }
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if (300..<400).contains(http.statusCode), let loc = http.value(forHTTPHeaderField: "Location"),
+           let target = URL(string: loc, relativeTo: http.url ?? url)?.absoluteURL, !ListUpdater.isAllowed(target) {
+            throw RedirectRefused(host: target.host?.lowercased() ?? "")
+        }
         // A compressed transfer reports the encoded length, which would not match the decoded body.
         let encoded = http.value(forHTTPHeaderField: "Content-Encoding") != nil
         return FetchResponse(status: http.statusCode, body: data, finalURL: http.url ?? url,
                              etag: http.value(forHTTPHeaderField: "ETag"), lastModified: http.value(forHTTPHeaderField: "Last-Modified"),
                              expectedLength: encoded || http.expectedContentLength < 0 ? nil : Int(http.expectedContentLength))
-    }
-
-    public func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                           newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        let ok = request.url?.scheme?.lowercased() == "https" && ListUpdater.allowedHosts.contains(request.url?.host?.lowercased() ?? "")
-        completionHandler(ok ? request : nil)
     }
 }

@@ -69,33 +69,53 @@ final class BlockEngineTests: XCTestCase {
     }
 
     func testSwapIsAtomicUnderConcurrentChecks() throws {
-        let old = try XCTUnwrap(BlockEngine(lists: ["||old.fixture.test^"]))
-        let new = try XCTUnwrap(BlockEngine(lists: ["||old.fixture.test^\n||new.fixture.test^"]))
-        let set = BlockEngineSet()
-        set.set(old, for: .ads)
+        // Each engine blocks "both" always; old blocks only "oldonly", new only "newonly". A check may only ever see
+        // the old or the new engine's answer for a URL, so "both" is always true and answers never come from a freed engine.
+        func make(_ new: Bool) throws -> BlockEngine {
+            try XCTUnwrap(BlockEngine(lists: ["||both.fixture.test^\n" + (new ? "||newonly.fixture.test^" : "||oldonly.fixture.test^")]))
+        }
+        let set = BlockSetBox()
+        set.set.set(try make(false), for: .ads)
         let enabled: Set<BlockList> = [.ads]
-        let bad = NSLock(); var failures = 0
+        let bad = NSLock(); var failures = 0, checks = 0
         let group = DispatchGroup()
         let stop = ManagedFlag()
         for _ in 0..<8 {
             DispatchQueue.global().async(group: group) {
+                var n = 0
                 while !stop.isSet {
-                    let a = set.isBlocked(url: "https://old.fixture.test/x", sourceURL: "", type: "script", enabled: enabled)
-                    let b = set.isBlocked(url: "https://new.fixture.test/x", sourceURL: "", type: "script", enabled: enabled)
-                    // old: (true,false); new: (true,true). Anything else is a torn read.
-                    if !a { bad.lock(); failures += 1; bad.unlock() }
-                    _ = b
+                    let both = set.set.isBlocked(url: "https://both.fixture.test/x", sourceURL: "", type: "script", enabled: enabled)
+                    let other = set.set.isBlocked(url: "https://neither.fixture.test/x", sourceURL: "", type: "script", enabled: enabled)
+                    if !both || other { bad.lock(); failures += 1; bad.unlock() }
+                    n += 1
                 }
+                bad.lock(); checks += n; bad.unlock()
             }
         }
-        for i in 0..<200 { set.set(i % 2 == 0 ? new : old, for: .ads); usleep(200) }
-        set.set(new, for: .ads)
+        // Engines are built inside the loop and the previous one is released at each swap while checks run.
+        for i in 0..<100 { set.set.set(try make(i % 2 == 0), for: .ads) }
+        let last = try make(true)
+        set.set.set(last, for: .ads)
+        usleep(20_000)
         stop.set()
         group.wait()
         XCTAssertEqual(failures, 0)
-        XCTAssertTrue(set.isBlocked(url: "https://new.fixture.test/x", sourceURL: "", type: "script", enabled: enabled))
+        XCTAssertGreaterThan(checks, 0)
+        XCTAssertTrue(set.set.isBlocked(url: "https://newonly.fixture.test/x", sourceURL: "", type: "script", enabled: enabled))
+        XCTAssertFalse(set.set.isBlocked(url: "https://oldonly.fixture.test/x", sourceURL: "", type: "script", enabled: enabled))
+    }
+
+    func testEmptyListsAndCorruptBytesDoNotCrash() throws {
+        let e = try XCTUnwrap(BlockEngine(lists: []))
+        XCTAssertFalse(e.check(url: "https://a.test/x", sourceURL: "", type: "script"))
+        let full = try XCTUnwrap(BlockEngine(lists: [Fixtures.ads])).serialize()
+        for cut in [full.count / 2, full.count - 1, 1, 7] { _ = BlockEngine(serialized: full.prefix(cut)) }
+        var flipped = full; for i in stride(from: 0, to: flipped.count, by: 97) { flipped[i] ^= 0xFF }
+        _ = BlockEngine(serialized: flipped)?.cosmetic(url: "https://site-a.test/")
     }
 }
+
+final class BlockSetBox: @unchecked Sendable { let set = BlockEngineSet() }
 
 final class ManagedFlag: @unchecked Sendable {
     private let l = NSLock(); private var v = false

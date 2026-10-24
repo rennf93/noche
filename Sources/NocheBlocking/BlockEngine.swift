@@ -20,7 +20,7 @@ public final class BlockEngine: @unchecked Sendable {
 
     /// Parses filter list texts (ABP syntax). Expensive: call off the main thread.
     public convenience init?(lists: [String]) {
-        var cs: [UnsafeMutablePointer<CChar>?] = lists.map { strdup($0) }
+        var cs: [UnsafeMutablePointer<CChar>?] = (lists.isEmpty ? [""] : lists).map { strdup($0) }
         defer { cs.forEach { free($0) } }
         let p = cs.withUnsafeMutableBufferPointer { b -> UnsafeMutableRawPointer? in
             b.baseAddress!.withMemoryRebound(to: UnsafePointer<CChar>?.self, capacity: b.count) { nab_engine_new($0, b.count) }
