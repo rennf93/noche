@@ -21,6 +21,8 @@ else NOCHE_PROBES=1 "$ROOT/scripts/build-app.sh" --product EngineProbe --app-nam
 
 SITE="$(mktemp -d)"
 echo '<!doctype html><title>probe</title><p>probe page' > "$SITE/index.html"
+# u10: NOCHE_PROBE_MEASURE=pagestatic puts the in-page visibility/rAF recorder in the page (same script as kPageJS in main.mm).
+[ "${NOCHE_PROBE_MEASURE:-}" = pagestatic ] && echo "<script>(()=>{window.__sw=[];document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const v=performance.timeOrigin+performance.now();requestAnimationFrame(()=>{window.__sw.push([v,performance.timeOrigin+performance.now()])});});})()</script>" >> "$SITE/index.html"
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$SITE" >/dev/null 2>&1 &
 SERVER_PID=$!

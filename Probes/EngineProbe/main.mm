@@ -17,6 +17,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_life_span_handler.h"
+#include "include/cef_trace.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/views/cef_browser_view.h"
@@ -350,8 +351,113 @@ static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<doub
   });
 }
 
+// Stall experiments (u10). NOCHE_PROBE_MEASURE=page: a script injected over CDP before the run records, in the page,
+// the epoch ms of visibilitychange to visible and of the first rAF after it. =pagestatic: the same script is in the
+// served index.html (probe-engine.sh), so no CDP message touches tabs 1 and 2 until the post-run read. In both modes
+// the driver awaits nothing over CDP: it switches, waits NOCHE_PROBE_GAP_MS (default 1500), switches again.
+static const char* kPageJS = "(()=>{if(window.__sw)return 'dup';window.__sw=[];document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const v=performance.timeOrigin+performance.now();requestAnimationFrame(()=>{window.__sw.push([v,performance.timeOrigin+performance.now()])});});return 'ok'})()";
+static double EpochMs() { return [NSDate date].timeIntervalSince1970 * 1000; }
+static std::vector<double> g_calls;
+static std::vector<CefRefPtr<CefBrowser>> g_ab;
+static std::function<void(int)> g_do_switch;
+static void PageAbStep();
+// NOCHE_PROBE_TRACE=<file>: a Chromium trace of the switch run (viz SendBeginFrameDecision carries the throttle reason).
+class EndTrace : public CefEndTracingCallback {
+ public:
+  explicit EndTrace(std::function<void()> f) : f_(f) {}
+  void OnEndTracingComplete(const CefString&) override { f_(); }
+ private:
+  std::function<void()> f_;
+  IMPLEMENT_REFCOUNTING(EndTrace);
+};
+static void FinishTraced(bool ok, NSString* detail) {
+  const char* t = getenv("NOCHE_PROBE_TRACE");
+  if (!t) { Finish(ok, detail); return; }
+  CefEndTracing(t, new EndTrace([=] { Finish(ok, detail); }));
+}
+static void PageAbRead() {
+  auto out = std::make_shared<std::vector<NSString*>>();
+  EvalOn(g_ab[0], @"JSON.stringify(window.__sw || [])", false, [out](NSString* a) {
+    out->push_back(a);
+    EvalOn(g_ab[1], @"JSON.stringify(window.__sw || [])", false, [out](NSString* b) {
+      out->push_back(b);
+      std::vector<std::vector<std::pair<double, double>>> ev(2);
+      for (int k = 0; k < 2; k++) {
+        id j = [NSJSONSerialization JSONObjectWithData:[(*out)[k] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        if ([j isKindOfClass:NSArray.class]) for (NSArray* e in j) ev[k].push_back({[e[0] doubleValue], [e[1] doubleValue]});
+      }
+      std::vector<double> call2raf, call2vis, vis2raf;
+      NSMutableString* series = [NSMutableString string];
+      size_t used[2] = {0, 0};
+      for (size_t i = 0; i < g_calls.size(); i++) {
+        int k = i % 2;
+        while (used[k] < ev[k].size() && ev[k][used[k]].first < g_calls[i] - 50) used[k]++;
+        if (used[k] >= ev[k].size()) { [series appendString:@" none"]; continue; }
+        auto e = ev[k][used[k]++];
+        call2vis.push_back(e.first - g_calls[i]); vis2raf.push_back(e.second - e.first); call2raf.push_back(e.second - g_calls[i]);
+        [series appendFormat:@" %.0f/%.0f/%.0f", call2vis.back(), vis2raf.back(), call2raf.back()];
+      }
+      auto med = [](std::vector<double> v) { if (v.empty()) return -1.0; std::sort(v.begin(), v.end()); return v[v.size() / 2]; };
+      g_ab.clear(); g_do_switch = nullptr;  // hold no browser reference at shutdown
+      FinishTraced(!call2raf.empty() && med(call2raf) <= 11.6, [NSString stringWithFormat:@"in-page %@ switches=%zu matched=%zu median call->visible=%.1f visible->rAF=%.1f call->rAF=%.1f ms; per switch call->visible/visible->rAF/call->rAF ms:%@", [NSString stringWithUTF8String:getenv("NOCHE_PROBE_MEASURE")], g_calls.size(), call2raf.size(), med(call2vis), med(vis2raf), med(call2raf), series]);
+    });
+  });
+}
+static void PageAbStep() {
+  const size_t kN = 16;
+  if (g_calls.size() == kN) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ PageAbRead(); }); return; }
+  const int k = g_calls.size() % 2;
+  g_calls.push_back(EpochMs());
+  Log(@"CALL %zu k=%d uptime_us=%llu", g_calls.size(), k, clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000);
+  g_do_switch(k);
+  const char* gapEnv = getenv("NOCHE_PROBE_GAP_MS");
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (gapEnv ? atoi(gapEnv) : 1500) * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ PageAbStep(); });
+}
+static void LogWindowState(const char* when) {
+  NSWindow* w = ((__bridge NSView*)g_window->GetWindowHandle()).window;
+  Log(@"WINDOW %s nsvisible=%d occlusionVisible=%d alpha=%.0f onActiveSpace=%d cefIsVisible=%d cefIsActive=%d", when, (int)w.isVisible, (int)((w.occlusionState & NSWindowOcclusionStateVisible) != 0), w.alphaValue, (int)w.onActiveSpace, (int)g_window->IsVisible(), (int)g_window->IsActive());
+}
+static void PageAbStart() {
+  if (getenv("NOCHE_PROBE_TRACE") && !getenv("NOCHE_PROBE_TRACE_EARLY")) CefBeginTracing("viz,cc,content,views,ui,toplevel,latency", nullptr);
+  LogWindowState("before");
+  if (getenv("NOCHE_PROBE_REORDER")) {
+    // u10 experiment 7: order the already-visible NSWindow in a second time (never activates). The first
+    // orderFrontRegardless ran while -isVisible still read NO, so Chromium's visibility bridge never saw the window
+    // become visible; a second order call lets it re-read -isVisible.
+    [((__bridge NSView*)g_window->GetWindowHandle()).window orderWindow:NSWindowAbove relativeTo:0];
+    LogWindowState("after-reorder");
+  }
+  const bool injected = ![@"pagestatic" isEqualToString:@(getenv("NOCHE_PROBE_MEASURE"))];
+  auto go = []{ dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ PageAbStep(); }); };
+  if (!injected) { go(); return; }
+  EvalOn(g_ab[0], @(kPageJS), false, [go](NSString*) { EvalOn(g_ab[1], @(kPageJS), false, [go](NSString*) { go(); }); });
+}
+static bool PageMode() { const char* m = getenv("NOCHE_PROBE_MEASURE"); return m && *m && strcmp(m, "cdp"); }
+
+// Hybrid control: strict A/B between two Alloy-style views by SetVisible, measured over CDP like SwitchStep.
+static void HybridCdpStep(std::vector<double> lat) {
+  if (lat.size() == 33) {
+    g_ab.clear(); g_do_switch = nullptr;
+    std::vector<double> t(lat.begin() + 3, lat.end());
+    std::sort(t.begin(), t.end());
+    Finish(t[14] <= 11.6, [NSString stringWithFormat:@"hybrid cdp median=%.1fms p90=%.1fms range=%.1f..%.1fms (30 timed after 3 warm-up) series:%@", (t[14] + t[15]) / 2, t[26], t.front(), t.back(), [NSString stringWithFormat:@"%.0f", lat.back()]]);
+    return;
+  }
+  const int k = lat.size() % 2;
+  auto b = g_ab[k];
+  double t0 = NowMs();
+  g_do_switch(k);
+  EvalOn(b, @"new Promise(r => requestAnimationFrame(() => r('raf')))", true, [=](NSString* r) mutable {
+    if (!r.length) { Finish(false, @"no rAF result"); return; }
+    lat.push_back(NowMs() - t0);
+    Log(@"SWITCH %zu %.1f ms", lat.size(), lat.back());
+    const char* gapEnv = getenv("NOCHE_PROBE_GAP_MS");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (gapEnv ? atoi(gapEnv) : 200) * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ HybridCdpStep(lat); });
+  });
+}
+
 static void RunTabsCheck() {
-  const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"];  // the other 19 views already exist, Alloy style
+  const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"] || [g_check isEqualToString:@"switch-latency-ab-hybrid"];  // the other 19 views already exist, Alloy style
   const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last" ] containsObject:g_check];
   const bool many = !few;
   int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
@@ -488,9 +594,24 @@ static void RunTabsCheck() {
           Finish(changed && isTab7 && cbTab7, [NSString stringWithFormat:@"OnActiveTabChanged=%d GetActiveTab is tab 7=%d callback active is tab 7=%d", g_active_changed, (int)isTab7, (int)cbTab7]);
         });
       });
+    } else if ([g_check isEqualToString:@"switch-latency-ab-hybrid"]) {
+      if (!loaded || g_alloy.size() != 19) { Finish(false, @"hybrid views did not all load"); return; }
+      g_view->SetVisible(false);
+      for (size_t i = 0; i < g_alloy.size(); i++) g_alloy[i]->SetVisible(i == 2);
+      g_ab = {g_alloy[0]->GetBrowser(), g_alloy[1]->GetBrowser()};
+      g_do_switch = [](int k) { g_alloy[1 - k]->SetVisible(false); g_alloy[k]->SetVisible(true); };
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (PageMode()) PageAbStart(); else HybridCdpStep({});
+      });
     } else if ([g_check hasPrefix:@"switch-latency"]) {
       if (tabs.size() != 20) { Finish(false, [NSString stringWithFormat:@"expected 20 tabs, GetTabs=%zu", tabs.size()]); return; }
       if (!loaded) { Finish(false, [NSString stringWithFormat:@"only %d of 20 tabs loaded", (int)g_loaded_ids.size()]); return; }
+      if (PageMode() && [g_check isEqualToString:@"switch-latency-ab"]) {
+        g_ab = {tabs[1], tabs[2]};
+        g_do_switch = [](int k) { g_view->SetActiveTab(g_ab[k]); };
+        PageAbStart();
+        return;
+      }
       SwitchStep(tabs, {});
     } else {  // rss-20 and rss-20-hybrid
       if (!loaded) { Finish(false, [NSString stringWithFormat:@"only %d of %d tabs loaded", (int)g_loaded_ids.size(), total]); return; }
@@ -602,6 +723,7 @@ class WinDelegate : public CefWindowDelegate {
   [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default/Service Worker"] error:nil];
   NSError* err = nil;
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }
+  if (getenv("NOCHE_PROBE_TRACE") && getenv("NOCHE_PROBE_TRACE_EARLY")) CefBeginTracing("viz,cc,content,views,ui,toplevel,latency", nullptr);
   InstallCrashHandlers();  // after CefInitialize, so Chromium's own handlers do not replace them
   g_reports_at_start = CrashReports();
   // test-only: --probe-selfcrash aborts, --probe-selfcrash=segv writes through a null pointer
@@ -613,7 +735,7 @@ class WinDelegate : public CefWindowDelegate {
     });
   }
   g_view = CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate());
-  if ([g_check isEqualToString:@"rss-20-hybrid"])  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
+  if ([g_check isEqualToString:@"rss-20-hybrid"] || [g_check isEqualToString:@"switch-latency-ab-hybrid"])  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
     for (int i = 1; i < 20; i++)
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
@@ -628,7 +750,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
@@ -639,8 +761,10 @@ int main(int argc, const char* argv[]) {
     // Quiet switches go in through argv: NCEngine hands it to CefInitialize, and the bridge's own
     // OnBeforeCommandLineProcessing adds disable-features=MacAppCodeSignClone (merging any existing value).
     static std::vector<const char*> av(argv, argv + argc);
+    // NOCHE_PROBE_NO_AF=1 drops the three anti-throttling switches (u10 experiment 1).
     for (const char* f : {"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
-                          "--disable-background-timer-throttling", "--mute-audio"}) av.push_back(f);
+                          "--disable-background-timer-throttling", "--mute-audio"})
+      if (!getenv("NOCHE_PROBE_NO_AF") || !strcmp(f, "--mute-audio")) av.push_back(f);
     av.push_back(nullptr);
     static char** avp = const_cast<char**>(av.data());
     static int ac = (int)av.size() - 1;
