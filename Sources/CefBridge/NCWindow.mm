@@ -1,8 +1,10 @@
 #import "CefBridge.h"
 #import "NCTabInternal.h"
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 #include "include/cef_client.h"
 #include "include/cef_command_handler.h"
+#include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window.h"
@@ -10,6 +12,7 @@
 
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
+- (void)applyMask;
 - (void)cefWindowCreated:(CefRefPtr<CefWindow>)window;
 - (void)cefWindowDestroyed;
 - (void)browserCreated:(CefRefPtr<CefBrowserView>)view browser:(CefRefPtr<CefBrowser>)browser;
@@ -111,6 +114,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   explicit NCWindowDelegate_(NCWindow* w) : w_(w) {}
   void OnWindowCreated(CefRefPtr<CefWindow> w) override { [w_ cefWindowCreated:w]; }
   void OnWindowDestroyed(CefRefPtr<CefWindow>) override { [w_ cefWindowDestroyed]; }
+  void OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect&) override { [w_ applyMask]; }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }  // Noche draws the chrome (M1.1 Task 4)
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return [w_ cefInitialBounds]; }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
@@ -133,9 +137,13 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
   NSWindow* _nsWindow;
   BOOL _firstEmitted, _closeRequested;
+  NSEdgeInsets _webInsets;
+  CGFloat _webCornerRadius;
+  CAShapeLayer* _mask;
 }
 
 @synthesize nsWindow = _nsWindow;
+@synthesize webInsets = _webInsets, webCornerRadius = _webCornerRadius;
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
   if ((self = [super init])) {
@@ -184,13 +192,13 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     std::vector<CefRefPtr<CefBrowser>> v;
     _view->GetTabs(v);
     for (auto& b : v)
-      if (NCTab* t = [self tabFor:b create:YES]) [out addObject:t];
+      if (NCTab* t = [self tabFor:b create:NO]) [out addObject:t];
   }
   return out;
 }
 
 - (NCTab*)activeTab {
-  return _view ? [self tabFor:_view->GetActiveTab() create:YES] : nil;
+  return _view ? [self tabFor:_view->GetActiveTab() create:NO] : nil;
 }
 
 - (NCTab*)addTabWithURL:(NSString*)url activate:(BOOL)activate {
@@ -208,12 +216,120 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   else _closeRequested = YES;
 }
 
+// MARK: web view rect and corner mask
+
+- (void)setWebInsets:(NSEdgeInsets)insets {
+  _webInsets = insets;
+  [self applyLayout];
+}
+
+- (void)setWebCornerRadius:(CGFloat)radius {
+  _webCornerRadius = radius;
+  [self applyMask];
+}
+
+// Views overrides SetBounds on the browser view (spike S1), so the rect is the window's box layout inside border.
+- (void)applyLayout {
+  if (!_window || !_view) return;
+  CefBoxLayoutSettings st;
+  st.horizontal = true;
+  st.inside_border_insets = CefInsets((int)lround(_webInsets.top), (int)lround(_webInsets.left),
+                                      (int)lround(_webInsets.bottom), (int)lround(_webInsets.right));
+  st.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
+  CefRefPtr<CefBoxLayout> bl = _window->SetToBoxLayout(st);
+  bl->SetFlexForView(_view, 1);
+  _window->Layout();
+  [self applyMask];
+}
+
+static NSView* FindByClass(NSView* v, NSString* cls) {
+  if ([NSStringFromClass(v.class) isEqualToString:cls]) return v;
+  for (NSView* s in v.subviews)
+    if (NSView* r = FindByClass(s, cls)) return r;
+  return nil;
+}
+
+// The page draws through ViewsCompositorSuperview, not the web view's own layer (spike S1, C6), so the bottom corner
+// rounding is a CAShapeLayer mask on that layer. The path is built in window base coordinates (origin bottom-left) and
+// mapped into the mask's space with AppKit and Core Animation's own conversions, so flipped layers cannot mirror it.
+- (void)applyMask {
+  NSView* host = self.chromeHost;
+  NSView* csv = host ? FindByClass(host, @"ViewsCompositorSuperview") : nil;
+  if (!csv) return;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  csv.wantsLayer = YES;
+  if (_webCornerRadius <= 0) {
+    csv.layer.mask = nil;
+    _mask = nil;
+  } else {
+    if (!_mask) _mask = [CAShapeLayer layer];
+    _mask.frame = csv.layer.bounds;
+    csv.layer.mask = _mask;
+    NSRect content = [_nsWindow.contentView convertRect:_nsWindow.contentView.bounds toView:nil];
+    const CGFloat x = NSMinX(content) + _webInsets.left, y = NSMinY(content) + _webInsets.bottom;
+    const CGFloat w = content.size.width - _webInsets.left - _webInsets.right;
+    const CGFloat h = content.size.height - _webInsets.top - _webInsets.bottom;
+    const CGFloat r = MIN(_webCornerRadius, MIN(w, h) / 2);
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathMoveToPoint(path, nullptr, x + r, y);  // bottom edge, then up the right side
+    CGPathAddArc(path, nullptr, x + w - r, y + r, r, -M_PI_2, 0, false);
+    CGPathAddLineToPoint(path, nullptr, x + w, y + h);
+    CGPathAddLineToPoint(path, nullptr, x, y + h);
+    CGPathAddLineToPoint(path, nullptr, x, y + r);
+    CGPathAddArc(path, nullptr, x + r, y + r, r, M_PI, 3 * M_PI_2, false);
+    CGPathCloseSubpath(path);
+    // base -> mask space is affine: map the origin and the unit vectors.
+    CGPoint o = [self maskPointForWindowPoint:CGPointZero];
+    CGPoint ex = [self maskPointForWindowPoint:CGPointMake(1, 0)];
+    CGPoint ey = [self maskPointForWindowPoint:CGPointMake(0, 1)];
+    CGAffineTransform t = CGAffineTransformMake(ex.x - o.x, ex.y - o.y, ey.x - o.x, ey.y - o.y, o.x, o.y);
+    CGPathRef mapped = CGPathCreateCopyByTransformingPath(path, &t);
+    _mask.path = mapped;
+    CGPathRelease(mapped);
+    CGPathRelease(path);
+  }
+  [CATransaction commit];
+}
+
+- (CGPoint)maskPointForWindowPoint:(CGPoint)p {
+  NSView* csv = FindByClass(self.chromeHost, @"ViewsCompositorSuperview");
+  NSPoint v = [csv convertPoint:p fromView:nil];  // view coordinates equal layer coordinates for a layer-backed view
+  return [_mask convertPoint:v fromLayer:csv.layer];
+}
+
+static NSView* FindVisible(NSView* v, NSString* cls) {
+  if ([NSStringFromClass(v.class) isEqualToString:cls] && !v.isHiddenOrHasHiddenAncestor) return v;
+  for (NSView* s in v.subviews)
+    if (NSView* r = FindVisible(s, cls)) return r;
+  return nil;
+}
+
+// The view that shows the page: WebContentsViewCocoa, the visible one when several tabs exist.
+- (NSView*)webView {
+  NSView* host = self.chromeHost;
+  if (!host) return nil;
+  return FindVisible(host, @"WebContentsViewCocoa");
+}
+
+- (BOOL)webMaskExists {
+  return _mask && _mask.path && _mask.superlayer != nil;
+}
+
+- (BOOL)webMaskContainsWindowPoint:(NSPoint)p {
+  if (![self webMaskExists]) return NO;
+  CGPoint m = [self maskPointForWindowPoint:p];
+  return CGPathContainsPoint(_mask.path, nullptr, m, false);
+}
+
 // MARK: CEF callbacks (UI thread)
 
 - (void)cefWindowCreated:(CefRefPtr<CefWindow>)w {
   _window = w;
   w->AddChildView(_view);
   _nsWindow = ((__bridge NSView*)w->GetWindowHandle()).window;
+  if (!g_own_windows) g_own_windows = [NSHashTable weakObjectsHashTable];
+  [g_own_windows addObject:_nsWindow];
   if (_mode == NCWindowModeHidden) {
     // Invisible and inert: alpha 0 before anything draws, click-through, never key, never shown through
     // CefWindow::Show (its kShowAndActivateWindow ends in an app activation).
@@ -223,6 +339,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   } else {
     w->Show();
   }
+  [self applyLayout];
   if (_closeRequested) w->Close();
 }
 
@@ -305,6 +422,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   NCTab* tab = [self tabFor:browser create:NO];
   if (!tab || urls.empty()) return;
   [tab loadFaviconFromURL:@(urls[0].ToString().c_str()) done:^{
+    if (!tab.browser || self->_table[@(tab.identifier)] != tab) return;  // closed meanwhile
     [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];
   }];
 }
@@ -320,6 +438,8 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 // window in at alpha 1 on first show and the Web Store install ends in [NSApp activateIgnoringOtherApps:YES], so
 // alpha is clamped to 0, each order-in zeroes alpha first, and every activation call is a counted no-op.
 static NSInteger g_activate_blocked = 0;
+static NSInteger g_alpha_attempts_own = 0, g_alpha_attempts_other = 0;
+static NSHashTable<NSWindow*>* g_own_windows;  // NCWindow windows, weak
 static void (*orig_setAlpha)(id, SEL, CGFloat);
 static void (*orig_orderWindow)(id, SEL, NSWindowOrderingMode, NSInteger);
 static void (*orig_orderFront)(id, SEL, id);
@@ -332,12 +452,20 @@ static void GuardWindow(id w) {
   orig_setAlpha(w, @selector(setAlphaValue:), 0);
   [(NSWindow*)w setIgnoresMouseEvents:YES];
 }
-static void swz_setAlpha(id self, SEL c, CGFloat) { orig_setAlpha(self, c, 0); }
+// An attempt to set alpha above 0 is counted, and clamped. Ours are counted apart: nothing may try to show one of our windows
+// (Chromium's own order-in at alpha 1 goes through the order swizzles, not here, and is not an attempt on setAlphaValue:).
+static void swz_setAlpha(id self, SEL c, CGFloat a) {
+  if (a > 0) {
+    if ([g_own_windows containsObject:self]) g_alpha_attempts_own++; else g_alpha_attempts_other++;
+  }
+  orig_setAlpha(self, c, 0);
+}
 static void swz_orderWindow(id self, SEL c, NSWindowOrderingMode m, NSInteger r) { GuardWindow(self); orig_orderWindow(self, c, m, r); }
 static void swz_orderFront(id self, SEL c, id a) { GuardWindow(self); orig_orderFront(self, c, a); }
 static void swz_orderBack(id self, SEL c, id a) { GuardWindow(self); orig_orderBack(self, c, a); }
 static void swz_orderFrontRegardless(id self, SEL c) { GuardWindow(self); orig_orderFrontRegardless(self, c); }
-static void swz_makeKeyAndOrderFront(id self, SEL c, id a) { GuardWindow(self); orig_makeKeyAndOrderFront(self, c, a); }
+// Hidden mode never makes a window key: order it in without makeKey.
+static void swz_makeKeyAndOrderFront(id self, SEL c, id a) { GuardWindow(self); orig_orderWindow(self, @selector(orderWindow:relativeTo:), NSWindowAbove, 0); }
 static void swz_beginSheet(id self, SEL c, NSWindow* sheet, id handler) {
   GuardWindow(sheet);
   orig_beginSheet(self, c, sheet, handler);
@@ -377,6 +505,14 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
 
 + (NSInteger)activationsBlocked {
   return g_activate_blocked;
+}
+
++ (NSInteger)alphaAttemptsOnOwnWindows {
+  return g_alpha_attempts_own;
+}
+
++ (NSInteger)alphaAttemptsOnOtherWindows {
+  return g_alpha_attempts_other;
 }
 
 @end

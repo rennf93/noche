@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (hidden, close-last, quit-many)
+# usage: app-test.sh <check>...   (hidden, close-last, quit-many, web-insets)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.

@@ -65,6 +65,7 @@ final class SelfTest {
             case "hidden": await hidden()
             case "close-last": await closeLast()
             case "quit-many": await quitMany()
+            case "web-insets": await webInsets()
             default: finish(false, "unknown check")
             }
         }
@@ -84,13 +85,52 @@ final class SelfTest {
         guard let win = app.windows.first, let ns = win.nsWindow, let tab = win.tabs.first else {
             return finish(false, "no window with a tab")
         }
+        // Negative controls (test only): a swallowed activation, and an attempt to show our window at alpha 1.
+        switch ProcessInfo.processInfo.environment["NOCHE_TEST_NEGATIVE"] {
+        case "activate": NSApp.activate()
+        case "alpha": ns.alphaValue = 1
+        default: break
+        }
         // CDP path every later check relies on.
         let title = await evaluate(tab, "document.title")
         try? await Task.sleep(for: .seconds(2))
         sample()
+        // setAlphaValue: is clamped to 0, so reading alpha alone cannot fail: count the attempts instead. Attempts on other
+        // windows (Chromium's popups and bubbles) are recorded as info; only an attempt on one of OUR windows fails.
+        let blocked = NCWindow.activationsBlocked()
+        let alphaOwn = NCWindow.alphaAttemptsOnOwnWindows()
+        line("info", "activations-blocked=\(blocked) alpha-attempts-own=\(alphaOwn) alpha-attempts-other=\(NCWindow.alphaAttemptsOnOtherWindows())")
         let ok = app.windows.count == 1 && win.tabs.count == 1 && ns.alphaValue == 0 && !ns.isKeyWindow && !NSApp.isActive
+            && ns.level == .floating && ns.ignoresMouseEvents && blocked == 0 && alphaOwn == 0
             && violations.isEmpty && title == "\"Noche App Fixture\""
-        finish(ok, "windows=\(app.windows.count) tabs=\(win.tabs.count) alpha=\(ns.alphaValue) key=\(ns.isKeyWindow) active=\(NSApp.isActive) title=\(title ?? "nil") violations=\(violations)")
+        finish(ok, "windows=\(app.windows.count) tabs=\(win.tabs.count) alpha=\(ns.alphaValue) key=\(ns.isKeyWindow) active=\(NSApp.isActive) level=\(ns.level.rawValue) clickthrough=\(ns.ignoresMouseEvents) activations-blocked=\(blocked) alpha-attempts-own=\(alphaOwn) title=\(title ?? "nil") violations=\(violations)")
+    }
+
+    /// webInsets and webCornerRadius: the page view's rect inside the window, and the bottom-corner mask.
+    private func webInsets() async {
+        guard await until(15, { loads >= 1 }) else { return finish(false, "first tab never finished loading") }
+        guard let win = app.windows.first, let ns = win.nsWindow, let content = ns.contentView else { return finish(false, "no window") }
+        win.webInsets = NSEdgeInsets(top: 48, left: 198, bottom: 7, right: 7)
+        // Window base coordinates have the origin bottom-left, so the bottom inset is the rect's minY.
+        let size = content.convert(content.bounds, to: nil).size
+        let want = NSRect(x: 198, y: 7, width: size.width - 198 - 7, height: size.height - 48 - 7)
+        func rect() -> NSRect? { win.webView.map { $0.convert($0.bounds, to: nil) } }
+        func near(_ a: NSRect, _ b: NSRect) -> Bool {
+            abs(a.minX - b.minX) <= 1 && abs(a.minY - b.minY) <= 1 && abs(a.width - b.width) <= 1 && abs(a.height - b.height) <= 1
+        }
+        guard await until(10, { rect().map { near($0, want) } ?? false }) else {
+            return finish(false, "page view rect \(rect().map { "\($0)" } ?? "nil") != expected \(want) (window \(size))")
+        }
+        let r = rect()!
+        win.webCornerRadius = 10
+        guard await until(10, { win.webMaskExists }) else { return finish(false, "no mask after webCornerRadius = 10") }
+        func inside(_ x: CGFloat, _ y: CGFloat) -> Bool { win.webMaskContains(NSPoint(x: x, y: y)) }
+        let e: CGFloat = 0.5
+        let covered = inside(r.midX, r.midY) && inside(r.midX, r.minY + e) && inside(r.midX, r.maxY - e)
+            && inside(r.minX + e, r.midY) && inside(r.maxX - e, r.midY)
+        let topSquare = inside(r.minX + e, r.maxY - e) && inside(r.maxX - e, r.maxY - e)
+        let bottomRound = !inside(r.minX + e, r.minY + e) && !inside(r.maxX - e, r.minY + e)
+        finish(covered && topSquare && bottomRound, "view \(r) window \(size): covers bounds=\(covered) top corners square=\(topSquare) bottom corners rounded=\(bottomRound)")
     }
 
     private func closeLast() async {

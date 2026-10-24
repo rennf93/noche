@@ -30,9 +30,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (instancetype)initWithURL:(NSString *)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate NS_DESIGNATED_INITIALIZER;
 @property(nonatomic, readonly, nullable) NSWindow *nsWindow;     // nil until the CefWindow exists
 @property(nonatomic, readonly, nullable) NSView *chromeHost;     // theme frame; AppKit chrome goes here above the content view
-/// Web view rect inside the window (top, left, bottom, right). Stored only in M1.1 Task 2; the chrome layout applies it.
+/// Web view rect inside the window (top, left, bottom, right), window points. Applied as the window box layout's inside border;
+/// setting it again re-applies the layout.
 @property(nonatomic) NSEdgeInsets webInsets;
-@property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (stored, see webInsets)
+@property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (0: no mask), re-applied on every bounds change
 @property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
 @property(nonatomic, readonly, nullable) NCTab *activeTab;
 - (nullable NCTab *)addTabWithURL:(NSString *)url activate:(BOOL)activate;
@@ -43,6 +44,15 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// ignored whoever orders a window in, and every NSApplication/NSRunningApplication activation call becomes a counted no-op.
 + (void)installHiddenGuards;
 + (NSInteger)activationsBlocked;
+/// Attempts to set alpha above 0 (clamped to 0), on windows of NCWindow and on any other window.
++ (NSInteger)alphaAttemptsOnOwnWindows;
++ (NSInteger)alphaAttemptsOnOtherWindows;
+
+/// The view that shows the page (WebContentsViewCocoa), nil until it exists.
+@property(nonatomic, readonly, nullable) NSView *webView;
+/// Test support for the corner mask: YES when a mask exists; whether a point (window base coordinates, origin bottom-left) is inside it.
+@property(nonatomic, readonly) BOOL webMaskExists;
+- (BOOL)webMaskContainsWindowPoint:(NSPoint)point;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR
