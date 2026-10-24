@@ -28,6 +28,9 @@ var products: [Product] = []
 var targets: [Target] = [
     .target(name: "NocheCore"),
     .testTarget(name: "NocheCoreTests", dependencies: ["NocheCore"]),
+    // The SQLite store builds with no CEF either, so plain `swift test` runs its tests.
+    .target(name: "NocheStore", dependencies: [.product(name: "GRDB", package: "GRDB.swift"), "NocheCore"]),
+    .testTarget(name: "NocheStoreTests", dependencies: ["NocheStore", "NocheCore"]),
 ]
 
 if withApp {
@@ -83,6 +86,7 @@ let package = Package(
     name: "Noche",
     platforms: [.macOS(.v14)],
     products: products,
+    dependencies: [.package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1")],
     targets: targets,
     cxxLanguageStandard: .cxx20
 )

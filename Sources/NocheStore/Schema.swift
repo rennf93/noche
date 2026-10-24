@@ -1,0 +1,52 @@
+import GRDB
+
+enum Schema {
+    static let defaultProfileID = "00000000-0000-0000-0000-000000000001"
+    static let defaultSpaceID = "00000000-0000-0000-0000-000000000002"
+
+    /// Never edit a shipped migration; add "v2" etc. to this one registration point.
+    static var migrator: DatabaseMigrator {
+        var m = DatabaseMigrator()
+        m.registerMigration("v1") { db in
+            try db.execute(sql: """
+            CREATE TABLE profile (
+              id TEXT PRIMARY KEY, name TEXT NOT NULL, colorIndex INTEGER NOT NULL DEFAULT 0,
+              chromiumDirName TEXT NOT NULL, isDefault INTEGER NOT NULL DEFAULT 0,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE TABLE space (
+              id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+              name TEXT NOT NULL, colorTheme TEXT, position INTEGER NOT NULL DEFAULT 0,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE TABLE window (
+              id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+              focusedSpaceId TEXT REFERENCES space(id),
+              x REAL, y REAL, w REAL, h REAL, isFullScreen INTEGER NOT NULL DEFAULT 0, isZoomed INTEGER NOT NULL DEFAULT 0,
+              sidebarWidth REAL, sidebarMode TEXT NOT NULL DEFAULT 'shown',
+              selectedTabId TEXT,
+              zOrder INTEGER NOT NULL DEFAULT 0,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE TABLE tabGroup (
+              id TEXT PRIMARY KEY, spaceId TEXT REFERENCES space(id), windowId TEXT REFERENCES window(id),
+              name TEXT NOT NULL DEFAULT '', colorIndex INTEGER NOT NULL DEFAULT 0, icon TEXT,
+              isCollapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE TABLE tab (
+              id TEXT PRIMARY KEY, windowId TEXT NOT NULL REFERENCES window(id),
+              spaceId TEXT REFERENCES space(id), groupId TEXT REFERENCES tabGroup(id),
+              kind TEXT NOT NULL DEFAULT 'web',
+              url TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', faviconURL TEXT,
+              position INTEGER NOT NULL, isPinned INTEGER NOT NULL DEFAULT 0, pinnedURL TEXT,
+              lastActiveAt REAL NOT NULL,
+              closedAt REAL, closedIndex INTEGER, closedWindowId TEXT,
+              archivedAt REAL,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE INDEX tab_window_order ON tab(windowId, position) WHERE deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+            CREATE INDEX tab_closed ON tab(closedAt DESC) WHERE closedAt IS NOT NULL AND deletedAt IS NULL;
+            CREATE INDEX tab_cleanup ON tab(lastActiveAt) WHERE isPinned = 0 AND deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+            CREATE INDEX window_live ON window(zOrder) WHERE deletedAt IS NULL;
+            CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            """)
+        }
+        return m
+    }
+}
