@@ -10,7 +10,11 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.mainMenu = MainMenu.build()
-    // Smoke runs share the owner's Mac: no Dock icon, never frontmost.
-    app.setActivationPolicy(SmokeOptions.parse(CommandLine.arguments) == nil ? .regular : .accessory)
+    // Smoke and self-test runs share the owner's Mac: no Dock icon, never frontmost.
+    var hidden = SmokeOptions.parse(CommandLine.arguments) != nil
+#if NOCHE_TESTHOOKS
+    hidden = hidden || SelfTest.parse(CommandLine.arguments) != nil
+#endif
+    app.setActivationPolicy(hidden ? .accessory : .regular)
     app.run()
 }

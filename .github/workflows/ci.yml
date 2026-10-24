@@ -18,40 +18,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test (NocheCore only, no CEF needed)
+        run: swift test
+
+      # The app needs our engine's tab API, which the stock CEF download lacks. The remaining steps run only when the
+      # repo variable NOCHE_ENGINE_URL points at a tar.bz2 of the engine distribution (see engine/README.md).
       - name: Cache vendored CEF
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         uses: actions/cache@v4
         with:
           path: vendor
-          key: cef-vendor-${{ hashFiles('scripts/fetch-cef.sh') }}
+          key: cef-vendor-${{ hashFiles('scripts/fetch-cef.sh') }}-${{ vars.NOCHE_ENGINE_URL }}
 
-      - name: Fetch CEF
-        run: scripts/fetch-cef.sh
+      - name: Fetch engine
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
+        env:
+          NOCHE_ENGINE_URL: ${{ vars.NOCHE_ENGINE_URL }}
+        run: |
+          DIST="$RUNNER_TEMP/engine"
+          rm -rf "$DIST" && mkdir -p "$DIST"
+          curl -fL --retry 3 -o "$DIST/engine.tar.bz2" "$NOCHE_ENGINE_URL"
+          tar -xjf "$DIST/engine.tar.bz2" -C "$DIST"
+          CEF_DIST="$(find "$DIST" -maxdepth 1 -type d -name 'cef_binary_*' | head -1)"
+          CEF_DIST="$CEF_DIST" scripts/fetch-cef.sh
 
       - name: Xcode version
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         id: xcode
         run: |
           xcodebuild -version
           echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
       - name: Cache CEF wrapper
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         uses: actions/cache@v4
         with:
           path: build/cef
-          key: cef-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh', 'scripts/build-cef-wrapper.sh') }}
+          key: cef-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh', 'scripts/build-cef-wrapper.sh') }}-${{ vars.NOCHE_ENGINE_URL }}
 
       - name: Build CEF wrapper
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         run: scripts/build-cef-wrapper.sh
 
-      - name: Test (NocheCore only, no CEF needed)
-        run: swift test
-
       - name: Build app
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         run: scripts/build-app.sh
 
       - name: Smoke (fixture)
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         run: scripts/smoke.sh build/Noche.app fixture
 
       - name: Smoke (closed port, exit 2 expected)
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         run: |
           set +e
           scripts/smoke.sh build/Noche.app closed-port
@@ -59,4 +77,5 @@ jobs:
           [ "$code" -eq 2 ] || { echo "expected exit 2, got $code"; exit 1; }
 
       - name: Sandbox check (seatbelt client on the renderer)
+        if: ${{ vars.NOCHE_ENGINE_URL != '' }}
         run: scripts/check-sandbox.sh build/Noche.app

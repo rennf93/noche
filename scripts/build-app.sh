@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # usage: build-app.sh [--product <SwiftPM product>] [--app-name <name>] [--release]
+# NOCHE_TESTHOOKS=1 (read by Package.swift, inherited from the environment) compiles the self-test harness into the app.
 # Sandbox is on by default; NOCHE_NO_SANDBOX=1 opts out. --release omits the dev-only NocheDevBuild plist key.
 set -euo pipefail
 

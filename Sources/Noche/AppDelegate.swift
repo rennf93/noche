@@ -3,16 +3,30 @@ import CefBridge
 import NocheCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
     private let smoke = SmokeOptions.parse(CommandLine.arguments)
-    private var window: NSWindow?
-    private var browser: NCBrowserView?
+#if NOCHE_TESTHOOKS
+    private let selfTestOptions = SelfTest.parse(CommandLine.arguments)
+    private var selfTest: SelfTest?
+    /// Set by the self-test when its verdict is only known at exit.
+    var exitCodeOverride: Int32?
+#endif
+    private(set) var windows: [NCWindow] = []
     private var finished = false
     private var exitCode: Int32 = 0
     private var status: Int?
     private var title: String?
 
+    /// Smoke and self-test runs share the owner's Mac: hidden windows, no Dock icon, never frontmost.
+    private var hidden: Bool {
+#if NOCHE_TESTHOOKS
+        if selfTestOptions != nil { return true }
+#endif
+        return smoke != nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if hidden { NCWindow.installHiddenGuards() }
         let me = ProcessInfo.processInfo.processIdentifier
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.noche.browser")
         if others.contains(where: { $0.processIdentifier != me }) {
@@ -20,8 +34,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
 
-        let cache = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Noche/Cache")
+        var profile = "Library/Application Support/Noche"
+        var url = smoke?.url.absoluteString ?? "about:blank"
+        var frame = NSRect(x: 100, y: 100, width: 1280, height: 800)
+#if NOCHE_TESTHOOKS
+        if let options = selfTestOptions {
+            profile = "Library/Application Support/Noche Test"  // never the dev profile
+            url = options.url
+            frame = SelfTest.windowFrame
+            selfTest = SelfTest(options, app: self)
+        }
+#endif
+        let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(profile + "/Cache")
         do {
             try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
             try NCEngine.start(withCachePath: cache.path)
@@ -30,37 +54,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             exit(4)
         }
 
-        let frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let view = NCBrowserView(frame: frame, url: smoke?.url.absoluteString ?? "https://example.com")
-        view.autoresizingMask = [.width, .height]
-        view.onLoadEnd = { [weak self] code in MainActor.assumeIsolated { self?.status = code; self?.checkLoaded() } }
-        view.onTitleChange = { [weak self] t in MainActor.assumeIsolated { self?.title = t; self?.checkLoaded() } }
-        view.onLoadError = { [weak self] code in MainActor.assumeIsolated { self?.finish(.loadError(code: code)) } }
-        view.onClosed = { [weak self] in MainActor.assumeIsolated { self?.browserClosed() } }
-        browser = view
-
-        let w = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                         backing: .buffered, defer: false)
-        w.title = "Noche"
-        w.delegate = self
-        w.contentView = view
-        w.center()
-        window = w
-        if smoke == nil {
-            w.makeKeyAndOrderFront(nil)
-            NSApp.activate()
-        } else {
-            // On screen so the page renders, but invisible, click-through and never key or active.
-            w.alphaValue = 0
-            w.ignoresMouseEvents = true
-            w.orderFrontRegardless()
-        }
+        newWindow(url: url, frame: frame)
 
         if let smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + smoke.timeout) { [weak self] in
                 MainActor.assumeIsolated { self?.finish(.timeout) }
             }
         }
+#if NOCHE_TESTHOOKS
+        selfTest?.start()
+#endif
+    }
+
+    /// One window with one tab at |url|. Task 4 wires File > New Window to this.
+    @discardableResult
+    func newWindow(url: String = "about:blank", frame: NSRect = NSRect(x: 100, y: 100, width: 1280, height: 800)) -> NCWindow {
+        let window = NCWindow(url: url, frame: frame, mode: hidden ? .hidden : .normal, delegate: self)
+        windows.append(window)
+        return window
     }
 
     /// Called by NCApplication.terminate (Cmd+Q).
@@ -68,19 +79,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         beginShutdown()
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // The window may close only after CEF called DoClose (its performClose: re-send lands here again).
-        if let browser, !browser.mayClose {
-            beginShutdown()
-            return false
-        }
-        return true
+    // MARK: NCWindowDelegate
+
+    func window(_ window: NCWindow, didAdd tab: NCTab, active: Bool) {
+#if NOCHE_TESTHOOKS
+        selfTest?.didAddTab()
+#endif
     }
 
-    func windowWillClose(_ notification: Notification) {
-        // Window closed without a browser to wait for, or by a CEF initiated close: make sure we exit.
-        beginShutdown()
+    func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {}
+
+    func window(_ window: NCWindow, didClose tab: NCTab) {
+#if NOCHE_TESTHOOKS
+        selfTest?.didCloseTab()
+#endif
     }
+
+    func window(_ window: NCWindow, didUpdate tab: NCTab) {
+        if !tab.title.isEmpty { title = tab.title }
+        checkLoaded()
+    }
+
+    func window(_ window: NCWindow, tab: NCTab, didFinishLoadWithStatus status: Int) {
+        self.status = status
+        if !tab.title.isEmpty { title = tab.title }
+        checkLoaded()
+#if NOCHE_TESTHOOKS
+        selfTest?.didFinishLoad()
+#endif
+    }
+
+    func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int) {
+        finish(.loadError(code: code))
+    }
+
+    func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool { false }
+
+    func windowDidClose(_ window: NCWindow) {
+        windows.removeAll { $0 === window }
+#if NOCHE_TESTHOOKS
+        selfTest?.windowDidClose()
+#endif
+        if closing && windows.isEmpty { exitNow() }
+        // Otherwise the app keeps running with no window.
+    }
+
+    // MARK: smoke and shutdown
 
     private func checkLoaded() {
         if let status, let title { finish(.loadEnd(status: status, title: title)) }
@@ -94,32 +138,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if closeBrowser { beginShutdown() } else { exit(exitCode) }
     }
 
-    /// Seconds to wait for OnBeforeClose after CloseBrowser before exiting anyway.
+#if NOCHE_TESTHOOKS
+    func selfTestFinished(ok: Bool) {
+        exitCode = ok ? 0 : 1
+        beginShutdown()
+    }
+#endif
+
+    /// Seconds to wait for every window to close after the shutdown request before exiting anyway.
     private static let shutdownWatchdog: TimeInterval = 5
 
     private var closing = false
+    private var exiting = false
+    private var watchdogFired = false
     private func beginShutdown() {
         guard !closing else { return }
         closing = true
         finished = true
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.shutdownWatchdog) { [weak self] in
             MainActor.assumeIsolated {
+                guard let self, !self.exiting else { return }
                 FileHandle.standardError.write(Data("NOCHE shutdown watchdog: browser did not close\n".utf8))
-                self?.browserClosed()
+                self.watchdogFired = true
+                self.exitNow()
             }
         }
 #if NOCHE_TESTHOOKS
         // Test-only: never ask CEF to close, so the watchdog path above is the only way out.
         if ProcessInfo.processInfo.environment["NOCHE_TEST_SKIP_CLOSE"] == "1" { return }
 #endif
-        if let browser { browser.close() } else { browserClosed() }
+        if windows.isEmpty { exitNow() } else { windows.forEach { $0.close() } }
     }
 
-    private func browserClosed() {
+    private func exitNow() {
+        guard !exiting else { return }
+        exiting = true
         // OnBeforeClose runs inside CEF teardown; shut down from a clean stack.
-        DispatchQueue.main.async { [exitCode] in
+        DispatchQueue.main.async { [self] in
+#if NOCHE_TESTHOOKS
+            selfTest?.beforeExit(watchdogFired: watchdogFired)
+            let code = exitCodeOverride ?? exitCode
+#else
+            let code = exitCode
+#endif
             NCEngine.shutdown()
-            exit(exitCode)
+            exit(code)
         }
     }
 }

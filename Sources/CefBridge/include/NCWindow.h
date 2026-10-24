@@ -1,0 +1,65 @@
+#import <AppKit/AppKit.h>
+
+#ifndef NC_EXPORT
+#define NC_EXPORT __attribute__((visibility("default")))
+#endif
+
+NS_ASSUME_NONNULL_BEGIN
+
+@class NCWindow, NCTab;
+
+typedef NS_ENUM(NSInteger, NCWindowMode) { NCWindowModeNormal, NCWindowModeHidden };
+
+/// Every callback arrives on the main thread, from a task posted after the CEF callback that caused it.
+NS_SWIFT_UI_ACTOR
+@protocol NCWindowDelegate <NSObject>
+- (void)window:(NCWindow *)window didAddTab:(NCTab *)tab active:(BOOL)active;          // every tab, the first included
+- (void)window:(NCWindow *)window didActivateTab:(NCTab *)tab previous:(nullable NCTab *)previous;
+- (void)window:(NCWindow *)window didCloseTab:(NCTab *)tab;
+- (void)window:(NCWindow *)window didUpdateTab:(NCTab *)tab;                            // title, url, loading, back/forward, favicon
+- (void)window:(NCWindow *)window tab:(NCTab *)tab didFinishLoadWithStatus:(NSInteger)status;
+- (void)window:(NCWindow *)window tab:(NCTab *)tab didFailLoadWithCode:(NSInteger)code;
+/// Called synchronously inside CEF's command handler. YES: Noche handled it, CEF must not.
+- (BOOL)window:(NCWindow *)window shouldHandleChromeCommand:(NSInteger)commandId;
+- (void)windowDidClose:(NCWindow *)window;
+@end
+
+NC_EXPORT NS_SWIFT_UI_ACTOR
+@interface NCWindow : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithURL:(NSString *)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate NS_DESIGNATED_INITIALIZER;
+@property(nonatomic, readonly, nullable) NSWindow *nsWindow;     // nil until the CefWindow exists
+@property(nonatomic, readonly, nullable) NSView *chromeHost;     // theme frame; AppKit chrome goes here above the content view
+/// Web view rect inside the window (top, left, bottom, right). Stored only in M1.1 Task 2; the chrome layout applies it.
+@property(nonatomic) NSEdgeInsets webInsets;
+@property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (stored, see webInsets)
+@property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
+@property(nonatomic, readonly, nullable) NCTab *activeTab;
+- (nullable NCTab *)addTabWithURL:(NSString *)url activate:(BOOL)activate;
+- (void)activateTab:(NCTab *)tab;
+- (void)close;                                                    // closes every tab, then the window
+
+/// Hidden-mode guards (process wide, call once before CefInitialize): window alpha is clamped to 0 and mouse events
+/// ignored whoever orders a window in, and every NSApplication/NSRunningApplication activation call becomes a counted no-op.
++ (void)installHiddenGuards;
++ (NSInteger)activationsBlocked;
+@end
+
+NC_EXPORT NS_SWIFT_UI_ACTOR
+@interface NCTab : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+@property(nonatomic, readonly) NSInteger identifier;             // CefBrowser::GetIdentifier
+@property(nonatomic, readonly, copy) NSString *url;
+@property(nonatomic, readonly, copy) NSString *title;
+@property(nonatomic, readonly) BOOL isLoading, canGoBack, canGoForward;
+@property(nonatomic, readonly, nullable) NSImage *favicon;
+@property(nonatomic) double zoomLevel;
+- (void)loadURL:(NSString *)url;
+- (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
+- (void)showDevTools;
+- (void)close;
+/// CDP Runtime.evaluate (awaitPromise, returnByValue). |json| is the JSON of the result value, |error| the exception or CDP error.
+- (void)evaluateJavaScript:(NSString *)script completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;
+@end
+
+NS_ASSUME_NONNULL_END

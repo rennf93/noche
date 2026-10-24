@@ -1,7 +1,11 @@
 #import <AppKit/AppKit.h>
 
 // -fvisibility=hidden would otherwise make the classes local to the merged object.
+#ifndef NC_EXPORT
 #define NC_EXPORT __attribute__((visibility("default")))
+#endif
+
+#import "NCWindow.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
