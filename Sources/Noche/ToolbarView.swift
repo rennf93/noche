@@ -6,13 +6,16 @@ final class ChromeButton: NSView {
     override var isFlipped: Bool { true }
     let symbol: String
     var onClick: (() -> Void)?
-    var isEnabled = true { didSet { needsDisplay = true } }
+    var isEnabled = true { didSet { needsDisplay = true; setAccessibilityEnabled(isEnabled) } }
     private var isHovered = false { didSet { needsDisplay = true } }
 
-    init(symbol: String, identifier: String) {
+    init(symbol: String, identifier: String, label: String) {
         self.symbol = symbol
         super.init(frame: NSRect(x: 0, y: 0, width: ChromeStyle.buttonSize, height: ChromeStyle.buttonSize))
         setAccessibilityIdentifier(identifier)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(label)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -39,10 +42,10 @@ final class ChromeButton: NSView {
 /// Toolbar above the page: sidebar toggle, back, forward, reload, the address text and the divider. It is transparent;
 /// the card behind it supplies the #1f1f1f.
 final class ToolbarView: DragView {
-    let toggle = ChromeButton(symbol: "sidebar.left", identifier: "toolbar.sidebarToggle")
-    let back = ChromeButton(symbol: "chevron.left", identifier: "toolbar.back")
-    let forward = ChromeButton(symbol: "chevron.right", identifier: "toolbar.forward")
-    let reload = ChromeButton(symbol: "arrow.clockwise", identifier: "toolbar.reload")
+    let toggle = ChromeButton(symbol: "sidebar.left", identifier: "toolbar.sidebarToggle", label: "Toggle Sidebar")
+    let back = ChromeButton(symbol: "chevron.left", identifier: "toolbar.back", label: "Back")
+    let forward = ChromeButton(symbol: "chevron.right", identifier: "toolbar.forward", label: "Forward")
+    let reload = ChromeButton(symbol: "arrow.clockwise", identifier: "toolbar.reload", label: "Reload")
     let address: NSTextField = {
         let field = NSTextField()
         let cell = CenteredTextFieldCell(textCell: "")
@@ -71,6 +74,7 @@ final class ToolbarView: DragView {
         address.maximumNumberOfLines = 1
         address.placeholderString = ""
         address.setAccessibilityIdentifier("toolbar.address")
+        address.setAccessibilityLabel("Address")
         addSubview(address)
         divider.setAccessibilityIdentifier("toolbar.divider")
         addSubview(divider)

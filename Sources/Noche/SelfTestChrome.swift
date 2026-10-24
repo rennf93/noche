@@ -288,5 +288,42 @@ extension SelfTest {
         line("info", "screens \(NSScreen.screens.map { "\($0.frame) visible \($0.visibleFrame)" })")
         finish(bad.isEmpty && violations.isEmpty, "\(cases.count) windows opened with the frame asked for (within 1 pt, no setFrame): \(seen.joined(separator: "; ")) \(bad) \(violations)")
     }
+
+    /// VoiceOver sees the chrome: tab rows, the New Tab row and the toolbar buttons are buttons with labels, rows carry the selection.
+    /// Also here: a row's favicon goes back to the placeholder when the next page has none.
+    func a11yLabels() async {
+        guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
+        guard await openTabs(2) else { return finish(false, "2 rows never appeared") }
+        var bad: [String] = []
+        func expect(_ name: String, _ v: NSView, _ label: String) {
+            if v.accessibilityRole() != .button { bad.append("\(name) role \(v.accessibilityRole()?.rawValue ?? "nil")") }
+            if v.accessibilityLabel() != label { bad.append("\(name) label \(v.accessibilityLabel() ?? "nil"), want \(label)") }
+            if !v.isAccessibilityElement() { bad.append("\(name) is not an accessibility element") }
+        }
+        let rows = ctl.sidebar.rows
+        for (i, row) in rows.enumerated() {
+            expect("row \(i)", row, ctl.list.displayTitle(of: ctl.list.items[i].id))
+            if row.isAccessibilitySelected() != (i == selected) { bad.append("row \(i) selected=\(row.isAccessibilitySelected()), the list says \(selected.map(String.init) ?? "nil")") }
+        }
+        click(rows[1])
+        _ = await until(5, { selected == 1 })
+        if !rows[1].isAccessibilitySelected() || rows[0].isAccessibilitySelected() { bad.append("after selecting row 1: selected states \(rows.map { $0.isAccessibilitySelected() })") }
+        expect("New Tab row", ctl.sidebar.newTabRow, "New Tab")
+        expect("toggle", ctl.toolbar.toggle, "Toggle Sidebar")
+        expect("back", ctl.toolbar.back, "Back")
+        expect("forward", ctl.toolbar.forward, "Forward")
+        expect("reload", ctl.toolbar.reload, "Reload")
+        for (i, name) in ["Close", "Minimize", "Zoom"].enumerated() { expect("window button \(name)", ctl.sidebar.lights[i], name) }
+        // Favicon: a page with one shows it, the next page without one brings the placeholder back.
+        click(rows[0])
+        _ = await until(5, { selected == 0 })
+        var before = loads
+        tab.loadURL(fixture("favicon.html"))
+        guard await until(15, { loads > before && !rows[0].showsPlaceholder }) else { return finish(false, "the favicon of favicon.html never reached its row \(bad)") }
+        before = loads
+        tab.loadURL(fixture("b.html"))
+        guard await until(15, { loads > before && rows[0].showsPlaceholder }) else { return finish(false, "the row kept the previous favicon after a page without one \(bad)") }
+        finish(bad.isEmpty && violations.isEmpty, "rows (button, title label, selected state), New Tab row and 4 toolbar buttons and 3 window buttons labelled; the row favicon returns to the placeholder \(bad) \(violations)")
+    }
 }
 #endif

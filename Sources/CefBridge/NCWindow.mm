@@ -30,6 +30,7 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser finishedLoadWithStatus:(int)status;
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url;
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
+- (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
 - (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser;
@@ -101,6 +102,10 @@ class NCClient : public CefClient,
       t.canGoBack = back;
       t.canGoForward = forward;
     }];
+  }
+  void OnLoadStart(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, TransitionType) override {
+    NC_CEF_CALLBACK;
+    if (f->IsMain()) [w_ browser:b mainFrameLoadStarted:@(f->GetURL().ToString().c_str())];
   }
   void OnLoadEnd(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, int status) override {
     NC_CEF_CALLBACK;
@@ -594,8 +599,24 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];
 }
 
+// A load of another page (not a reload, not a change of the #fragment) that ends without Chrome having sent an icon list has no
+// icon: Chrome sends no empty list in that case, so the previous page's icon is cleared here, once the load is over.
+- (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url {
+  NCTab* tab = [self tabFor:browser create:NO];
+  if (!tab) return;
+  NSString* bare = [url componentsSeparatedByString:@"#"].firstObject;
+  tab.clearFaviconAtLoadEnd = ![bare isEqualToString:tab.lastLoadURL];
+  tab.lastLoadURL = bare;
+  tab.faviconListSeen = NO;
+}
+
 - (void)browser:(CefRefPtr<CefBrowser>)browser finishedLoadWithStatus:(int)status {
   NCTab* tab = [self tabFor:browser create:NO];
+  if (tab && tab.clearFaviconAtLoadEnd && !tab.faviconListSeen && tab.favicon) {
+    [tab clearFavicon];
+    [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];
+  }
+  if (tab) tab.clearFaviconAtLoadEnd = NO;
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFinishLoadWithStatus:status]; }];
 }
 
@@ -606,7 +627,14 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls {
   NCTab* tab = [self tabFor:browser create:NO];
-  if (!tab || urls.empty()) return;
+  if (!tab) return;
+  tab.faviconListSeen = YES;
+  if (urls.empty()) {  // the page has no icon: the placeholder comes back, the previous page's icon does not stay
+    if (!tab.favicon) return;
+    [tab clearFavicon];
+    [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];
+    return;
+  }
   [tab loadFaviconFromURL:@(urls[0].ToString().c_str()) done:^{
     if (!tab.browser || self->_table[@(tab.identifier)] != tab) return;  // closed meanwhile
     [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];

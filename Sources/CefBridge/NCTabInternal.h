@@ -37,9 +37,15 @@ inline int NCTestInt(const char* name) {
 @property(nonatomic, readwrite, nullable) NSImage* favicon;
 /// YES from [close] until the tab ends or the close is reported cancelled (a beforeunload dialog answered Stay).
 @property(nonatomic) BOOL closeRequested;
+/// Favicon bookkeeping for the current main-frame load: Chrome sends no icon list for a page without icons, so a load that ended
+/// with none has to clear the previous page's icon itself.
+@property(nonatomic) BOOL faviconListSeen, clearFaviconAtLoadEnd;
+@property(nonatomic, copy, nullable) NSString* lastLoadURL;
 /// Null once the browser is closed.
 @property(nonatomic) CefRefPtr<CefBrowser> browser;
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser;
+/// Forgets the favicon, and drops a download still in flight so it cannot bring the old one back.
+- (void)clearFavicon;
 /// A DevTools browser of this window ended: a close that stopped polling for it tries again.
 - (void)devToolsEnded;
 /// Drops the browser and the DevTools observer and fails every pending evaluation.

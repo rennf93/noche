@@ -38,6 +38,9 @@ final class SidebarView: DragView {
         for (i, light) in lights.enumerated() {
             light.frame = NSRect(x: ChromeStyle.trafficX[i], y: ChromeStyle.trafficY, width: ChromeStyle.trafficSize, height: ChromeStyle.trafficSize)
             light.setAccessibilityIdentifier(["window.close", "window.minimize", "window.zoom"][i])
+            light.setAccessibilityElement(true)
+            light.setAccessibilityRole(.button)
+            light.setAccessibilityLabel(["Close", "Minimize", "Zoom"][i])
             addSubview(light)
         }
         scroll.drawsBackground = false

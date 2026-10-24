@@ -4,7 +4,13 @@
 #include "include/cef_id_mappers.h"
 #include "include/cef_image.h"
 
+@interface NCTab (Favicon)
+- (BOOL)faviconGenerationIs:(NSInteger)generation;
+@end
+
 namespace {
+
+bool NCFaviconIsCurrent(NCTab* tab, NSInteger generation) { return [tab faviconGenerationIs:generation]; }
 
 class NCDevToolsObserver : public CefDevToolsMessageObserver {
  public:
@@ -18,11 +24,11 @@ class NCDevToolsObserver : public CefDevToolsMessageObserver {
 
 class NCFaviconCallback : public CefDownloadImageCallback {
  public:
-  NCFaviconCallback(NCTab* tab, void (^done)(void)) : tab_(tab), done_(done) {}
+  NCFaviconCallback(NCTab* tab, NSInteger generation, void (^done)(void)) : tab_(tab), generation_(generation), done_(done) {}
   void OnDownloadImageFinished(const CefString&, int, CefRefPtr<CefImage> image) override {
     NC_CEF_CALLBACK;
     NCTab* tab = tab_;
-    if (!tab || !image) return;
+    if (!tab || !image || !NCFaviconIsCurrent(tab, generation_)) return;  // cleared or replaced while it downloaded
     int w = 0, h = 0;
     CefRefPtr<CefBinaryValue> png = image->GetAsPNG(1.0f, true, w, h);
     if (!png || !png->GetSize()) return;
@@ -36,6 +42,7 @@ class NCFaviconCallback : public CefDownloadImageCallback {
 
  private:
   __weak NCTab* tab_;
+  NSInteger generation_;
   void (^done_)(void);
   IMPLEMENT_REFCOUNTING(NCFaviconCallback);
 };
@@ -54,12 +61,14 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   CefRefPtr<CefRegistration> _registration;
   NSMutableDictionary<NSNumber*, NCEvalCompletion>* _pending;
   int _nextId;
+  NSInteger _faviconGeneration;
   BOOL _waitingForDevTools;  // the 10 s of polling ran out with the DevTools still open
 }
 
 @synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon;
 @synthesize isLoading = _isLoading, canGoBack = _canGoBack, canGoForward = _canGoForward;
 @synthesize browser = _browser, closeRequested = _closeRequested;
+@synthesize faviconListSeen = _faviconListSeen, clearFaviconAtLoadEnd = _clearFaviconAtLoadEnd, lastLoadURL = _lastLoadURL;
 
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser {
   NCTab* tab = [[NCTab alloc] initPrivate];
@@ -205,8 +214,17 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   for (NCEvalCompletion cb in callbacks) dispatch_async(dispatch_get_main_queue(), ^{ cb(nil, @"tab closed"); });
 }
 
+- (BOOL)faviconGenerationIs:(NSInteger)generation { return generation == _faviconGeneration; }
+
+- (void)clearFavicon {
+  _faviconGeneration++;
+  _favicon = nil;
+}
+
 - (void)loadFaviconFromURL:(NSString*)url done:(void (^)(void))done {
-  if (_browser) _browser->GetHost()->DownloadImage(url.UTF8String, true, 36, false, new NCFaviconCallback(self, done));
+  const NSInteger generation = ++_faviconGeneration;
+  void (^guarded)(void) = ^{ if (generation == self->_faviconGeneration) done(); };
+  if (_browser) _browser->GetHost()->DownloadImage(url.UTF8String, true, 36, false, new NCFaviconCallback(self, generation, guarded));
 }
 
 @end

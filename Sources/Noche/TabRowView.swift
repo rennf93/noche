@@ -30,6 +30,10 @@ final class TabRowView: NSView {
         fade.endPoint = CGPoint(x: 1, y: 0.5)
         fade.colors = [NSColor.white.cgColor, NSColor.white.cgColor, NSColor.clear.cgColor]
         titleField.layer?.mask = fade
+        setAccessibilityElement(true)  // one button per tab: the title is its label, the selection its state
+        setAccessibilityRole(.button)
+        faviconView.setAccessibilityElement(false)
+        titleField.setAccessibilityElement(false)
         addSubview(faviconView)
         addSubview(titleField)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
@@ -53,6 +57,8 @@ final class TabRowView: NSView {
         showsPlaceholder = favicon == nil
         faviconView.image = favicon ?? ChromeStyle.symbol("globe", size: 14, color: ChromeStyle.newTabColor)
         isSelected = selected
+        setAccessibilityLabel(title)
+        setAccessibilitySelected(selected)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -84,6 +90,9 @@ final class NewTabRowView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("New Tab")
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError() }
