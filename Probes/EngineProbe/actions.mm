@@ -20,8 +20,8 @@ namespace {
 
 using H = std::shared_ptr<const ActionsHost>;
 int g_added = 0, g_updated = 0;  // observer counters; counts only, never an action reference
-NSTimer* g_hide = nil;
 NSButton* g_button = nil;
+id g_hide = nil;  // the NSNotificationCenter observer token
 
 class Obs : public CefExtensionActionObserver {
  public:
@@ -32,7 +32,7 @@ class Obs : public CefExtensionActionObserver {
 };
 
 void Done(const H& h, bool ok, NSString* detail) {
-  [g_hide invalidate];
+  if (g_hide) [NSNotificationCenter.defaultCenter removeObserver:g_hide];
   g_hide = nil;
   g_button = nil;
   h->finish(ok, detail);
@@ -68,9 +68,10 @@ int NonTransparentPixels(CefRefPtr<CefImage> img, int* w, int* hgt) {
   return n;
 }
 
-// Keeps every child window of the probe window (the popup bubble) at alpha 0 so nothing shows on the owner's screen.
+// Zeroes the alpha of every child window of the probe window (the popup bubble) on each window update, which runs
+// before the window is displayed, so nothing shows on the owner's screen. Window ordering is not a notification.
 void KeepChildrenInvisible(NSWindow* w) {
-  g_hide = [NSTimer scheduledTimerWithTimeInterval:0.005 repeats:YES block:^(NSTimer*) {
+  g_hide = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidUpdateNotification object:nil queue:nil usingBlock:^(NSNotification*) {
     for (NSWindow* c in w.childWindows) if (c.alphaValue != 0) c.alphaValue = 0;
   }];
 }
@@ -86,7 +87,7 @@ CefRect ButtonRect(NSWindow* w, NSRect* appkit) {
   NSRect s = [w convertRectToScreen:[g_button convertRect:g_button.bounds toView:nil]];
   *appkit = s;
   CGFloat primaryH = NSScreen.screens.firstObject.frame.size.height;
-  return CefRect((int)s.origin.x, (int)(primaryH - NSMaxY(s)), (int)s.size.width, (int)s.size.height);
+  return CefRect((int)lround(s.origin.x), (int)lround(primaryH - NSMaxY(s)), (int)lround(s.size.width), (int)lround(s.size.height));
 }
 
 // Runs the action as a click on the button, inactive, and waits until the popup NSWindow is up.
@@ -99,6 +100,24 @@ void OpenPopup(const H& h, std::function<void(NSString* err, NSRect button, NSWi
   if (!a || !a->Execute(r, /*activate=*/false)) { cb(@"Execute returned false (action missing or disabled)", btn, nil); return; }
   WaitFor(h, 10000, [h, w] { auto a = Find(h); return a && a->IsShowingPopup() && w.childWindows.count && w.childWindows.lastObject.isVisible; },
           [h, w, cb, btn](bool up) { cb(up ? nil : @"popup window did not appear in 10s", btn, up ? w.childWindows.lastObject : nil); });
+}
+
+// The popup's content area in AppKit screen coordinates: the web contents view inside the bubble. The NSWindow frame is
+// bigger (bubble_border.cc:351-353 expands the contents by the shadow insets). NSZeroRect if no such view was found.
+NSView* FindView(NSView* v, NSString* part) {
+  if ([NSStringFromClass(v.class) containsString:part]) return v;
+  for (NSView* c in v.subviews) if (NSView* f = FindView(c, part)) return f;
+  return nil;
+}
+NSRect ContentRect(NSWindow* popup, NSString** which) {
+  for (NSString* part in @[ @"WebContentsViewCocoa", @"RenderWidgetHostViewCocoa" ]) {
+    if (NSView* v = FindView(popup.contentView, part)) {
+      *which = part;
+      return [popup convertRectToScreen:[v convertRect:v.bounds toView:nil]];
+    }
+  }
+  *which = @"none";
+  return NSZeroRect;
 }
 
 // "Inactive" proof for the hidden rule: the app never became active and no window of ours is key.
@@ -169,15 +188,18 @@ void PopupAnchor(const H& h) {
   OpenPopup(h, [h](NSString* err, NSRect btn, NSWindow* popup) {
     if (err) { Done(h, false, err); return; }
     const NSRect f = popup.frame;
-    const double delta = fabs(NSMaxY(f) - btn.origin.y);  // popup top vs button bottom (AppKit y is up)
+    NSString* which = nil;
+    const NSRect content = ContentRect(popup, &which);
+    // Content top vs button bottom (AppKit y is up); the frame top sits above it by the shadow inset.
+    const double delta = NSIsEmptyRect(content) ? 1e9 : fabs(NSMaxY(content) - btn.origin.y);
     NSString* act = ActivationProblem(h->window(), popup);
     h->extCmd(@{@"what" : @"popupclick"}, [=](NSDictionary* r) {
-      if (r[@"error"]) { Done(h, false, [NSString stringWithFormat:@"CDP click failed: %@ (popup frame top %.1f, button bottom %.1f)", r[@"error"], NSMaxY(f), btn.origin.y]); return; }
+      if (r[@"error"]) { Done(h, false, [NSString stringWithFormat:@"CDP click failed: %@ (content top %.1f via %@, frame top %.1f, button bottom %.1f)", r[@"error"], NSMaxY(content), which, NSMaxY(f), btn.origin.y]); return; }
       PopupState(h, ^bool(NSDictionary* s) { return [s[@"clicks"] intValue] >= 1; }, 10000, [=](NSDictionary* s) {
         const int clicks = [s[@"clicks"] intValue];
         NSString* act2 = act ?: ActivationProblem(h->window(), popup);
         Done(h, delta <= 2.0 && clicks >= 1 && !act2,
-             [NSString stringWithFormat:@"popup top %.1f vs button bottom %.1f (delta %.1f pt, limit 2), CDP click reached popup.js %d time(s), tabId=%@, activation problem: %@", NSMaxY(f), btn.origin.y, delta, clicks, s[@"tabId"], act2 ?: @"none"]);
+             [NSString stringWithFormat:@"popup content top %.1f (view %@; frame top %.1f incl. shadow) vs button bottom %.1f (delta %.1f pt, limit 2), CDP click reached popup.js %d time(s), tabId=%@, activation problem: %@", NSMaxY(content), which, NSMaxY(f), btn.origin.y, delta, clicks, s[@"tabId"], act2 ?: @"none"]);
       });
     });
   });
@@ -206,12 +228,17 @@ void PopupCloses(const H& h) {
     if (err) { Done(h, false, err); return; }
     OpenPopup(h, [h](NSString* err, NSRect, NSWindow*) {
       if (err) { Done(h, false, err); return; }
-      std::vector<CefRefPtr<CefBrowser>> tabs;
-      h->view()->GetTabs(tabs);
-      h->view()->SetActiveTab(tabs[0]);
       NSWindow* w = h->window();
-      WaitFor(h, 5000, [h, w] { auto a = Find(h); return a && !a->IsShowingPopup() && w.childWindows.count == 0; }, [h](bool closed) {
-        Done(h, closed, closed ? @"popup closed after SetActiveTab to another tab" : @"popup still showing 5s after SetActiveTab");
+      // Control: the popup must survive a second with no tab change, or "closed" below proves nothing.
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        auto a = Find(h);
+        if (!a || !a->IsShowingPopup() || w.childWindows.count == 0) { Done(h, false, @"control failed: the popup closed by itself within 1 s, before any tab change"); return; }
+        std::vector<CefRefPtr<CefBrowser>> tabs;
+        h->view()->GetTabs(tabs);
+        h->view()->SetActiveTab(tabs[0]);
+        WaitFor(h, 5000, [h, w] { auto a = Find(h); return a && !a->IsShowingPopup() && w.childWindows.count == 0; }, [h](bool closed) {
+          Done(h, closed, closed ? @"popup stayed open for 1 s (control), then closed after SetActiveTab to another tab" : @"popup still showing 5s after SetActiveTab");
+        });
       });
     });
   });

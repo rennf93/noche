@@ -5,6 +5,7 @@
 # Profile: ~/Library/Application Support/Noche Probe. Check names are [a-z0-9-]+.
 # rss-20 waits a minute between samples, so it gets a 120s probe watchdog (set in main.mm) and a longer outer limit.
 # switch-latency needs frames; it orders its alpha-0 window in without activating. The tab checks need NOCHE_TABS_API=1 (new engine).
+# NOCHE_PROBE_VISIBLE=1 makes the probe window opaque on screen: it needs the owner's approval each time and is never on by default.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 

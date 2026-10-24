@@ -24,6 +24,7 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
+#include "actions.h"
 
 static NSString* g_check = nil;
 static NSString* g_logPath = nil;
@@ -138,6 +139,33 @@ static std::vector<CefRefPtr<CefRegistration>> g_regs;
 static void CheckTabs(NSString* s);
 static void RunTabsCheck();
 static void RunRafHidden();
+static ActionsHost MakeActionsHost();
+static void EnsureWindowVisible(std::function<void(bool)> cb);
+
+// Checks that need drawn frames and a window Chromium treats as visible: the latency checks, the popups, raf-visible.
+static bool NeedsVisibleWindow() {
+  return [g_check hasPrefix:@"switch-latency"] || [g_check hasPrefix:@"popup-"] || [g_check isEqualToString:@"raf-visible"];
+}
+
+// Shared helper: the probe window is ordered in (alpha 0, click-through, never key or active; see WinDelegate), then
+// re-ordered until views::Widget::IsVisible() reads true. u10 experiment 7: a raw orderFrontRegardless leaves the Widget
+// invisible (cefIsVisible=0, the compositor stays suspended); ordering the NSWindow again once it is on screen flips it.
+static void EnsureWindowVisible(std::function<void(bool)> cb) {
+  auto step = std::make_shared<std::function<void(int)>>();
+  *step = [cb, step](int left) {
+    if (g_done || !g_window) { *step = nullptr; return; }
+    NSWindow* w = ((__bridge NSView*)g_window->GetWindowHandle()).window;
+    [w orderWindow:NSWindowAbove relativeTo:0];  // never makeKey, never activate
+    if (g_window->IsVisible() || left <= 0) {
+      Log(@"WINDOW helper nsvisible=%d occlusionVisible=%d alpha=%.0f key=%d cefIsVisible=%d cefIsActive=%d appActive=%d", (int)w.isVisible, (int)((w.occlusionState & NSWindowOcclusionStateVisible) != 0), w.alphaValue, (int)w.isKeyWindow, (int)g_window->IsVisible(), (int)g_window->IsActive(), (int)NSApp.isActive);
+      bool ok = g_window->IsVisible() && !g_window->IsActive() && !NSApp.isActive && !w.isKeyWindow;
+      auto f = cb; *step = nullptr; f(ok);
+      return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{ (*step)(left - 1); });
+  };
+  (*step)(25);
+}
 
 // The content script fills dataset.nocheTabs from the service worker's answer. A view created before the
 // extension finished loading misses the script (spike S1, C4b), so reload once if it stays empty.
@@ -159,7 +187,16 @@ static void CheckTabs(NSString* s) {
   } else if ([g_check isEqualToString:@"ext-loaded"]) {
     Finish(true, [NSString stringWithFormat:@"service worker answered %@", s]);
   } else if (![g_check isEqualToString:@"tabs-one"]) {
-    if ([g_check isEqualToString:@"raf-hidden"]) RunRafHidden(); else RunTabsCheck();
+    auto route = [] {
+      if (RunActionsCheck(g_check, MakeActionsHost())) {}
+      else if ([g_check isEqualToString:@"raf-hidden"] || [g_check isEqualToString:@"raf-visible"]) RunRafHidden();
+      else RunTabsCheck();
+    };
+    if (NeedsVisibleWindow()) EnsureWindowVisible([route](bool ok) {
+      if (!ok) Finish(false, @"probe window never became a visible, inactive Widget (cefIsVisible=0 or app/window active)");
+      else route();
+    });
+    else route();
   } else {  // tabs-one
     bool ok = [j[@"count"] intValue] == 1 && [j[@"ids"] count] == 1;
     Finish(ok, [NSString stringWithFormat:@"count=%@ ids=%@ activeId=%@", j[@"count"], [j[@"ids"] componentsJoinedByString:@","], j[@"activeId"]]);
@@ -250,6 +287,18 @@ static void ExtCmd(NSDictionary* cmd, std::function<void(NSDictionary*)> cb) {
   });
 }
 
+static ActionsHost MakeActionsHost() {
+  ActionsHost h;
+  h.finish = [](bool ok, NSString* d) { Finish(ok, d); };
+  h.extCmd = [](NSDictionary* c, std::function<void(NSDictionary*)> cb) { ExtCmd(c, cb); };
+  h.log = [](NSString* s) { Log(@"%@", s); };
+  h.view = []() { return g_view; };
+  h.window = []() -> NSWindow* { return g_window ? ((__bridge NSView*)g_window->GetWindowHandle()).window : nil; };
+  h.done = []() { return g_done; };
+  h.url = []() { return g_url; };
+  return h;
+}
+
 // Windows the probe process owns on screen layer 0, hidden ones included (the probe's window has alpha 0).
 static int WindowCount() {
   CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID);
@@ -328,6 +377,7 @@ static std::vector<CefRefPtr<CefBrowser>> Tabs() {
 }
 
 static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<double> lat) {
+  if (g_done || !g_view) return;  // the run ended (timeout) while a switch was in flight
   const size_t kWarm = 3, kTimed = 30;
   if (lat.size() == kWarm + kTimed) {
     std::vector<double> t(lat.begin() + kWarm, lat.end());
@@ -681,12 +731,12 @@ class WinDelegate : public CefWindowDelegate {
     // Invisible and inert: never shown or activated; the NSWindow exists already, so hide it before anything draws.
     NSWindow* nw = ((__bridge NSView*)w->GetWindowHandle()).window;
     // NOCHE_PROBE_VISIBLE=1 is for owner-approved runs only: opaque, still click-through, never key or active.
-    nw.alphaValue = getenv("NOCHE_PROBE_VISIBLE") ? 1 : 0;
+    nw.alphaValue = [@"1" isEqualToString:@(getenv("NOCHE_PROBE_VISIBLE") ?: "")] ? 1 : 0;  // only the value "1"
     nw.ignoresMouseEvents = YES;
     // CefWindow::Show() ends in NSApp activateIgnoringOtherApps (native_widget_ns_window_bridge.mm, kShowAndActivateWindow),
     // which is forbidden here. Ordering the NSWindow in directly never activates the app or makes the window key.
     // Both latency checks need drawn frames: viz throttles a never-drawn sink to 1 BeginFrame/s after 3 undrawn frames.
-    if (!getenv("NOCHE_PROBE_NO_ORDER") && [g_check hasPrefix:@"switch-latency"]) [nw orderFrontRegardless];
+    if (!getenv("NOCHE_PROBE_NO_ORDER") && NeedsVisibleWindow()) [nw orderFrontRegardless];  // EnsureWindowVisible() finishes the job
   }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return CefRect(120, 120, 1000, 700); }
@@ -750,7 +800,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

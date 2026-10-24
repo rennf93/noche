@@ -1,26 +1,26 @@
-From 1c5f37d2fa25871fc93db25cd866038bf018f595 Mon Sep 17 00:00:00 2001
+From b023a6ef1366c4d205ab32cffb2246b7c9891141 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 03:34:40 +0200
 Subject: [PATCH] views: extension actions and popups for embedders
 
 ---
- BUILD.gn                                      |   2 +
- include/cef_extension_action.h                | 181 +++++++
- include/views/cef_browser_view.h              |  28 ++
- .../chrome/extensions/extension_actions.cc    | 469 ++++++++++++++++++
- .../chrome/extensions/extension_actions.h     | 115 +++++
+ BUILD.gn                                      |   6 +
+ include/cef_extension_action.h                | 185 +++++++
+ include/views/cef_browser_view.h              |  28 +
+ .../chrome/extensions/extension_actions.cc    | 488 ++++++++++++++++++
+ .../chrome/extensions/extension_actions.h     | 122 +++++
  libcef/browser/views/browser_view_impl.cc     |  51 ++
  libcef/browser/views/browser_view_impl.h      |  11 +
  patch/patch.cfg                               |   5 +
  ...rome_browser_ui_extension_popup_rect.patch | 133 +++++
- 9 files changed, 995 insertions(+)
+ 9 files changed, 1029 insertions(+)
  create mode 100644 include/cef_extension_action.h
  create mode 100644 libcef/browser/chrome/extensions/extension_actions.cc
  create mode 100644 libcef/browser/chrome/extensions/extension_actions.h
  create mode 100644 patch/patches/chrome_browser_ui_extension_popup_rect.patch
 
 diff --git a/BUILD.gn b/BUILD.gn
-index dd0a558c0..212540530 100644
+index dd0a558c0..5c0a07d28 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
 @@ -578,6 +578,8 @@ source_set("libcef_static") {
@@ -32,12 +32,23 @@ index dd0a558c0..212540530 100644
      "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.cc",
      "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.h",
      "libcef/browser/chrome/views/browser_platform_delegate_chrome_views.cc",
+@@ -958,6 +960,10 @@ source_set("libcef_static") {
+     "//chrome:packed_resources",
+     "//chrome:resources",
+     "//chrome:strings",
++    "//chrome/browser/extensions",
++    "//chrome/browser/ui/extensions",
++    "//chrome/browser/ui/toolbar",
++    "//chrome/browser/ui/views/extensions:extension_popup",
+     "//chrome/common:buildflags",
+     "//chrome/services/printing:lib",
+     "//components/certificate_transparency",
 diff --git a/include/cef_extension_action.h b/include/cef_extension_action.h
 new file mode 100644
-index 000000000..72ae597f6
+index 000000000..b36989899
 --- /dev/null
 +++ b/include/cef_extension_action.h
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,185 @@
 +// Copyright (c) 2026 Noche. Portions Copyright (c) 2012 Marshall A. Greenblatt. All rights reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -163,7 +174,10 @@ index 000000000..72ae597f6
 +  /// BrowserView's window is activated. With |activate| true the popup takes
 +  /// focus and may activate the application. With false it is shown inactive:
 +  /// the application is not activated and the popup never becomes the key
-+  /// window. Returns false if the action is disabled or invalid.
++  /// window. Returns true if the action was run, which does not mean a popup
++  /// opened: an action without a popup fires onClicked instead, and Chrome can
++  /// still withhold the popup (host permission). Use IsShowingPopup() to see
++  /// whether one opened. Returns false if the action is disabled or invalid.
 +  ///
 +  /*--cef()--*/
 +  virtual bool Execute(const CefRect& anchor_screen_rect, bool activate) = 0;
@@ -191,8 +205,9 @@ index 000000000..72ae597f6
 +class CefExtensionActionObserver : public virtual CefBaseRefCounted {
 + public:
 +  ///
-+  /// Called for an action that appeared, including each existing action once
-+  /// the toolbar model is ready.
++  /// Called for an action that appeared. Each existing action is reported once
++  /// to a newly added observer when the toolbar model is ready, or as soon as
++  /// it becomes ready (so an observer added late still hears about them).
 +  ///
 +  /*--cef()--*/
 +  virtual void OnActionAdded(CefRefPtr<CefExtensionAction> action) {}
@@ -267,10 +282,10 @@ index aa272832e..42d54d1da 100644
  
 diff --git a/libcef/browser/chrome/extensions/extension_actions.cc b/libcef/browser/chrome/extensions/extension_actions.cc
 new file mode 100644
-index 000000000..6183d22fb
+index 000000000..b7f81edc9
 --- /dev/null
 +++ b/libcef/browser/chrome/extensions/extension_actions.cc
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,488 @@
 +// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be found
 +// in the LICENSE file.
@@ -287,6 +302,7 @@ index 000000000..6183d22fb
 +#include "cef/libcef/browser/thread_util.h"
 +#include "chrome/browser/extensions/extension_tab_util.h"
 +#include "chrome/browser/extensions/extension_view_host.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/extensions/extension_action_delegate.h"
 +#include "chrome/browser/ui/extensions/extension_action_view_model.h"
@@ -499,6 +515,21 @@ index 000000000..6183d22fb
 +void CefExtensionActionsController::AddObserver(
 +    CefRefPtr<CefExtensionActionObserver> observer) {
 +  observers_.push_back(observer);
++  // OnToolbarModelInitialized() only reaches observers added before the model
++  // was ready, so tell a late observer about the existing actions.
++  if (model_ && model_->actions_initialized()) {
++    for (const auto& id : model_->action_ids()) {
++      CEF_POST_TASK(CEF_UIT,
++                    base::BindOnce(&CefExtensionActionsController::NotifyAddedTo,
++                                   weak_ptr_factory_.GetWeakPtr(), observer, id));
++    }
++  }
++}
++
++void CefExtensionActionsController::NotifyAddedTo(
++    CefRefPtr<CefExtensionActionObserver> observer,
++    std::string id) {
++  observer->OnActionAdded(MakeAction(id));
 +}
 +
 +CefRefPtr<CefExtensionAction> CefExtensionActionsController::MakeAction(
@@ -532,13 +563,16 @@ index 000000000..6183d22fb
 +    if (!registry->enabled_extensions().GetByID(id)) {
 +      return nullptr;
 +    }
-+    it = view_models_
-+             .emplace(id, ExtensionActionViewModel::Create(
-+                              id, browser_,
-+                              std::make_unique<CefExtensionActionDelegate>(this)))
++    auto vm = ExtensionActionViewModel::Create(
++        id, browser_, std::make_unique<CefExtensionActionDelegate>(this));
++    // The icon (and so the badge) can load after the view model exists.
++    auto subscription = vm->RegisterIconUpdateObserver(base::BindRepeating(
++        &CefExtensionActionsController::OnToolbarActionUpdated,
++        base::Unretained(this), id));
++    it = view_models_.emplace(id, ViewModelEntry{std::move(vm), std::move(subscription)})
 +             .first;
 +  }
-+  return it->second.get();
++  return it->second.view_model.get();
 +}
 +
 +extensions::ExtensionAction* CefExtensionActionsController::GetAction(
@@ -643,19 +677,19 @@ index 000000000..6183d22fb
 +
 +bool CefExtensionActionsController::IsShowingPopup(const std::string& id) {
 +  auto it = view_models_.find(id);
-+  return it != view_models_.end() && it->second->IsShowingPopup();
++  return it != view_models_.end() && it->second.view_model->IsShowingPopup();
 +}
 +
 +void CefExtensionActionsController::HidePopup(const std::string& id) {
 +  auto it = view_models_.find(id);
 +  if (it != view_models_.end()) {
-+    it->second->HidePopup();
++    it->second.view_model->HidePopup();
 +  }
 +}
 +
 +void CefExtensionActionsController::HideAllPopups() {
-+  for (auto& [id, vm] : view_models_) {
-+    vm->HidePopup();
++  for (auto& [id, entry] : view_models_) {
++    entry.view_model->HidePopup();
 +  }
 +}
 +
@@ -677,7 +711,7 @@ index 000000000..6183d22fb
 +    const ToolbarActionsModel::ActionId& id) {
 +  auto it = view_models_.find(id);
 +  if (it != view_models_.end()) {
-+    it->second->HidePopup();
++    it->second.view_model->HidePopup();
 +    view_models_.erase(it);
 +  }
 +  CEF_POST_TASK(CEF_UIT,
@@ -742,10 +776,10 @@ index 000000000..6183d22fb
 +}
 diff --git a/libcef/browser/chrome/extensions/extension_actions.h b/libcef/browser/chrome/extensions/extension_actions.h
 new file mode 100644
-index 000000000..63ef3b898
+index 000000000..581221e1e
 --- /dev/null
 +++ b/libcef/browser/chrome/extensions/extension_actions.h
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,122 @@
 +// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be found
 +// in the LICENSE file.
@@ -760,6 +794,7 @@ index 000000000..63ef3b898
 +#include <string>
 +#include <vector>
 +
++#include "base/callback_list.h"
 +#include "base/functional/callback.h"
 +#include "base/memory/raw_ptr.h"
 +#include "base/memory/weak_ptr.h"
@@ -846,6 +881,8 @@ index 000000000..63ef3b898
 +  // Observer callbacks run from a posted task: calling out synchronously from
 +  // a Chromium observer notification can re-enter Chromium.
 +  void NotifyAdded(std::string id);
++  void NotifyAddedTo(CefRefPtr<CefExtensionActionObserver> observer,
++                     std::string id);
 +  void NotifyRemoved(std::string id);
 +  void NotifyUpdated(std::string id);
 +  void NotifyPinnedChanged();
@@ -853,7 +890,11 @@ index 000000000..63ef3b898
 +  const raw_ptr<BrowserWindowInterface> browser_;
 +  const base::RepeatingCallback<views::Widget*()> anchor_widget_;
 +  raw_ptr<ToolbarActionsModel> model_;
-+  std::map<std::string, std::unique_ptr<ExtensionActionViewModel>> view_models_;
++  struct ViewModelEntry {
++    std::unique_ptr<ExtensionActionViewModel> view_model;
++    base::CallbackListSubscription icon_subscription;
++  };
++  std::map<std::string, ViewModelEntry> view_models_;
 +  std::vector<CefRefPtr<CefExtensionActionObserver>> observers_;
 +  std::optional<PopupRequest> popup_request_;
 +
@@ -1004,7 +1045,7 @@ index 52847485f..ec3b22ab9 100644
  ]
 diff --git a/patch/patches/chrome_browser_ui_extension_popup_rect.patch b/patch/patches/chrome_browser_ui_extension_popup_rect.patch
 new file mode 100644
-index 000000000..7d45f45d6
+index 000000000..760bca5ed
 --- /dev/null
 +++ b/patch/patches/chrome_browser_ui_extension_popup_rect.patch
 @@ -0,0 +1,133 @@
@@ -1028,16 +1069,16 @@ index 000000000..7d45f45d6
 ++void ExtensionPopup::ShowPopupAtRect(
 ++    BrowserWindowInterface* browser,
 ++    std::unique_ptr<extensions::ExtensionViewHost> host,
-++    views::Widget* anchor_widget,
+++    views::Widget* popup_anchor_widget,
 ++    const gfx::Rect& screen_anchor,
 ++    views::BubbleBorder::Arrow arrow,
 ++    PopupShowAction show_action,
 ++    bool activate,
 ++    ShowPopupCallback callback) {
-++  CHECK(anchor_widget);
+++  CHECK(popup_anchor_widget);
 ++  auto* popup = new ExtensionPopup(browser, std::move(host),
 ++                                   views::BubbleAnchor(), arrow, show_action,
-++                                   std::move(callback), anchor_widget,
+++                                   std::move(callback), popup_anchor_widget,
 ++                                   screen_anchor, activate);
 ++  views::BubbleDialogDelegateView::CreateBubble(popup);
 ++}
@@ -1068,7 +1109,7 @@ index 000000000..7d45f45d6
 +     PopupShowAction show_action,
 +-    ShowPopupCallback callback)
 ++    ShowPopupCallback callback,
-++    views::Widget* anchor_widget,
+++    views::Widget* popup_anchor_widget,
 ++    const gfx::Rect& screen_anchor,
 ++    bool activate)
 +     : BubbleDialogDelegateView(anchor,
@@ -1079,8 +1120,8 @@ index 000000000..7d45f45d6
 +       deferred_close_weak_ptr_factory_(this) {
 +   g_last_popup_for_testing = this;
 ++  // Before anything below asks for the anchor (max bounds, CHECK(anchor_widget())).
-++  if (anchor_widget) {
-++    SetAnchorWidget(anchor_widget);
+++  if (popup_anchor_widget) {
+++    SetAnchorWidget(popup_anchor_widget);
 ++    SetAnchorRect(screen_anchor);
 ++  }
 ++  if (!activate) {
@@ -1113,13 +1154,13 @@ index 000000000..7d45f45d6
 +                         ShowPopupCallback callback);
 + 
 ++  // Noche (CEF embedders): like ShowPopup(), but the bubble is anchored to
-++  // |screen_anchor| (screen DIP) of |anchor_widget|, a window that has no
+++  // |screen_anchor| (screen DIP) of |popup_anchor_widget|, a window that has no
 ++  // Chrome toolbar. With |activate| false the bubble is shown inactive: it
 ++  // does not activate the application or become the key window.
 ++  static void ShowPopupAtRect(
 ++      BrowserWindowInterface* browser,
 ++      std::unique_ptr<extensions::ExtensionViewHost> host,
-++      views::Widget* anchor_widget,
+++      views::Widget* popup_anchor_widget,
 ++      const gfx::Rect& screen_anchor,
 ++      views::BubbleBorder::Arrow arrow,
 ++      PopupShowAction show_action,
@@ -1135,7 +1176,7 @@ index 000000000..7d45f45d6
 +                  PopupShowAction show_action,
 +-                 ShowPopupCallback callback);
 ++                 ShowPopupCallback callback,
-++                 views::Widget* anchor_widget = nullptr,
+++                 views::Widget* popup_anchor_widget = nullptr,
 ++                 const gfx::Rect& screen_anchor = gfx::Rect(),
 ++                 bool activate = true);
 + 
