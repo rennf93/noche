@@ -16,6 +16,7 @@
 - (CefRect)cefInitialBounds;
 - (void)applyMask;
 - (void)devToolsGone:(CefRefPtr<CefBrowser>)browser;
+- (void)devToolsAbout:(CefRefPtr<CefBrowser>)browser;
 - (void)closeWindowNow;
 - (void)closeWindowWhenDevToolsGone:(int)left;
 - (void)cefWindowCreated:(CefRefPtr<CefWindow>)window;
@@ -32,12 +33,6 @@
 @end
 
 namespace {
-
-// Test-only switches, read at call time (see scripts/app-test.sh and the M1.1 Task 6 fix report).
-bool TestFlag(const char* name) {
-  const char* v = getenv(name);
-  return v && v[0] == '1';
-}
 
 NSInteger g_devtools_created = 0, g_devtools_closed = 0;
 // DevTools has its own client, so its load end never reaches ours: loaded is read off the browser (polled by the checks).
@@ -66,6 +61,12 @@ class NCClient : public CefClient,
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
 
+  // Called for every DevTools popup of a tab of this window, whoever asked for it (menu, accelerator, context menu).
+  void OnBeforeDevToolsPopup(CefRefPtr<CefBrowser> b, CefWindowInfo&, CefRefPtr<CefClient>&, CefBrowserSettings&,
+                             CefRefPtr<CefDictionaryValue>&, bool*) override {
+    NC_CEF_CALLBACK;
+    [w_ devToolsAbout:b];
+  }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override { NC_CEF_CALLBACK; [w_ browserClosing:b]; }
 
   void OnLoadingStateChange(CefRefPtr<CefBrowser> b, bool loading, bool back, bool forward) override {
@@ -167,6 +168,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
   NSMutableSet<NSNumber*>* _closed;  // identifiers whose OnBeforeClose ran: a late callback must not bring them back
   BOOL _destroyed, _windowClosing;
+  int _devtoolsPending;  // OnBeforeDevToolsPopup seen, its browser not created yet (tells DevTools from window.open popups)
   NSMutableSet<NSNumber*>* _devtools;  // popup browsers of this window (DevTools), until their OnBeforeClose
   NSWindow* _nsWindow;
   BOOL _firstEmitted, _closeRequested;
@@ -214,7 +216,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (!b) return nil;
   NSNumber* key = @(b->GetIdentifier());
   NCTab* t = _table[key];
-  const BOOL filtered = !TestFlag("NOCHE_TEST_NO_CLOSED_FILTER");  // negative control for no-zombie-tab
+  const BOOL filtered = !NC_TEST_FLAG("NOCHE_TEST_NO_CLOSED_FILTER");  // negative control for no-zombie-tab
   if (!t && create && (!filtered || (!_destroyed && ![_closed containsObject:key]))) {
     t = [NCTab tabWithBrowser:b];
     _table[key] = t;
@@ -257,7 +259,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (void)close {
   if (!_window) { _closeRequested = YES; return; }
   // DevTools browsers go first; the window closes once they are gone (the cap covers one that never reports).
-  if (TestFlag("NOCHE_TEST_DEVTOOLS_LAST")) {  // negative control: the tabs close first, as before this fix
+  if (NC_TEST_FLAG("NOCHE_TEST_DEVTOOLS_LAST")) {  // negative control: the tabs close first, as before this fix
     [self closeWindowNow];
     return;
   }
@@ -443,9 +445,9 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   // OnBrowserCreated can fire before CreateBrowserView returned, so _view may still be unset.
   if (_destroyed) return;
   if (_view && !view->IsSame(_view)) {
-    // Only DevTools popups count (not window.open ones): the ones a ShowDevTools call is waiting for.
-    if (g_nc_devtools_pending > 0) {
-      g_nc_devtools_pending--;
+    // Only DevTools popups count (not window.open ones): the ones OnBeforeDevToolsPopup announced.
+    if (_devtoolsPending > 0) {
+      _devtoolsPending--;
       [_devtools addObject:@(browser->GetIdentifier())];
       g_devtools_created++;
       g_devtools_browsers[browser->GetIdentifier()] = browser;
@@ -456,6 +458,10 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   if (_firstEmitted) return;  // later tabs are announced by OnTabAdded
   _firstEmitted = YES;
   [self post:^(id<NCWindowDelegate> d) { [d window:self didAddTab:tab active:YES]; }];
+}
+
+- (void)devToolsAbout:(CefRefPtr<CefBrowser>)browser {
+  _devtoolsPending++;
 }
 
 // A DevTools browser ended (OnBeforeClose or the view's OnBrowserDestroyed, whichever comes first).
@@ -491,7 +497,7 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   [_table removeObjectForKey:key];
   [tab browserClosed];
   [self post:^(id<NCWindowDelegate> d) { [d window:self didCloseTab:tab]; }];
-  if (TestFlag("NOCHE_TEST_LATE_CALLBACKS")) {  // simulates CEF's late async OnTabAdded / OnActiveTabChanged
+  if (NC_TEST_FLAG("NOCHE_TEST_LATE_CALLBACKS")) {  // simulates CEF's late async OnTabAdded / OnActiveTabChanged
     dispatch_async(dispatch_get_main_queue(), ^{
       [self tabAdded:browser active:YES];
       [self activeTabChangedFrom:nullptr to:browser];
@@ -601,6 +607,7 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
 }
 
+#ifdef NOCHE_TESTHOOKS
 + (NSInteger)devToolsCreated { return g_devtools_created; }
 + (NSInteger)devToolsLoaded {
   for (auto& [id, b] : g_devtools_browsers)
@@ -612,6 +619,7 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
 + (BOOL)insideCefCallback {
   return g_nc_cef_depth > 0;
 }
+#endif
 
 + (NSInteger)activationsBlocked {
   return g_activate_blocked;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
@@ -12,7 +12,22 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[ $# -gt 0 ] || { echo "usage: app-test.sh <check>..." >&2; exit 2; }
+# --negative: run each check with its negative-control switch and expect it to FAIL (exit 0 only when all expected-FAIL ones do).
+# devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1 is recorded only: the engine crash it targets has not reproduced in a hidden run.
+if [ "${1:-}" = "--negative" ]; then
+  BAD=0
+  for PAIR in "no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail" "hidden NOCHE_TEST_NEGATIVE=activate expect-fail" \
+              "shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail" "devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record"; do
+    set -- $PAIR
+    if env "$2" "$0" "$1" >/dev/null 2>&1; then RES=pass; else RES=fail; fi
+    case "$3" in
+      expect-fail) if [ "$RES" = fail ]; then echo "NEGATIVE $1 with $2: failed as expected"; else echo "NEGATIVE $1 with $2: PASSED, the check cannot fail"; BAD=1; fi ;;
+      *) echo "NEGATIVE $1 with $2: $RES (recorded, not asserted)" ;;
+    esac
+  done
+  exit "$BAD"
+fi
+[ $# -gt 0 ] || { echo "usage: app-test.sh <check>... | --negative" >&2; exit 2; }
 for C in "$@"; do
   [[ "$C" =~ ^[a-z0-9-]+$ ]] || { echo "bad check name: $C" >&2; exit 2; }
 done

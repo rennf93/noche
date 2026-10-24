@@ -11,8 +11,16 @@ struct NCCefScope {
   NCCefScope() { g_nc_cef_depth++; }
   ~NCCefScope() { g_nc_cef_depth--; }
 };
-/// ShowDevTools calls whose DevTools browser has not been created yet (tells DevTools popups from window.open ones).
-inline int g_nc_devtools_pending = 0;
+// Test switches exist only in builds with NOCHE_TESTHOOKS; elsewhere the name is not even in the binary.
+#ifdef NOCHE_TESTHOOKS
+inline bool NCTestFlag(const char* name) {
+  const char* v = getenv(name);
+  return v && v[0] == '1';
+}
+#define NC_TEST_FLAG(name) NCTestFlag(name)
+#else
+#define NC_TEST_FLAG(name) false
+#endif
 #define NC_CEF_CALLBACK NCCefScope nc_cef_scope_
 
 @interface NCTab ()

@@ -74,6 +74,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)loadURL:(NSString *)url;
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
 - (void)showDevTools;
+/// Test support (builds with NOCHE_TESTHOOKS only): runs the Chrome command with this IDC name on the tab, bypassing Noche's actions.
+- (BOOL)testExecuteChromeCommandNamed:(NSString *)name;
 - (void)close;
 /// CDP Runtime.evaluate (awaitPromise, returnByValue). |json| is the JSON of the result value, |error| the exception or CDP error.
 - (void)evaluateJavaScript:(NSString *)script completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;

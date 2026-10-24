@@ -13,6 +13,8 @@ let withApp = env["NOCHE_APP"] == "1" || withSpikes || withProbes
 let sandboxFlags = env["NOCHE_NO_SANDBOX"] == "1" ? [] : ["-DNOCHE_SANDBOX=1"]
 // NOCHE_TESTHOOKS=1 compiles test-only hooks (forcing the shutdown watchdog) into the app.
 let testHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS")] : []
+// The bridge's test switches and counters compile only with the same switch.
+let bridgeTestFlags = env["NOCHE_TESTHOOKS"] == "1" ? ["-DNOCHE_TESTHOOKS=1"] : []
 let cefFlags = sandboxFlags + [
     "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-fno-strict-aliasing",
     "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-fobjc-call-cxx-cdtors",
@@ -36,7 +38,7 @@ if withApp {
         .target(
             name: "CefBridge",
             publicHeadersPath: "include",
-            cxxSettings: [.unsafeFlags(cefFlags)],
+            cxxSettings: [.unsafeFlags(cefFlags + bridgeTestFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore")]
         ),
         .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"], swiftSettings: testHookSettings),

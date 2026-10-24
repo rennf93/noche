@@ -63,7 +63,7 @@ final class SelfTest {
             line(ok ? "pass" : "fail", "2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
-        if check == "devtools-quit", !verdictPrinted {
+        if check == "devtools-quit" || check == "devtools-any-path", !verdictPrinted {
             let devTools = app.windows.reduce(0) { $0 + Int($1.devToolsCount) }
             // Before NCEngine.shutdown: every DevTools browser must already have had its OnBeforeClose.
             let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
@@ -105,6 +105,7 @@ final class SelfTest {
             case "eval-async": await evalAsync()
             case "no-zombie-tab": await noZombieTab()
             case "devtools-quit": await devToolsQuit()
+            case "devtools-any-path": await devToolsAnyPath()
             case "devtools-close-tab": await devToolsCloseTab()
             case "load-error-link": await loadErrorLink()
             default: finish(false, "unknown check")
@@ -285,6 +286,19 @@ final class SelfTest {
         guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount), created \(NCWindow.devToolsCreated()) loaded \(NCWindow.devToolsLoaded()), actions \(BrowserWindowController.actionCounts))") }
         line("info", "DevTools open, sending the Quit menu action")
         quitViaMenu()  // the verdict is printed by beforeExit
+    }
+
+    /// DevTools opened by a Chrome command that Noche does not intercept (the path of Inspect and Chrome's own accelerators).
+    private func devToolsAnyPath() async {
+        guard await ready(), let win, let tab = win.activeTab else { return }
+        guard tab.testExecuteChromeCommandNamed("IDC_DEV_TOOLS_CONSOLE") else { return finish(false, "IDC_DEV_TOOLS_CONSOLE cannot run") }
+        guard await until(20, { NCWindow.devToolsCreated() >= 1 && NCWindow.devToolsLoaded() >= 1 }) else {
+            return finish(false, "no DevTools browser from the Chrome command (created \(NCWindow.devToolsCreated()) loaded \(NCWindow.devToolsLoaded()), actions \(BrowserWindowController.actionCounts))")
+        }
+        devToolsOpened = true
+        try? await Task.sleep(for: .seconds(1))
+        line("info", "DevTools open through a Chrome command (Noche devTools action ran \(BrowserWindowController.actionCounts["devTools"] ?? 0) times), sending the Quit menu action")
+        quitViaMenu()
     }
 
     private func devToolsCloseTab() async {

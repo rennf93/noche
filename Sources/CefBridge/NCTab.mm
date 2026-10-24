@@ -1,6 +1,7 @@
 #import "NCTabInternal.h"
 #include "include/cef_client.h"
 #include "include/cef_devtools_message_observer.h"
+#include "include/cef_id_mappers.h"
 #include "include/cef_image.h"
 
 namespace {
@@ -95,16 +96,25 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 - (void)stopLoad { if (_browser) _browser->StopLoad(); }
 
 - (void)showDevTools {
-  if (_browser && !_browser->GetHost()->HasDevTools()) g_nc_devtools_pending++;
   if (_browser) _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
 }
+
+#ifdef NOCHE_TESTHOOKS
+- (BOOL)testExecuteChromeCommandNamed:(NSString*)name {
+  if (!_browser) return NO;
+  const int id = cef_id_for_command_id_name(name.UTF8String);
+  if (id < 0 || !_browser->GetHost()->CanExecuteChromeCommand(id)) return NO;
+  _browser->GetHost()->ExecuteChromeCommand(id, CEF_WOD_CURRENT_TAB);
+  return YES;
+}
+#endif
 
 - (void)close {
   if (!_browser) return;
   CefRefPtr<CefBrowserHost> host = _browser->GetHost();
   // The DevTools browser of a closing tab goes first (closing the tab under it can leave it alive until the profile dies).
-  const char* last = getenv("NOCHE_TEST_DEVTOOLS_LAST");  // negative control: the tab closes under its DevTools
-  if (host->HasDevTools() && !(last && last[0] == '1')) {
+  // Negative control: the tab closes under its DevTools.
+  if (host->HasDevTools() && !NC_TEST_FLAG("NOCHE_TEST_DEVTOOLS_LAST")) {
     host->CloseDevTools();
     [self closeAfterDevTools:40];
   } else {
