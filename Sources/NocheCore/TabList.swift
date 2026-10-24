@@ -28,14 +28,32 @@ public struct TabList: Equatable, Sendable {
 
     public init() {}
 
-    /// A nil or unknown opener appends at the end.
-    public mutating func insert(_ item: TabItem, after opener: TabID?, activate: Bool) {
+    /// Restores a saved list. Nil when two items share an id or |activeID| is not one of them (a nil |activeID| is allowed).
+    public init?(items: [TabItem], activeID: TabID?) {
+        guard Set(items.map(\.id)).count == items.count else { return nil }
+        if let activeID, !items.contains(where: { $0.id == activeID }) { return nil }
+        self.items = items
+        self.activeID = activeID
+    }
+
+    /// A nil or unknown opener appends at the end. A duplicate id changes nothing and returns false (no activation either).
+    @discardableResult
+    public mutating func insert(_ item: TabItem, after opener: TabID?, activate: Bool) -> Bool {
+        guard !items.contains(where: { $0.id == item.id }) else { return false }
         if let opener, let i = items.firstIndex(where: { $0.id == opener }) {
             items.insert(item, at: i + 1)
         } else {
             items.append(item)
         }
         if activate { activeID = item.id }
+        return true
+    }
+
+    /// Moves a tab to |index| (clamped to the list); the active tab does not change. An unknown id is a no-op.
+    public mutating func move(_ id: TabID, to index: Int) {
+        guard let from = items.firstIndex(where: { $0.id == id }) else { return }
+        let item = items.remove(at: from)
+        items.insert(item, at: min(max(index, 0), items.count))
     }
 
     /// Returns the id that became active, only when the removed tab was the active one.

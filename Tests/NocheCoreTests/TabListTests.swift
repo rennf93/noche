@@ -79,4 +79,59 @@ final class TabListTests: XCTestCase {
         XCTAssertEqual(l.displayTitle(of: titled.id), "Hello")
         XCTAssertEqual(l.displayTitle(of: hostOnly.id), "example.com")
     }
+
+    func testInsertRejectsDuplicateID() {
+        var (l, ts) = list(2)
+        let dup = TabItem(id: ts[0].id, engineID: 99, url: "x", title: "x", isLoading: false)
+        XCTAssertFalse(l.insert(dup, after: nil, activate: true))
+        XCTAssertEqual(l.items.map(\.engineID), [0, 1])
+        XCTAssertEqual(l.activeID, ts[0].id)  // the rejected insert did not activate
+        XCTAssertTrue(l.insert(tab(7), after: nil, activate: false))
+    }
+    func testRestoreInitRoundTrip() {
+        let (l, ts) = list(3)
+        let back = TabList(items: l.items, activeID: ts[2].id)
+        XCTAssertEqual(back?.items, l.items)
+        XCTAssertEqual(back?.activeID, ts[2].id)
+        XCTAssertNil(TabList(items: [], activeID: nil)?.activeID)
+        XCTAssertEqual(TabList(items: l.items, activeID: nil)?.activeID, nil)
+    }
+    func testRestoreInitRejectsBadInput() {
+        let (l, _) = list(2)
+        XCTAssertNil(TabList(items: l.items, activeID: TabID()))          // active id not in the items
+        XCTAssertNil(TabList(items: [], activeID: TabID()))
+        XCTAssertNil(TabList(items: l.items + [l.items[0]], activeID: nil))  // duplicate id
+    }
+    func testMove() {
+        var (l, ts) = list(4)
+        l.move(ts[0].id, to: 2)
+        XCTAssertEqual(l.items.map(\.id), [ts[1].id, ts[2].id, ts[0].id, ts[3].id])
+        l.move(ts[3].id, to: 0)
+        XCTAssertEqual(l.items.map(\.id), [ts[3].id, ts[1].id, ts[2].id, ts[0].id])
+        l.move(ts[1].id, to: 99)  // clamped to the end
+        XCTAssertEqual(l.items.last?.id, ts[1].id)
+        l.move(ts[1].id, to: -5)  // clamped to the start
+        XCTAssertEqual(l.items.first?.id, ts[1].id)
+        XCTAssertEqual(l.activeID, ts[0].id)  // moving never changes the active tab
+        let before = l
+        l.move(TabID(), to: 0)  // unknown id: no change
+        XCTAssertEqual(l, before)
+    }
+    func testUnknownOpenerAppends() {
+        var (l, ts) = list(2)
+        let c = tab(5)
+        XCTAssertTrue(l.insert(c, after: TabID(), activate: false))
+        XCTAssertEqual(l.items.map(\.id), [ts[0].id, ts[1].id, c.id])
+    }
+    func testActivateUnknownIsNoOp() {
+        var (l, ts) = list(2)
+        l.activate(TabID())
+        XCTAssertEqual(l.activeID, ts[0].id)
+    }
+    func testRemoveUnknownIsNoOp() {
+        var (l, _) = list(2)
+        let before = l
+        XCTAssertNil(l.remove(TabID()))
+        XCTAssertEqual(l, before)
+    }
 }
