@@ -29,7 +29,8 @@ static CefRefPtr<CefBrowser> g_browser;  // the first tab: it carries the extens
 static NSString* g_url = @"about:blank";
 static int g_created = 0;  // browsers the window's views reported
 static int g_tab_added = 0, g_active_changed = 0;  // CefBrowserViewDelegate tab callbacks seen
-static CefRefPtr<CefBrowser> g_last_active;        // the |active| of the last OnActiveTabChanged
+static int g_last_active_id = -1;                  // the |active| of the last OnActiveTabChanged (an id, never a reference)
+static std::vector<CefRefPtr<CefBrowserView>> g_alloy;  // rss-20-hybrid: 19 Alloy-style views beside the Chrome-style one
 static std::set<int> g_loaded_ids;                 // browsers whose main frame finished loading
 static int g_cdp_id = 0;
 static bool g_done = false, g_started = false;
@@ -126,7 +127,8 @@ static void CheckTabs(NSString* s) {
 
 class BVDelegate : public CefBrowserViewDelegate {
  public:
-  cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+  explicit BVDelegate(bool alloy = false) : alloy_(alloy) {}
+  cef_runtime_style_t GetBrowserRuntimeStyle() override { return alloy_ ? CEF_RUNTIME_STYLE_ALLOY : CEF_RUNTIME_STYLE_CHROME; }
   ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NONE; }
   void OnBrowserCreated(CefRefPtr<CefBrowserView> v, CefRefPtr<CefBrowser> b) override {
     g_created++;
@@ -141,7 +143,7 @@ class BVDelegate : public CefBrowserViewDelegate {
   }
   void OnActiveTabChanged(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> previous, CefRefPtr<CefBrowser> active) override {
     g_active_changed++;
-    g_last_active = active;
+    g_last_active_id = active->GetIdentifier();
     Log(@"ACTIVE_TAB_CHANGED previous=%d active=%d", previous ? previous->GetIdentifier() : -1, active->GetIdentifier());
   }
   void OnTabClosed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab) override {
@@ -149,6 +151,7 @@ class BVDelegate : public CefBrowserViewDelegate {
   }
 #endif
  private:
+  const bool alloy_;
   IMPLEMENT_REFCOUNTING(BVDelegate);
 };
 
@@ -178,6 +181,7 @@ static void ExtCmd(NSDictionary* cmd, std::function<void(NSDictionary*)> cb) {
       Eval(@"document.documentElement.dataset.nocheReply || ''", [cb, tries, poll](NSString* r) {
         if (r.length) {
           NSDictionary* j = [NSJSONSerialization JSONObjectWithData:[r dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+          *poll = nullptr;  // the lambda holds itself and cb (and so CefRefPtrs): break the cycle or the tabs leak
           cb([j isKindOfClass:NSDictionary.class] ? j : @{@"error" : r});
         } else if (++*tries > 100) {
           cb(@{@"error" : @"no answer from the service worker in 10s"});
@@ -200,22 +204,44 @@ static int WindowCount() {
   return n;
 }
 
-// Summed RSS in MB (decimal) of this process and every descendant.
-static double TreeRssMB(int* procs) {
-  FILE* f = popen("/bin/ps -axo pid=,ppid=,rss=", "r");
-  std::map<int, std::pair<int, long>> all;  // pid -> (ppid, rss KB)
-  int pid, ppid; long rss;
-  while (f && fscanf(f, "%d %d %ld", &pid, &ppid, &rss) == 3) all[pid] = {ppid, rss};
+struct Proc { int pid, ppid; long kb; std::string cmd; };
+
+// Summed RSS in MB (decimal) of this process and every descendant; |tree| gets the members.
+static double TreeRssMB(int* procs, std::vector<Proc>* tree) {
+  FILE* f = popen("/bin/ps -axo pid=,ppid=,rss=,command=", "r");
+  std::map<int, Proc> all;
+  char line[8192];
+  while (f && fgets(line, sizeof line, f)) {
+    Proc p; int off = 0;
+    if (sscanf(line, "%d %d %ld %n", &p.pid, &p.ppid, &p.kb, &off) < 3) continue;
+    p.cmd = line + off;
+    all[p.pid] = p;
+  }
   if (f) pclose(f);
-  std::set<int> tree{(int)getpid()};
+  std::set<int> in{(int)getpid()};
   for (bool grew = true; grew;) {
     grew = false;
-    for (auto& [p, v] : all) if (!tree.count(p) && tree.count(v.first)) { tree.insert(p); grew = true; }
+    for (auto& [pid, p] : all) if (!in.count(pid) && in.count(p.ppid)) { in.insert(pid); grew = true; }
   }
   long kb = 0;
-  for (int p : tree) if (all.count(p)) kb += all[p].second;
-  if (procs) *procs = (int)tree.size();
+  for (int pid : in) if (all.count(pid)) { kb += all[pid].kb; if (tree) tree->push_back(all[pid]); }
+  if (procs) *procs = (int)in.size();
   return kb * 1024.0 / 1e6;
+}
+
+// Top 10 processes by RSS with their type from the command line (renderer, gpu-process, utility, ...).
+static void PrintTop10(const char* label, std::vector<Proc> tree) {
+  std::sort(tree.begin(), tree.end(), [](const Proc& a, const Proc& b) { return a.kb > b.kb; });
+  for (size_t i = 0; i < tree.size() && i < 10; i++) {
+    std::string type = "browser";
+    size_t t = tree[i].cmd.find("--type=");
+    if (t != std::string::npos) type = tree[i].cmd.substr(t + 7, tree[i].cmd.find(' ', t) - t - 7);
+    size_t u = tree[i].cmd.find("--utility-sub-type=");
+    if (u != std::string::npos) type += ":" + tree[i].cmd.substr(u + 19, tree[i].cmd.find(' ', u) - u - 19);
+    if (tree[i].cmd.find("--extension-process") != std::string::npos) type += "+extension";
+    printf("PROBE %s info %s rank=%zu pid=%d rss=%.1fMB type=%s\n", g_check.UTF8String, label, i + 1, tree[i].pid, tree[i].kb * 1024.0 / 1e6, type.c_str());
+  }
+  fflush(stdout);
 }
 
 #ifdef NOCHE_TABS_API
@@ -250,13 +276,21 @@ static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<doub
 }
 
 static void RunTabsCheck() {
+  const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"];  // the other 19 views already exist, Alloy style
   const bool many = ![g_check isEqualToString:@"ext-create"] && ![g_check isEqualToString:@"ext-activate"];
-  const int total = many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
-  if (!AddTabs(total - 1)) { Finish(false, @"AddTab returned NULL"); return; }
+  const int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
+  if (!hybrid && !AddTabs(total - 1)) { Finish(false, @"AddTab returned NULL"); return; }
   // Loading is best effort: a slow tab must not hide the check's own answer.
   WaitFor([total]{ return (int)g_loaded_ids.size() >= total; }, 15000, [total](bool) {
     auto tabs = Tabs();
-    if ([g_check isEqualToString:@"tabs-20"]) {
+    if ([g_check hasPrefix:@"tabs-bare"]) {
+      // Holds nothing: leaves with no CefRefPtr of its own, to tell a probe leak from an engine leak at shutdown.
+      const size_t n = tabs.size();
+      const bool wait = [g_check isEqualToString:@"tabs-bare-wait"];  // idle a minute first, like rss-20 does
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (wait ? 60 : 0) * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        Finish(true, [NSString stringWithFormat:@"opened %d tabs, GetTabs=%zu, probe holds no references", total, n]);
+      });
+    } else if ([g_check isEqualToString:@"tabs-20"]) {
       ExtCmd(@{@"what" : @"tabs"}, [tabs](NSDictionary* j) {
         bool ok = [j[@"count"] intValue] == 20 && tabs.size() == 20;
         Finish(ok, [NSString stringWithFormat:@"extension count=%@ GetTabs=%zu GetTabCount=%zu OnTabAdded=%d", j[@"count"] ?: j[@"error"], tabs.size(), g_view->GetTabCount(), g_tab_added]);
@@ -278,20 +312,22 @@ static void RunTabsCheck() {
         if (j[@"error"]) { Finish(false, [NSString stringWithFormat:@"chrome.tabs.update failed: %@", j[@"error"]]); return; }
         WaitFor([]{ return g_active_changed >= 1; }, 5000, [tab7](bool changed) {
           auto active = g_view->GetActiveTab();
-          bool isTab7 = active && active->IsSame(tab7), cbTab7 = g_last_active && g_last_active->IsSame(tab7);
+          bool isTab7 = active && active->IsSame(tab7), cbTab7 = g_last_active_id == tab7->GetIdentifier();
           Finish(changed && isTab7 && cbTab7, [NSString stringWithFormat:@"OnActiveTabChanged=%d GetActiveTab is tab 7=%d callback active is tab 7=%d", g_active_changed, (int)isTab7, (int)cbTab7]);
         });
       });
     } else if ([g_check isEqualToString:@"switch-latency"]) {
       if (tabs.size() != 20) { Finish(false, [NSString stringWithFormat:@"expected 20 tabs, GetTabs=%zu", tabs.size()]); return; }
       SwitchStep(tabs, {});
-    } else {  // rss-20
+    } else {  // rss-20 and rss-20-hybrid
       int p1 = 0;
-      double r1 = TreeRssMB(&p1);
+      double r1 = TreeRssMB(&p1, nullptr);
       Log(@"RSS sample 1: %.1f MB, %d processes, %d loaded of %d", r1, p1, (int)g_loaded_ids.size(), total);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         int p2 = 0;
-        double r2 = TreeRssMB(&p2);
+        std::vector<Proc> tree;
+        double r2 = TreeRssMB(&p2, &tree);
+        PrintTop10("sample2", tree);
         Finish(std::max(r1, r2) <= 3200, [NSString stringWithFormat:@"rss=%.1f MB then %.1f MB (%d then %d processes, %d loaded) limit=3200 MB (U6)", r1, r2, p1, p2, (int)g_loaded_ids.size()]);
       });
     }
@@ -333,6 +369,7 @@ class WinDelegate : public CefWindowDelegate {
   void OnWindowCreated(CefRefPtr<CefWindow> w) override {
     g_window = w;
     w->AddChildView(g_view);
+    for (auto& v : g_alloy) w->AddChildView(v);
     // Invisible and inert: never shown or activated; the NSWindow exists already, so hide it before anything draws.
     NSWindow* nw = ((__bridge NSView*)w->GetWindowHandle()).window;
     nw.alphaValue = 0;
@@ -345,7 +382,7 @@ class WinDelegate : public CefWindowDelegate {
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return CefRect(120, 120, 1000, 700); }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
   void OnWindowDestroyed(CefRefPtr<CefWindow>) override {
-    g_regs.clear(); g_browser = nullptr; g_last_active = nullptr; g_view = nullptr; g_window = nullptr;
+    g_regs.clear(); g_alloy.clear(); g_browser = nullptr; g_view = nullptr; g_window = nullptr;
     dispatch_async(dispatch_get_main_queue(), ^{ [NCEngine shutdown]; exit(g_ok ? 0 : 1); });
   }
  private:
@@ -366,9 +403,12 @@ class WinDelegate : public CefWindowDelegate {
   NSError* err = nil;
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }
   g_view = CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate());
+  if ([g_check isEqualToString:@"rss-20-hybrid"])  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
+    for (int i = 1; i < 20; i++)
+      g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
   // Own watchdog; the script has an outer one on top. rss-20 waits a minute between its two samples.
-  const int watchdog = [g_check isEqualToString:@"rss-20"] ? 120 : 40;
+  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"]) ? 120 : 40;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, watchdog * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ Finish(false, @"timeout"); });
 }
 @end
@@ -378,7 +418,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"rss-20", @"raf-hidden" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

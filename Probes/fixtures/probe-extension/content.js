@@ -7,6 +7,6 @@ chrome.runtime.sendMessage({ what: "tabs" }, (r) => {
 // Engine probe commands: the page (main world) dispatches 'noche-cmd' with a JSON string, the answer lands in dataset.nocheReply.
 document.addEventListener("noche-cmd", (e) => {
   chrome.runtime.sendMessage(JSON.parse(e.detail), (r) => {
-    document.documentElement.dataset.nocheReply = JSON.stringify(r || { error: String(chrome.runtime.lastError) });
+    document.documentElement.dataset.nocheReply = JSON.stringify(r || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || "no reply" });
   });
 });

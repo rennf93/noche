@@ -32,7 +32,7 @@ FAILED=0
 for CHECK in "$@"; do
   : > "$OUTF"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
-  [ "$CHECK" = rss-20 ] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
+  [[ "$CHECK" == rss-20* || "$CHECK" == tabs-bare-wait ]] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
   (cd / && exec "$BIN" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
       --load-extension="$ROOT/Probes/fixtures/probe-extension" --enable-logging=stderr >"$OUTF") &

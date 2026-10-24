@@ -7,7 +7,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
   if (msg && msg.what === "create") {
-    chrome.tabs.create({ url: msg.url }).then((t) => reply({ id: t.id, windowId: t.windowId, index: t.index }), (e) => reply({ error: String(e) }));
+    try {
+      chrome.tabs.create({ url: msg.url }).then((t) => reply({ id: t.id, windowId: t.windowId, index: t.index }), (e) => reply({ error: "create rejected: " + ((e && e.message) || String(e)) }));
+    } catch (e) { reply({ error: "create threw: " + ((e && e.message) || String(e)) }); }
     return true;
   }
   if (msg && msg.what === "activate") {  // makes the n-th tab (1-based, tab strip order) active
@@ -16,7 +18,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const t = all[msg.n - 1];
       if (!t) { reply({ error: "no tab " + msg.n }); return; }
       return chrome.tabs.update(t.id, { active: true }).then((u) => reply({ id: u.id, index: u.index, active: u.active }));
-    }).catch((e) => reply({ error: String(e) }));
+    }).catch((e) => reply({ error: "activate rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
   if (msg && msg.what === "popup") { popupTab = msg.tabId; reply({ ok: true }); return; }
