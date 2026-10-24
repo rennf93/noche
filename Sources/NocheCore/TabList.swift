@@ -47,6 +47,13 @@ public struct TabList: Equatable, Sendable {
         return activeID
     }
 
+    public mutating func update(_ id: TabID, url: String, title: String, isLoading: Bool) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        items[i].url = url
+        items[i].title = title
+        items[i].isLoading = isLoading
+    }
+
     public mutating func activate(_ id: TabID) {
         if items.contains(where: { $0.id == id }) { activeID = id }
     }

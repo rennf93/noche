@@ -3,13 +3,23 @@ import Foundation
 public enum AddressInput {
     public static let defaultSearchTemplate = "https://www.google.com/search?q=%s"
 
+    /// Typed or pasted text only ever opens these schemes, compared lowercase; anything else (javascript:, data:) searches.
+    public static let allowedSchemes: Set<String> = ["http", "https", "file", "about", "chrome", "chrome-extension", "view-source"]
+
     /// Typed text to a navigable URL: explicit scheme as is, host-like text gets a scheme, anything else is a search.
     public static func resolve(_ text: String, searchTemplate: String) -> URL? {
         let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.isEmpty { return nil }
-        if s.hasPrefix("about:") { return URL(string: s) }
-        if s.contains("://") {
-            if let c = URLComponents(string: s), c.scheme != nil, c.host?.isEmpty == false || c.scheme == "file" {
+        // An explicit scheme (not host:port, whose text after the colon starts with a digit) must be on the allowlist.
+        let scheme = s.prefix { $0.isASCII && ($0.isLetter || $0.isNumber || "+-.".contains($0)) }
+        if let first = scheme.first, first.isLetter, s.dropFirst(scheme.count).hasPrefix(":"),
+           s.dropFirst(scheme.count + 1).first?.isNumber != true {
+            let name = scheme.lowercased()
+            let text = name + String(s.dropFirst(scheme.count))
+            guard allowedSchemes.contains(name) else { return search(s, searchTemplate) }
+            if name == "about" || name == "view-source" { return URL(string: text) }
+            if let c = URLComponents(string: text), text.dropFirst(name.count + 1).hasPrefix("//"),
+               c.host?.isEmpty == false || name == "file" {
                 return c.url
             }
             return search(s, searchTemplate)

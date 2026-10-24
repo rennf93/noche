@@ -20,6 +20,15 @@ final class TabListTests: XCTestCase {
         XCTAssertEqual(l.items.map(\.id), [a.id, b.id])
         XCTAssertEqual(l.activeID, a.id)
     }
+    func testUpdateChangesTitleAndURL() {
+        var (l, ts) = list(2)
+        l.update(ts[1].id, url: "https://b.example/", title: "B", isLoading: true)
+        XCTAssertEqual(l.items[1].title, "B")
+        XCTAssertEqual(l.displayTitle(of: ts[1].id), "B")
+        XCTAssertTrue(l.items[1].isLoading)
+        l.update(TabID(), url: "x", title: "x", isLoading: false)  // unknown id: no change
+        XCTAssertEqual(l.items.count, 2)
+    }
     func testInsertAfterOpener() {
         var (l, ts) = list(3)
         let c = tab(9)
