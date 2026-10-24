@@ -67,12 +67,16 @@ public enum SuggestionRanker {
             .sorted { (tabIndex[$0.tabID!] ?? 0) < (tabIndex[$1.tabID!] ?? 0) }
 
         // One slot stays for a history page, so sites shrink first, then tabs.
+        // A tab-carrying page past the two tab slots falls back to the history rows (keeping its tab id) and counts toward the reserve.
         let slots = maxRows - head.count
-        let reserve = pageRows.isEmpty ? 0 : 1
+        let overflow = tabGroup.dropFirst(2).filter { $0.kind == .page }
+        let reserve = min(slots, (pageRows.isEmpty ? 0 : 1) + (overflow.isEmpty ? 0 : 1))
         let tabTake = min(tabGroup.count, 2, slots - reserve)
+        let fallback = tabGroup.dropFirst(tabTake).filter { $0.kind == .page }
+        let allPages = (pageRows + fallback).sorted { $0.frecency > $1.frecency }
         let siteTake = min(siteRows.count, 3, slots - reserve - tabTake)
         let pageTake = slots - tabTake - siteTake
-        return head + tabGroup.prefix(tabTake) + siteRows.prefix(siteTake) + pageRows.prefix(pageTake)
+        return head + tabGroup.prefix(tabTake) + siteRows.prefix(siteTake) + allPages.prefix(pageTake)
     }
 
     /// Never a real URL, so a resolve that does not search is told apart by its scheme.

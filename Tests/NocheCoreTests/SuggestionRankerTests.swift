@@ -122,6 +122,18 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(rows.last?.url, "https://other.org/p", "history reserve")
     }
 
+    func testOverflowTabCarryingPageFallsBackToHistoryRows() {
+        let tabs = (1...3).map { tab("https://t\($0).example/p", "Zed \($0)") }
+        let pages = [page("https://zed.org/top", host: "zed.org", title: "t", visits: 9)]
+            + tabs.map { page($0.url, host: "\(URL(string: $0.url)!.host!)", title: "Zed", visits: 2) }
+            + [page("https://other.org/p", host: "other.org", title: "Zed plain")]
+        let rows = rank("zed", pages: pages, tabs: tabs)
+        XCTAssertEqual(rows.map(\.kind), [.page, .query, .page, .page, .page, .page])
+        XCTAssertEqual(rows.compactMap(\.tabID), tabs.map(\.id))
+        XCTAssertEqual(rows.last?.url, "https://other.org/p")
+        XCTAssertEqual(CommandRouter.route(rows[4], typed: "zed", searchTemplate: AddressInput.defaultSearchTemplate), .switchTo(tabs[2].id))
+    }
+
     func testPlainTabAndTabCarryingPageShareTabGroup() {
         let a = tab("https://zed.org/a", "Zed a"), b = tab("https://two.example", "Zed b")
         let rows = rank("zed", pages: [page("https://zed.org/a", host: "zed.org", title: "Zed a")], tabs: [b, a])
