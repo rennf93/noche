@@ -43,7 +43,13 @@ final class ToolbarView: DragView {
     let back = ChromeButton(symbol: "chevron.left", identifier: "toolbar.back")
     let forward = ChromeButton(symbol: "chevron.right", identifier: "toolbar.forward")
     let reload = ChromeButton(symbol: "arrow.clockwise", identifier: "toolbar.reload")
-    let address = NSTextField()
+    let address: NSTextField = {
+        let field = NSTextField()
+        let cell = CenteredTextFieldCell(textCell: "")
+        cell.isEditable = true
+        field.cell = cell
+        return field
+    }()
     let divider = DividerView()
 
     override init(frame: NSRect) {
@@ -85,5 +91,24 @@ final class DividerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         ChromeStyle.dividerColor.setFill()
         bounds.fill()
+    }
+}
+
+/// A text cell whose line sits in the vertical middle of its box (also while editing).
+final class CenteredTextFieldCell: NSTextFieldCell {
+    private func centered(_ rect: NSRect) -> NSRect {
+        var r = rect
+        let h = cellSize(forBounds: rect).height
+        r.origin.y += (rect.height - h) / 2
+        r.size.height = h
+        return r
+    }
+    override func titleRect(forBounds rect: NSRect) -> NSRect { centered(super.titleRect(forBounds: rect)) }
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) { super.drawInterior(withFrame: centered(cellFrame), in: controlView) }
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+        super.edit(withFrame: centered(rect), in: controlView, editor: textObj, delegate: delegate, event: event)
+    }
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+        super.select(withFrame: centered(rect), in: controlView, editor: textObj, delegate: delegate, start: selStart, length: selLength)
     }
 }

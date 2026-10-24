@@ -10,7 +10,7 @@ final class TabRowView: NSView {
     var onClose: (() -> Void)?
     var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
-    private let fade = CAGradientLayer()
+    let fade = CAGradientLayer()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -39,10 +39,10 @@ final class TabRowView: NSView {
     /// Child frames are window points: the row sits at x 6, so favicon x 14 and title x 37 are 8 and 31 inside it.
     override func layout() {
         super.layout()
-        let y = 10
-        faviconView.frame = NSRect(x: ChromeStyle.faviconX - ChromeStyle.rowX, y: CGFloat(y), width: ChromeStyle.faviconSize, height: ChromeStyle.faviconSize)
+        let y: CGFloat = 10
+        faviconView.frame = NSRect(x: ChromeStyle.faviconX - ChromeStyle.rowX, y: y, width: ChromeStyle.faviconSize, height: ChromeStyle.faviconSize)
         let tx = ChromeStyle.titleX - ChromeStyle.rowX
-        titleField.frame = NSRect(x: tx, y: CGFloat(y), width: bounds.width - tx, height: 18)
+        titleField.frame = NSRect(x: tx, y: y, width: bounds.width - tx, height: 18)
         fade.frame = titleField.bounds
         let w = max(titleField.bounds.width, 1)
         fade.locations = [0, NSNumber(value: Double(max(0, w - ChromeStyle.titleFade) / w)), 1]
@@ -68,6 +68,8 @@ final class TabRowView: NSView {
         }
     }
 
+    /// The row takes every click inside it, whatever subview is under the point.
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) { onSelect?() }

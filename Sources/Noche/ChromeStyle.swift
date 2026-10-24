@@ -60,9 +60,9 @@ enum ChromeStyle {
     static let rowSelectedBorder = NSColor(hex: 0x2A2A2A)
     static let rowHover = NSColor.white.withAlphaComponent(0.14)
     static let rowRadius: CGFloat = 10
-    // Section 8: motion 
+    // Section 8: motion
     static let showDuration: TimeInterval = 0.110
-    static let hideDuration: TimeInterval = 0.130
+    static let hideDuration: TimeInterval = 0.125
     static let overshootBack: CGFloat = 0.55             // ease-out-back constant: peak at 1.0103, 1.96 pt on a 191 pt slide
 
     /// A tinted SF Symbol.
