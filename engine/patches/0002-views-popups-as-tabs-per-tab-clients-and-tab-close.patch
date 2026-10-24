@@ -1,0 +1,240 @@
+From 104fa6c0608e847a227c08d434dba438f9d6fa32 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 03:02:51 +0200
+Subject: [PATCH] views: popups as tabs, per-tab clients and tab close
+
+---
+ include/views/cef_browser_view.h              | 17 +++++++--
+ libcef/browser/browser_info_manager.cc        | 16 ++++++++
+ libcef/browser/browser_platform_delegate.cc   | 14 +++++++
+ .../browser/chrome/chrome_browser_delegate.cc | 37 ++++++++++++++++---
+ .../browser/chrome/chrome_browser_delegate.h  | 17 +++++++++
+ libcef/browser/views/browser_view_impl.cc     | 13 +++++--
+ 6 files changed, 101 insertions(+), 13 deletions(-)
+
+diff --git a/include/views/cef_browser_view.h b/include/views/cef_browser_view.h
+index a31e5b454..b591d8572 100644
+--- a/include/views/cef_browser_view.h
++++ b/include/views/cef_browser_view.h
+@@ -128,10 +128,19 @@ class CefBrowserView : public CefView {
+   /// OnBrowserCreated). All tabs share this BrowserView and its window; Chrome
+   /// APIs such as chrome.tabs see all of them. If |activate| is true the new
+   /// tab becomes the active tab (see GetActiveTab). OnTabAdded is called for
+-  /// every tab added after the first. NOTE: |client|, |settings| and
+-  /// |extra_info| are currently ignored; the new tab uses the client and
+-  /// settings of the first tab. Per-tab values will be supported in a future
+-  /// change.
++  /// every tab added after the first. |client|, |settings| and |extra_info|
++  /// apply to this tab only (OnAfterCreated is called on |client| for it). If
++  /// |client| is NULL the new tab uses the client of the first tab. Tabs that
++  /// Chrome creates itself (chrome.tabs.create(), Cmd+T) use the first tab's
++  /// client and settings, as do popups opened as tabs from a link with
++  /// target=_blank or window.open() when OnBeforePopup does not claim them
++  /// (they use the opener's client).
++  ///
++  /// Closing a tab (CefBrowserHost::CloseBrowser) that is not the last one
++  /// leaves the BrowserView, its window and the other tabs alone. Closing the
++  /// last tab closes the window with it, as for a single browser: the
++  /// BrowserView does not stay open empty. Keep a placeholder tab to avoid
++  /// that.
+   ///
+   /*--cef(added=experimental,optional_param=client,optional_param=url,
+           optional_param=extra_info)--*/
+diff --git a/libcef/browser/browser_info_manager.cc b/libcef/browser/browser_info_manager.cc
+index 8b077f071..cf1fd2f3a 100644
+--- a/libcef/browser/browser_info_manager.cc
++++ b/libcef/browser/browser_info_manager.cc
+@@ -222,6 +222,22 @@ bool CefBrowserInfoManager::CanCreateWindow(
+       pending_popup->use_default_browser_creation = true;
+     }
+ 
++    // Tab dispositions of a Chrome style BrowserView that the client did not
++    // claim become tabs of that BrowserView (see CefBrowserView::AddTab)
++    // instead of new windows. The navigator then adds the contents to the
++    // opener's Browser (default Browser creation) and the platform delegate is
++    // bound to the opener's BrowserView.
++    if (CEF_API_IS_ADDED(CEF_EXPERIMENTAL) &&
++        (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
++         disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)) {
++      auto opener_view = browser->GetBrowserView();
++      if (opener_view &&
++          opener_view->GetRuntimeStyle() == CEF_RUNTIME_STYLE_CHROME) {
++        pending_popup->use_default_browser_creation = true;
++        create_params.browser_view = opener_view;
++      }
++    }
++
+     create_params.popup_with_views_hosted_opener = ShouldCreateViewsHostedPopup(
+         browser, pending_popup->use_default_browser_creation);
+ 
+diff --git a/libcef/browser/browser_platform_delegate.cc b/libcef/browser/browser_platform_delegate.cc
+index 167b2af62..17ebc3077 100644
+--- a/libcef/browser/browser_platform_delegate.cc
++++ b/libcef/browser/browser_platform_delegate.cc
+@@ -204,6 +204,13 @@ void CefBrowserPlatformDelegate::PopupWebContentsCreated(
+     return;
+   }
+ 
++  // A popup opened as a tab of this BrowserView needs no BrowserView or window
++  // of its own (see CefBrowserInfoManager::CanCreateWindow).
++  if (auto view = GetBrowserView();
++      view && new_platform_delegate->GetBrowserView() == view) {
++    return;
++  }
++
+   CefRefPtr<CefBrowserViewDelegate> new_delegate;
+   CefRefPtr<CefBrowserViewDelegate> opener_delegate;
+   cef_runtime_style_t opener_runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+@@ -250,6 +257,13 @@ void CefBrowserPlatformDelegate::PopupBrowserCreated(
+     return;
+   }
+ 
++  // A popup opened as a tab of this BrowserView needs no BrowserView or window
++  // of its own (see CefBrowserInfoManager::CanCreateWindow).
++  if (auto view = GetBrowserView();
++      view && new_platform_delegate->GetBrowserView() == view) {
++    return;
++  }
++
+   auto new_browser_view = new_browser->GetBrowserView();
+   CHECK(new_browser_view);
+ 
+diff --git a/libcef/browser/chrome/chrome_browser_delegate.cc b/libcef/browser/chrome/chrome_browser_delegate.cc
+index 3c4eead6f..4a3bffa1a 100644
+--- a/libcef/browser/chrome/chrome_browser_delegate.cc
++++ b/libcef/browser/chrome/chrome_browser_delegate.cc
+@@ -253,7 +253,23 @@ void ChromeBrowserDelegate::SetAsDelegate(content::WebContents* web_contents,
+   // CreateDevToolsBrowser should have already created the browser host.
+   DCHECK(!is_devtools_popup || !opener_host_);
+ 
+-  auto platform_delegate = CefBrowserPlatformDelegate::Create(create_params_);
++  // Per-tab values from CefBrowserView::AddTab, else the first tab's. Copy
++  // only when needed: copies do not carry every field.
++  CefBrowserCreateParams tab_params_copy;
++  const CefBrowserCreateParams* tab_params = &create_params_;
++  if (pending_tab_params_) {
++    auto pending = std::move(*pending_tab_params_);
++    pending_tab_params_.reset();
++    tab_params_copy = create_params_;
++    if (pending.client) {
++      tab_params_copy.client = pending.client;
++    }
++    tab_params_copy.settings = pending.settings;
++    tab_params_copy.extra_info = pending.extra_info;
++    tab_params = &tab_params_copy;
++  }
++
++  auto platform_delegate = CefBrowserPlatformDelegate::Create(*tab_params);
+   CHECK(platform_delegate);
+ 
+   // Expect runtime style to match.
+@@ -261,18 +277,29 @@ void ChromeBrowserDelegate::SetAsDelegate(content::WebContents* web_contents,
+ 
+   auto browser_info = CefBrowserInfoManager::GetInstance()->CreateBrowserInfo(
+       is_devtools_popup, platform_delegate->GetBrowserConfig(),
+-      create_params_.extra_info);
++      tab_params->extra_info);
+ 
+   auto request_context_impl =
+       CefRequestContextImpl::GetOrCreateForRequestContext(
+-          create_params_.request_context);
++          tab_params->request_context);
+ 
+-  CreateBrowserHost(browser_, web_contents, create_params_.settings,
+-                    create_params_.client, std::move(platform_delegate),
++  CreateBrowserHost(browser_, web_contents, tab_params->settings,
++                    tab_params->client, std::move(platform_delegate),
+                     browser_info, is_devtools_popup, /*opener=*/nullptr,
+                     request_context_impl);
+ }
+ 
++void ChromeBrowserDelegate::SetPendingTabParams(
++    CefRefPtr<CefClient> client,
++    const CefBrowserSettings& settings,
++    CefRefPtr<CefDictionaryValue> extra_info) {
++  pending_tab_params_ = PendingTabParams{client, settings, extra_info};
++}
++
++void ChromeBrowserDelegate::ClearPendingTabParams() {
++  pending_tab_params_.reset();
++}
++
+ bool ChromeBrowserDelegate::ShowStatusBubble(bool show_by_default) {
+   if (!show_status_bubble_.has_value()) {
+     show_status_bubble_ = show_by_default;
+diff --git a/libcef/browser/chrome/chrome_browser_delegate.h b/libcef/browser/chrome/chrome_browser_delegate.h
+index 639ecc820..5c005f41b 100644
+--- a/libcef/browser/chrome/chrome_browser_delegate.h
++++ b/libcef/browser/chrome/chrome_browser_delegate.h
+@@ -90,6 +90,16 @@ class ChromeBrowserDelegate : public cef::BrowserDelegate {
+ 
+   Browser* browser() const { return browser_; }
+ 
++  // Per-tab values for the next WebContents that SetAsDelegate() sees, used
++  // by CefBrowserView::AddTab. A single slot, not a queue: AddTab creates the
++  // WebContents synchronously, so the slot is consumed (or cleared by the
++  // caller) before anything else can create one. Tabs that Chrome creates
++  // itself find the slot empty and use |create_params_| (first tab).
++  void SetPendingTabParams(CefRefPtr<CefClient> client,
++                           const CefBrowserSettings& settings,
++                           CefRefPtr<CefDictionaryValue> extra_info);
++  void ClearPendingTabParams();
++
+  private:
+   static CefRefPtr<ChromeBrowserHostImpl> CreateBrowserHost(
+       Browser* browser,
+@@ -123,6 +133,13 @@ class ChromeBrowserDelegate : public cef::BrowserDelegate {
+   // Used when creating a new browser host.
+   const CefBrowserCreateParams create_params_;
+ 
++  struct PendingTabParams {
++    CefRefPtr<CefClient> client;
++    CefBrowserSettings settings;
++    CefRefPtr<CefDictionaryValue> extra_info;
++  };
++  std::optional<PendingTabParams> pending_tab_params_;
++
+   std::optional<bool> show_status_bubble_;
+   std::optional<SkRegion> draggable_region_;
+   mutable std::optional<bool> frameless_pip_;
+diff --git a/libcef/browser/views/browser_view_impl.cc b/libcef/browser/views/browser_view_impl.cc
+index b9b3438af..4608c8f25 100644
+--- a/libcef/browser/views/browser_view_impl.cc
++++ b/libcef/browser/views/browser_view_impl.cc
+@@ -10,6 +10,7 @@
+ 
+ #include "cef/libcef/browser/browser_event_util.h"
+ #include "cef/libcef/browser/browser_host_base.h"
++#include "cef/libcef/browser/chrome/chrome_browser_delegate.h"
+ #include "cef/libcef/browser/chrome/chrome_browser_host_impl.h"
+ #include "cef/libcef/browser/chrome/views/chrome_browser_view.h"
+ #include "cef/libcef/browser/context.h"
+@@ -309,8 +310,6 @@ CefRefPtr<CefBrowser> CefBrowserViewImpl::AddTab(
+   CEF_REQUIRE_VALID_RETURN(nullptr);
+   CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
+ 
+-  // |client|, |settings| and |extra_info| are ignored until per-tab client
+-  // support is added.
+   if (is_alloy_style_ || !browser_ || !root_view()) {
+     return nullptr;
+   }
+@@ -323,8 +322,14 @@ CefRefPtr<CefBrowser> CefBrowserViewImpl::AddTab(
+ 
+   // Goes through the navigator, which creates the WebContents and indirectly
+   // the ChromeBrowserHostImpl (see ChromeBrowserDelegate::SetAsDelegate).
+-  auto* contents = chrome::AddAndReturnTabAt(
+-      chrome_browser_view()->browser(), gurl, TabStripModel::kNoTab, activate);
++  auto* bwi = chrome_browser_view()->browser();
++  auto* delegate = static_cast<ChromeBrowserDelegate*>(bwi->cef_delegate());
++  CHECK(delegate);
++  delegate->SetPendingTabParams(client, settings, extra_info);
++  auto* contents =
++      chrome::AddAndReturnTabAt(bwi, gurl, TabStripModel::kNoTab, activate);
++  // Unconsumed if no host was created for the new tab.
++  delegate->ClearPendingTabParams();
+   if (!contents) {
+     return nullptr;
+   }
+-- 
+2.56.0
+

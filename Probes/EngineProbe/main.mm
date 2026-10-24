@@ -16,6 +16,7 @@
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_life_span_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/views/cef_browser_view.h"
@@ -36,6 +37,10 @@ static std::vector<CefRefPtr<CefBrowserView>> g_alloy;  // rss-20-hybrid: 19 All
 static std::set<int> g_loaded_ids;                 // browsers whose main frame finished loading
 static int g_cdp_id = 0;
 static bool g_done = false, g_started = false;
+static bool g_window_gone = false;                 // WinDelegate::OnWindowDestroyed ran
+static int g_tab_closed = 0, g_closed_id = -1;     // OnTabClosed count and the last |tab| id (ids, never references)
+static int g_first_created = 0, g_first_last_id = -1;  // OnAfterCreated seen by the first tab's client (Client)
+static int g_client_created[2] = {0, 0}, g_client_id[2] = {-1, -1};  // per-tab-client: OnAfterCreated per TabClient
 static std::map<int, std::function<void(NSDictionary*)>> g_pending;
 
 // A crash must not reach macOS (.ips report, Problem Reporter window): print one line and leave with 128+signal.
@@ -90,7 +95,7 @@ static void Finish(bool ok, NSString* detail) {
   fflush(stdout);
   dispatch_async(dispatch_get_main_queue(), ^{
     if (g_window) g_window->Close();
-    else exit(g_ok ? 0 : 1);
+    else if (!g_window_gone) exit(g_ok ? 0 : 1);  // else OnWindowDestroyed shuts down
   });
 }
 
@@ -117,7 +122,7 @@ static void EvalOn(CefRefPtr<CefBrowser> b, NSString* expr, bool await, std::fun
   if (!b) { cb(@""); return; }
   int rid = ++g_cdp_id;
   NSDictionary* msg = @{@"id" : @(rid), @"method" : @"Runtime.evaluate",
-                        @"params" : @{@"expression" : expr, @"returnByValue" : @YES, @"awaitPromise" : @(await)}};
+                        @"params" : @{@"expression" : expr, @"returnByValue" : @YES, @"awaitPromise" : @(await), @"userGesture" : @YES}};
   NSData* d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
   g_pending[rid] = [cb](NSDictionary* j) {
     id v = j[@"result"][@"result"][@"value"];
@@ -182,7 +187,9 @@ class BVDelegate : public CefBrowserViewDelegate {
     Log(@"ACTIVE_TAB_CHANGED previous=%d active=%d", previous ? previous->GetIdentifier() : -1, active->GetIdentifier());
   }
   void OnTabClosed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab) override {
-    Log(@"TAB_CLOSED id=%d", tab->GetIdentifier());
+    g_tab_closed++;
+    g_closed_id = tab->GetIdentifier();
+    Log(@"TAB_CLOSED id=%d total=%d", g_closed_id, g_tab_closed);
   }
 #endif
  private:
@@ -299,6 +306,20 @@ static bool AddTabs(int n) {
   return true;
 }
 
+// A client of its own for one AddTab call. Keeps ids and counts only, never a browser reference.
+class TabClient : public CefClient, public CefLifeSpanHandler {
+ public:
+  explicit TabClient(int slot) : slot_(slot) {}
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    g_client_created[slot_]++;
+    g_client_id[slot_] = b->GetIdentifier();
+  }
+ private:
+  const int slot_;
+  IMPLEMENT_REFCOUNTING(TabClient);
+};
+
 static std::vector<CefRefPtr<CefBrowser>> Tabs() {
   std::vector<CefRefPtr<CefBrowser>> t;
   g_view->GetTabs(t);
@@ -331,8 +352,10 @@ static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<doub
 
 static void RunTabsCheck() {
   const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"];  // the other 19 views already exist, Alloy style
-  const bool many = ![g_check isEqualToString:@"ext-create"] && ![g_check isEqualToString:@"ext-activate"];
-  const int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
+  const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last" ] containsObject:g_check];
+  const bool many = !few;
+  int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
+  if ([g_check isEqualToString:@"close-last"]) total = 3;
   if (!hybrid && !AddTabs(total - 1)) { Finish(false, @"AddTab returned NULL"); return; }
   // Loading is best effort: a slow tab must not hide the check's own answer.
   WaitFor([total]{ return (int)g_loaded_ids.size() >= total; }, 15000, [total](bool loaded) {
@@ -348,6 +371,66 @@ static void RunTabsCheck() {
       ExtCmd(@{@"what" : @"tabs"}, [tabs](NSDictionary* j) {
         bool ok = [j[@"count"] intValue] == 20 && tabs.size() == 20;
         Finish(ok, [NSString stringWithFormat:@"extension count=%@ GetTabs=%zu GetTabCount=%zu OnTabAdded=%d", j[@"count"] ?: j[@"error"], tabs.size(), g_view->GetTabCount(), g_tab_added]);
+      });
+    } else if ([g_check isEqualToString:@"blank-link"]) {
+      // OnBeforePopup is unhandled (Client has no life span handler): the link must become a tab of this view.
+      const int before = WindowCount(), added0 = g_tab_added;
+      const size_t beforeTabs = tabs.size();
+      Eval(@"var a = document.createElement('a'); a.href = location.origin + '/?blank-link'; a.target = '_blank'; document.body.appendChild(a); a.click(); 'clicked'", [](NSString*) {});
+      WaitFor([added0]{ return g_tab_added > added0; }, 8000, [before, beforeTabs](bool added) {
+        const int after = WindowCount();
+        const size_t afterTabs = Tabs().size();
+        Finish(added && after == before && afterTabs == beforeTabs + 1, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs before=%zu after=%zu (must be +1)", (int)added, before, after, beforeTabs, afterTabs]);
+      });
+    } else if ([g_check isEqualToString:@"per-tab-client"]) {
+      CefRefPtr<CefBrowser> a = g_view->AddTab(g_url.UTF8String, new TabClient(0), CefBrowserSettings(), nullptr, false);
+      CefRefPtr<CefBrowser> b = g_view->AddTab(g_url.UTF8String, new TabClient(1), CefBrowserSettings(), nullptr, false);
+      if (!a || !b) { Finish(false, @"AddTab returned NULL"); return; }
+      const int aid = a->GetIdentifier(), bid = b->GetIdentifier(), firstCreated = g_first_created, tabsBefore = (int)Tabs().size();
+      a = nullptr; b = nullptr;
+      const bool own = g_client_created[0] == 1 && g_client_id[0] == aid && g_client_created[1] == 1 && g_client_id[1] == bid;
+      // Cmd+T: the tab Chrome creates itself belongs to the fallback (first tab's) client.
+      const int added0 = g_tab_added;
+      g_browser->GetHost()->ExecuteChromeCommand(34014 /* IDC_NEW_TAB */, CEF_WOD_CURRENT_TAB);
+      WaitFor([added0]{ return g_tab_added > added0; }, 8000, [=](bool added) {
+        auto now = Tabs();
+        const size_t nowCount = now.size();
+        int newId = -1;
+        for (auto& t : now) if (t->GetIdentifier() != aid && t->GetIdentifier() != bid && !t->IsSame(g_browser)) newId = t->GetIdentifier();
+        const bool fallback = added && g_first_created == firstCreated + 1 && g_first_last_id == newId && newId != -1;
+        const bool still = g_client_created[0] == 1 && g_client_created[1] == 1;
+        now.clear();  // hold no browser reference past this point
+        Finish(own && fallback && still && (int)nowCount == tabsBefore + 1, [NSString stringWithFormat:@"own: A=%d(id %d, want %d) B=%d(id %d, want %d); Cmd+T: OnTabAdded=%d first client OnAfterCreated %d->%d last id=%d new tab id=%d; tabs=%zu", g_client_created[0], g_client_id[0], aid, g_client_created[1], g_client_id[1], bid, (int)added, firstCreated, g_first_created, g_first_last_id, newId, nowCount]);
+      });
+    } else if ([g_check isEqualToString:@"close-non-last"]) {
+      if (tabs.size() != 20) { Finish(false, [NSString stringWithFormat:@"expected 20 tabs, GetTabs=%zu", tabs.size()]); return; }
+      const int before = WindowCount(), closing = tabs[4]->GetIdentifier(), closed0 = g_tab_closed;
+      tabs[4]->GetHost()->CloseBrowser(true);
+      tabs.clear();
+      WaitFor([closed0]{ return g_tab_closed > closed0; }, 8000, [before, closing](bool closed) {
+        // The closed tab is gone and the window, the view and the other 19 tabs stay.
+        auto now = Tabs();
+        const size_t n = now.size();
+        bool gone = true;
+        for (auto& t : now) if (t->GetIdentifier() == closing) gone = false;
+        now.clear();  // hold no browser reference past this point
+        const bool alive = g_window && g_view && g_view->GetActiveTab();
+        const int after = WindowCount();
+        ExtCmd(@{@"what" : @"tabs"}, [=](NSDictionary* j) {
+          Finish(closed && g_closed_id == closing && gone && alive && after == before && n == 19 && [j[@"count"] intValue] == 19, [NSString stringWithFormat:@"OnTabClosed=%d id ok=%d closed tab gone=%d window and view alive=%d windows before=%d after=%d GetTabs=%zu extension count=%@", (int)closed, (int)(g_closed_id == closing), (int)gone, (int)alive, before, after, n, j[@"count"] ?: j[@"error"]]);
+        });
+      });
+    } else if ([g_check isEqualToString:@"close-last"]) {
+      // Documented behavior (cef_browser_view.h, AddTab): the window closes with the last tab. Closes all 3 tabs and
+      // reports what happened; WinDelegate::OnWindowDestroyed finishes the check when the window goes.
+      const int before = WindowCount(), n = (int)tabs.size();
+      if (n != 3) { Finish(false, [NSString stringWithFormat:@"expected 3 tabs, GetTabs=%d", n]); return; }
+      Log(@"CLOSE_LAST closing %d tabs, windows=%d", n, before);
+      for (auto& t : tabs) t->GetHost()->CloseBrowser(true);
+      tabs.clear();
+      WaitFor([]{ return g_window_gone; }, 8000, [n](bool gone) {
+        if (gone) return;
+        Finish(false, [NSString stringWithFormat:@"window stayed open after %d of %d tabs closed (empty view kept, not the documented behavior)", g_tab_closed, n]);
       });
     } else if ([g_check isEqualToString:@"ext-create"]) {
       const int before = WindowCount(), added0 = g_tab_added;
@@ -406,8 +489,12 @@ static void RunRafHidden() {
                  ^{ Finish(false, @"requestAnimationFrame did not resolve in 10s while hidden"); });
 }
 
-class Client : public CefClient, public CefLoadHandler, public CefRequestHandler {
+// The first tab's client. OnBeforePopup is deliberately not implemented (blank-link), but OnAfterCreated is counted so
+// per-tab-client can tell which tabs got this fallback client.
+class Client : public CefClient, public CefLoadHandler, public CefRequestHandler, public CefLifeSpanHandler {
  public:
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  void OnAfterCreated(CefRefPtr<CefBrowser> b) override { g_first_created++; g_first_last_id = b->GetIdentifier(); }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   // cef_request_handler.h:260. The only child-exit callback in 156 (no GPU or utility one); other helpers are
@@ -449,8 +536,15 @@ class WinDelegate : public CefWindowDelegate {
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return CefRect(120, 120, 1000, 700); }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
   void OnWindowDestroyed(CefRefPtr<CefWindow>) override {
+    g_window_gone = true;
+    // close-last: pending OnTabClosed callbacks may still arrive, so report a second later and shut down after that.
+    const bool deferred = [g_check isEqualToString:@"close-last"] && !g_done;
     g_regs.clear(); g_alloy.clear(); g_browser = nullptr; g_view = nullptr; g_window = nullptr;
-    dispatch_async(dispatch_get_main_queue(), ^{ [NCEngine shutdown]; exit(g_ok ? 0 : 1); });
+    if (deferred)
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        Finish(g_tab_closed == 3, [NSString stringWithFormat:@"window closed with the last tab (documented behavior), no crash; OnTabClosed=%d of 3", g_tab_closed]);
+      });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, deferred ? 2 * NSEC_PER_SEC : 0), dispatch_get_main_queue(), ^{ [NCEngine shutdown]; exit(g_ok ? 0 : 1); });
   }
  private:
   IMPLEMENT_REFCOUNTING(WinDelegate);
@@ -498,7 +592,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

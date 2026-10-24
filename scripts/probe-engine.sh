@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20)
+# usage: probe-engine.sh <check>...   (ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe. Check names are [a-z0-9-]+.
