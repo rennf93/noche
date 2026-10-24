@@ -16,15 +16,31 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1 is recorded only: the engine crash it targets has not reproduced in a hidden run.
 if [ "${1:-}" = "--negative" ]; then
   BAD=0
-  for PAIR in "no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail" "hidden NOCHE_TEST_NEGATIVE=activate expect-fail" \
-              "shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail" "devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record"; do
+  # An expected FAIL counts only when the check itself printed `NOCHE_TEST <check> fail <detail>` and the app exited 1 on its own
+  # verdict: a build failure, crash, timeout, missing binary or crash report is a failure of --negative, not the expected one.
+  # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
+  SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
+  # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
+  for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
-    if env "$2" "$0" "$1" >/dev/null 2>&1; then RES=pass; else RES=fail; fi
+    NEG_OUT="$(mktemp)"
+    if env "$2" NOCHE_APPTEST_KEEP_HOOKS=1 "$0" "$1" >"$NEG_OUT" 2>/dev/null; then RES=pass; else RES=fail; fi
+    OWN="$(grep -E "^NOCHE_TEST $1 fail " "$NEG_OUT" | grep -vE "$SCRIPT_LINES" | head -1 || true)"
+    OTHER="$(grep -E "$SCRIPT_LINES" "$NEG_OUT" | grep -vE "^NOCHE_TEST $1 fail exit-rc=1 watchdog=0\$" | head -1 || true)"
+    rm -f "$NEG_OUT"
     case "$3" in
-      expect-fail) if [ "$RES" = fail ]; then echo "NEGATIVE $1 with $2: failed as expected"; else echo "NEGATIVE $1 with $2: PASSED, the check cannot fail"; BAD=1; fi ;;
+      expect-fail)
+        if [ "$RES" = pass ]; then echo "NEGATIVE $1 with $2: PASSED, the check cannot fail"; BAD=1
+        elif [ -z "$OWN" ]; then echo "NEGATIVE $1 with $2: failed WITHOUT the check's own fail line (build failure, crash or timeout?)"; BAD=1
+        elif [ -n "$OTHER" ]; then echo "NEGATIVE $1 with $2: the check failed, but the run also hit: $OTHER"; BAD=1
+        else echo "NEGATIVE $1 with $2: failed as expected: $OWN"; fi ;;
       *) echo "NEGATIVE $1 with $2: $RES (recorded, not asserted)" ;;
     esac
   done
+  # The app left on disk is the plain one.
+  env -u NOCHE_TESTHOOKS "$ROOT/scripts/build-app.sh" >&2 || { echo "NEGATIVE plain rebuild failed"; BAD=1; }
   exit "$BAD"
 fi
 [ $# -gt 0 ] || { echo "usage: app-test.sh <check>... | --negative" >&2; exit 2; }
@@ -112,4 +128,8 @@ for CHECK in "$@"; do
   if [ -n "$LEFT" ]; then FAILED=1; echo "NOCHE_TEST leftover-helpers fail pids: $LEFT"; fi
 done
 rm -rf "$PROFILE"
+# The app left on disk is the plain one (no test hooks), unless --negative asked to keep the hook build between runs.
+if [ "${NOCHE_APPTEST_KEEP_HOOKS:-}" != 1 ]; then
+  env -u NOCHE_TESTHOOKS "$ROOT/scripts/build-app.sh" >&2 || { echo "NOCHE_TEST plain-rebuild fail"; FAILED=1; }
+fi
 exit "$FAILED"
