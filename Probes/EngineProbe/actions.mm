@@ -21,13 +21,17 @@ namespace {
 using H = std::shared_ptr<const ActionsHost>;
 void Crumb(const char* what) { fprintf(stderr, "[PROBE] CRUMB %s\n", what); fflush(stderr); }
 int g_added = 0, g_updated = 0;  // observer counters; counts only, never an action reference
+int g_badge7 = 0;  // OnActionUpdated calls whose payload already carried badge "7" on 0xFFFF0000 (icon loads fire it too)
 NSButton* g_button = nil;
 id g_hide = nil;  // the NSNotificationCenter observer token
 
 class Obs : public CefExtensionActionObserver {
  public:
   void OnActionAdded(CefRefPtr<CefExtensionAction>) override { g_added++; }
-  void OnActionUpdated(CefRefPtr<CefExtensionAction>) override { g_updated++; }
+  void OnActionUpdated(CefRefPtr<CefExtensionAction> a) override {
+    g_updated++;
+    if (a && a->GetBadgeText(nullptr).ToString() == "7" && a->GetBadgeBackgroundColor(nullptr) == 0xFFFF0000) g_badge7++;
+  }
  private:
   IMPLEMENT_REFCOUNTING(Obs);
 };
@@ -60,14 +64,19 @@ CefRefPtr<CefExtensionAction> Find(const H& h) {
   return nullptr;
 }
 
-int NonTransparentPixels(CefRefPtr<CefImage> img, int* w, int* hgt) {
+// Opaque pixels of the icon, and how many of them are the fixture icon's color #3366cc (RGBA, 3 per channel of slack).
+int NonTransparentPixels(CefRefPtr<CefImage> img, int* w, int* hgt, int* fixtureColor) {
+  *fixtureColor = 0;
   if (!img) return 0;
   CefRefPtr<CefBinaryValue> bin = img->GetAsBitmap(2.0f, CEF_COLOR_TYPE_RGBA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, *w, *hgt);
   if (!bin) return 0;
   std::vector<uint8_t> px(bin->GetSize());
   bin->GetData(px.data(), px.size(), 0);
   int n = 0;
-  for (size_t i = 3; i < px.size(); i += 4) if (px[i]) n++;
+  for (size_t i = 0; i + 3 < px.size(); i += 4) {
+    if (px[i + 3]) n++;
+    if (px[i + 3] == 255 && abs(px[i] - 0x33) <= 3 && abs(px[i + 1] - 0x66) <= 3 && abs(px[i + 2] - 0xcc) <= 3) (*fixtureColor)++;
+  }
   return n;
 }
 
@@ -157,23 +166,24 @@ void ActionsList(const H& h) {
     Crumb("list: GetIcon");
     auto icon = a->GetIcon(nullptr, 16);
     Crumb(icon ? "list: got icon" : "list: icon NULL");
-    int n = NonTransparentPixels(icon, &pw, &ph);
+    int match = 0;
+    int n = NonTransparentPixels(icon, &pw, &ph, &match);
     Crumb("list: pixels counted");
-    *detail = [NSString stringWithFormat:@"id=%s name=%s title=\"%s\" enabled=%d pinned=%d icon=%dx%d px with alpha=%d", a->GetId().ToString().c_str(), a->GetName().ToString().c_str(), a->GetTitle(nullptr).ToString().c_str(), (int)a->IsEnabled(nullptr), (int)a->IsPinned(), pw, ph, n];
-    return n > 0 && a->GetTitle(nullptr).ToString() == "Noche probe action";
+    *detail = [NSString stringWithFormat:@"id=%s name=%s title=\"%s\" enabled=%d pinned=%d icon=%dx%d px with alpha=%d, of them #3366cc=%d", a->GetId().ToString().c_str(), a->GetName().ToString().c_str(), a->GetTitle(nullptr).ToString().c_str(), (int)a->IsEnabled(nullptr), (int)a->IsPinned(), pw, ph, n, match];
+    return n > 0 && match * 2 > n && a->GetTitle(nullptr).ToString() == "Noche probe action";
   }, [h, detail](bool ok) { Done(h, ok, ok ? *detail : [@"title or icon never became right: " stringByAppendingString:*detail]); });
 }
 
 void BadgeObserver(const H& h) {
-  const int before = g_updated;
+  const int before = g_badge7;
   h->extCmd(@{@"what" : @"badge", @"text" : @"7", @"color" : @"#FF0000"}, [h, before](NSDictionary* r) {
     if (r[@"error"]) { Done(h, false, [NSString stringWithFormat:@"%@", r[@"error"]]); return; }
     auto got = std::make_shared<NSString*>(@"");
     WaitFor(h, 10000, [h, before, got] {
       auto a = Find(h);
       if (!a) return false;
-      *got = [NSString stringWithFormat:@"text=\"%s\" textColor=0x%08x background=0x%08x OnActionUpdated=%d (before %d) OnActionAdded=%d", a->GetBadgeText(nullptr).ToString().c_str(), a->GetBadgeTextColor(nullptr), a->GetBadgeBackgroundColor(nullptr), g_updated, before, g_added];
-      return a->GetBadgeText(nullptr).ToString() == "7" && a->GetBadgeBackgroundColor(nullptr) == 0xFFFF0000 && g_updated > before;
+      *got = [NSString stringWithFormat:@"text=\"%s\" textColor=0x%08x background=0x%08x OnActionUpdated=%d (with badge 7 on red: %d, before %d) OnActionAdded=%d", a->GetBadgeText(nullptr).ToString().c_str(), a->GetBadgeTextColor(nullptr), a->GetBadgeBackgroundColor(nullptr), g_updated, g_badge7, before, g_added];
+      return a->GetBadgeText(nullptr).ToString() == "7" && a->GetBadgeBackgroundColor(nullptr) == 0xFFFF0000 && g_badge7 > before;
     }, [h, got](bool ok) { Done(h, ok, ok ? *got : [@"observer or API did not report the badge: " stringByAppendingString:*got]); });
   });
 }

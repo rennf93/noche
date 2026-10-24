@@ -1,5 +1,5 @@
 // Also sets the badge ("badge") and drives the action popup: the popup reports its tabId ("popup") and clicks ("popupClick"), "popupclick" clicks it over the debugger API.
-// Answers {what:"tabs"} with what chrome.tabs sees, runs the probe commands create/activate, and keeps the tabId the popup resolved.
+// Answers {what:"tabs"} with what chrome.tabs sees, {what:"windowNormal"} with the window types and the normal filters, runs the probe commands create/activate, and keeps the tabId the popup resolved.
 let popupTab = null, popupClicks = 0;
 console.log("NOCHE-SW loaded v1.3");
 self.addEventListener("unhandledrejection", (e) => console.log("NOCHE-SW unhandledrejection", String(e.reason)));
@@ -24,6 +24,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (!t) { reply({ error: "no tab " + msg.n }); return; }
       return chrome.tabs.update(t.id, { active: true }).then((u) => reply({ id: u.id, index: u.index, active: u.active }));
     }).catch((e) => reply({ error: "activate rejected: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
+  if (msg && msg.what === "windowNormal") {  // what the extension sees as window type, and what the "normal" filters return
+    Promise.all([chrome.windows.getAll({ populate: true }), chrome.windows.getAll({ windowTypes: ["normal"], populate: true }),
+                 chrome.tabs.query({ windowType: "normal" }), chrome.tabs.query({})]).then(([all, normal, qNormal, qAll]) =>
+      reply({ rawTypes: all.map((w) => w.type), wins: normal.map((w) => ({ id: w.id, type: w.type, tabs: w.tabs ? w.tabs.length : -1 })), qNormal: qNormal.length, qAll: qAll.length }),
+      (e) => reply({ error: "windows rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
   if (msg && msg.what === "badge") {  // sets the badge for every tab: text and a #RRGGBB background

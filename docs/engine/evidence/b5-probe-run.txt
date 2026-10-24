@@ -4,7 +4,7 @@
 fetch-cef rc=0, build-cef-wrapper rc=0, engine/test.sh rc=0, test-fetch-cef.sh rc=0, swift test rc=0, build-app.sh rc=0
 smoke fixture rc=0 (expect 0), smoke closed-port rc=2 (expect 2), check-sandbox rc=0 (expect 0)
 
-## Probe run: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 scripts/probe-engine.sh <22 checks>, rc=0
+## Probe run: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 scripts/probe-engine.sh <21 checks>, rc=0
 PROBE ext-loaded info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
 PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
 PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0

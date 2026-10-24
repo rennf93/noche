@@ -87,7 +87,9 @@ static NSSet<NSString*>* g_reports_at_start;
 // Alpha guard (installed at the top of main(), before CEF starts): every window of the probe process stays alpha 0 and
 // click-through, whoever orders it in. Chromium can order a popup child window in at alpha 1 on first show
 // (native_widget_ns_window_bridge.mm:1037-1047, 2107-2109), before any update notification, so setAlphaValue: is clamped
-// and each order-in primitive zeroes the window first. Off only for NOCHE_PROBE_VISIBLE=1 (owner-approved visible runs).
+// and each order-in primitive zeroes the window first. It only zeroes alpha and ignores mouse events: it does not stop
+// activation or key status (see the activation guard below and ActivationProblem in actions.mm).
+// Off only for NOCHE_PROBE_VISIBLE=1 (owner-approved visible runs).
 #import <objc/runtime.h>
 static int g_guard_calls = 0;
 static void (*orig_setAlpha)(id, SEL, CGFloat);
@@ -667,10 +669,10 @@ static void HybridCdpStep(std::vector<double> lat) {
 
 static void RunTabsCheck() {
   const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"] || [g_check hasPrefix:@"switch-latency"] && [g_check hasSuffix:@"-hybrid"];  // the other 19 views already exist, Alloy style
-  const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last" ] containsObject:g_check];
+  const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last", @"window-normal" ] containsObject:g_check];
   const bool many = !few;
   int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
-  if ([g_check isEqualToString:@"close-last"]) total = 3;
+  if ([g_check isEqualToString:@"close-last"] || [g_check isEqualToString:@"window-normal"]) total = 3;
   if (!hybrid && !AddTabs(total - 1)) { Finish(false, @"AddTab returned NULL"); return; }
   // Loading is best effort: a slow tab must not hide the check's own answer.
   WaitFor([total]{ return (int)g_loaded_ids.size() >= total; }, 15000, [total](bool loaded) {
@@ -790,6 +792,19 @@ static void RunTabsCheck() {
           const size_t afterTabs = Tabs().size();
           Finish(added && after == before && afterTabs == beforeTabs + 1, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs before=%zu after=%zu (must be +1)", (int)added, before, after, beforeTabs, afterTabs]);
         });
+      });
+    } else if ([g_check isEqualToString:@"window-normal"]) {
+      // P5: the views-hosted Browser must be a "normal" window for the extension. rawTypes is what it sees today (info).
+      const size_t n = tabs.size();
+      ExtCmdDiag(@{@"what" : @"windowNormal"}, [n](NSDictionary* j) {
+        if (j[@"error"]) { Finish(false, [NSString stringWithFormat:@"%@", j[@"error"]]); return; }
+        printf("PROBE %s info raw window types seen by the extension: %s\n", g_check.UTF8String, [[j[@"rawTypes"] componentsJoinedByString:@","] UTF8String]);
+        fflush(stdout);
+        NSArray* wins = j[@"wins"];
+        const size_t viewTabs = g_view->GetTabCount();
+        const bool oneWin = wins.count == 1 && [wins[0][@"tabs"] intValue] == (int)viewTabs;
+        const bool query = [j[@"qNormal"] intValue] == (int)viewTabs && [j[@"qAll"] intValue] == (int)viewTabs;
+        Finish(n >= 2 && viewTabs == n && oneWin && query, [NSString stringWithFormat:@"windows.getAll normal=%lu (window tabs %@) tabs.query normal=%@ query all=%@ GetTabCount=%zu GetTabs=%zu", (unsigned long)wins.count, wins.count ? wins[0][@"tabs"] : @"-", j[@"qNormal"], j[@"qAll"], viewTabs, n]);
       });
     } else if ([g_check isEqualToString:@"ext-activate"]) {
       if (tabs.size() != 10) { Finish(false, [NSString stringWithFormat:@"expected 10 tabs, GetTabs=%zu", tabs.size()]); return; }
@@ -980,7 +995,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

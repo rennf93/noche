@@ -1,0 +1,40 @@
+# B6 RED run on the vendored engine without P5 (cef_binary_156.0.12-noche.3657+g2e54412), hidden, alpha guard on
+
+## Launch 1: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 scripts/probe-engine.sh window-normal, rc=1 (expected: fail)
+PROBE window-normal info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info raw window types seen by the extension: popup
+PROBE window-normal info alpha-guard hooked calls=5
+PROBE window-normal fail windows.getAll normal=0 (window tabs -) tabs.query normal=0 query all=3 GetTabCount=3 GetTabs=3
+PROBE window-normal info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal fail exit-rc=1 watchdog=0
+
+## Launch 2: scripts/probe-engine.sh badge-observer actions-list (tightened rules), rc=0
+PROBE badge-observer info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info alpha-guard hooked calls=5
+PROBE badge-observer pass text="7" textColor=0x00000000 background=0xffff0000 OnActionUpdated=2 (with badge 7 on red: 1, before 0) OnActionAdded=2
+PROBE badge-observer info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info alpha-guard hooked calls=5
+PROBE actions-list pass id=jkpfhboimkkaeacdcajlpalajnbigldj name=Noche engine probe extension title="Noche probe action" enabled=1 pinned=0 icon=32x32 px with alpha=1024, of them #3366cc=1024
+PROBE actions-list info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
