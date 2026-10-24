@@ -37,6 +37,8 @@ static CefRefPtr<CefBrowser> g_browser;  // the first tab: it carries the extens
 static NSString* g_url = @"about:blank";
 static int g_created = 0;  // browsers the window's views reported
 static int g_tab_added = 0, g_active_changed = 0;  // CefBrowserViewDelegate tab callbacks seen
+static std::set<int> g_before_close;               // ids whose OnBeforeClose ran (close-active-previous)
+static int g_stale_previous = 0;                   // OnActiveTabChanged calls whose |previous| was already in g_before_close
 static int g_last_active_id = -1;                  // the |active| of the last OnActiveTabChanged (an id, never a reference)
 static std::vector<CefRefPtr<CefBrowserView>> g_alloy;  // rss-20-hybrid: 19 Alloy-style views beside the Chrome-style one
 static std::set<int> g_loaded_ids;                 // browsers whose main frame finished loading
@@ -51,6 +53,7 @@ static std::function<void(NSDictionary*)> g_event_hook;  // CDP events (messages
 
 // A crash must not reach macOS (.ips report, Problem Reporter window): print one line and leave with 128+signal.
 static void CrashHandler(int sig, siginfo_t* si, void* uc) {
+  alarm(3);  // backtrace() can allocate and hang inside a malloc crash; SIGALRM's default action ends the process
   char b[] = "PROBE crash signal=00\n";
   b[19] = '0' + sig / 10; b[20] = '0' + sig % 10;
   write(1, b, sizeof b - 1);
@@ -190,6 +193,7 @@ static void Finish(bool ok, NSString* detail) {
   if (fresh.count) { ok = false; detail = [detail stringByAppendingFormat:@" child-terminated: %lu new crash report(s) %@", (unsigned long)fresh.count, fresh.allObjects]; }
   g_ok = ok;
   if (g_guard_calls) printf("PROBE %s info alpha-guard hooked calls=%d\n", g_check.UTF8String, g_guard_calls);
+  if (g_activation_guard) printf("PROBE %s info activate calls blocked=%d\n", g_check.UTF8String, g_activate_blocked);
   printf("PROBE %s %s %s\n", g_check.UTF8String, ok ? "pass" : "fail", detail.UTF8String);
   fflush(stdout);
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -326,7 +330,9 @@ class BVDelegate : public CefBrowserViewDelegate {
   void OnActiveTabChanged(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> previous, CefRefPtr<CefBrowser> active) override {
     g_active_changed++;
     g_last_active_id = active->GetIdentifier();
-    Log(@"ACTIVE_TAB_CHANGED previous=%d active=%d", previous ? previous->GetIdentifier() : -1, active->GetIdentifier());
+    const bool stale = previous && g_before_close.count(previous->GetIdentifier());
+    if (stale) g_stale_previous++;
+    Log(@"ACTIVE_TAB_CHANGED previous=%d active=%d%s", previous ? previous->GetIdentifier() : -1, active->GetIdentifier(), stale ? " (previous already past OnBeforeClose)" : "");
   }
   void OnTabClosed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab) override {
     g_tab_closed++;
@@ -430,6 +436,7 @@ static ActionsHost MakeActionsHost() {
   h.window = []() -> NSWindow* { return g_window ? ((__bridge NSView*)g_window->GetWindowHandle()).window : nil; };
   h.done = []() { return g_done; };
   h.url = []() { return g_url; };
+  h.activateBlocked = []() { return g_activate_blocked; };
   return h;
 }
 
@@ -519,6 +526,15 @@ class TabClient : public CefClient, public CefLifeSpanHandler {
   IMPLEMENT_REFCOUNTING(TabClient);
 };
 
+// Records which tabs reached OnBeforeClose, for close-active-previous. Ids only.
+class ClosingClient : public CefClient, public CefLifeSpanHandler {
+ public:
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  void OnBeforeClose(CefRefPtr<CefBrowser> b) override { g_before_close.insert(b->GetIdentifier()); }
+ private:
+  IMPLEMENT_REFCOUNTING(ClosingClient);
+};
+
 static std::vector<CefRefPtr<CefBrowser>> Tabs() {
   std::vector<CefRefPtr<CefBrowser>> t;
   g_view->GetTabs(t);
@@ -568,6 +584,10 @@ static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<doub
   EvalOn(tab, @"new Promise(r => requestAnimationFrame(() => r('raf')))", true, [=](NSString* r) mutable {
     if (!r.length) { Finish(false, @"no requestAnimationFrame result; is the screen locked or the window hidden?"); return; }
     lat.push_back(NowMs() - t0);
+    auto act = g_view ? g_view->GetActiveTab() : nullptr;
+    const bool isActive = act && act->GetIdentifier() == tab->GetIdentifier();
+    act = nullptr;
+    if (!isActive) { Finish(false, [NSString stringWithFormat:@"GetActiveTab is not tab %d after SetActiveTab (switch %zu)", tab->GetIdentifier(), lat.size()]); return; }
     Log(@"SWITCH %zu tab=%d %.1f ms", lat.size(), tab->GetIdentifier(), lat.back());
     const char* gapEnv = getenv("NOCHE_PROBE_GAP_MS");  // pause between switches, default 200
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (gapEnv ? atoi(gapEnv) : 200) * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ SwitchStep(tabs, lat); });
@@ -684,7 +704,7 @@ static void HybridCdpStep(std::vector<double> lat) {
 
 static void RunTabsCheck() {
   const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"] || [g_check hasPrefix:@"switch-latency"] && [g_check hasSuffix:@"-hybrid"];  // the other 19 views already exist, Alloy style
-  const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last", @"window-normal" ] containsObject:g_check];
+  const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last", @"window-normal", @"close-active-previous" ] containsObject:g_check];
   const bool many = !few;
   int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
   if ([g_check isEqualToString:@"close-last"] || [g_check isEqualToString:@"window-normal"]) total = 3;
@@ -710,9 +730,18 @@ static void RunTabsCheck() {
       const size_t beforeTabs = tabs.size();
       Eval(@"var a = document.createElement('a'); a.href = location.origin + '/?blank-link'; a.target = '_blank'; document.body.appendChild(a); a.click(); 'clicked'", [](NSString*) {});
       WaitFor([added0]{ return g_tab_added > added0; }, 8000, [before, beforeTabs](bool added) {
-        const int after = WindowCount();
-        const size_t afterTabs = Tabs().size();
-        Finish(added && after == before && afterTabs == beforeTabs + 1, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs before=%zu after=%zu (must be +1)", (int)added, before, after, beforeTabs, afterTabs]);
+        // The new tab must be the link's page, not any tab that happened to appear: its committed URL carries the query.
+        auto hasLink = [] {
+          auto now = Tabs();
+          bool found = false;
+          for (auto& t : now) if (auto f = t->GetMainFrame()) if (f->GetURL().ToString().find("?blank-link") != std::string::npos) found = true;
+          return found;
+        };
+        WaitFor(hasLink, added ? 5000 : 0, [=](bool linked) {
+          const int after = WindowCount();
+          const size_t afterTabs = Tabs().size();
+          Finish(added && linked && after == before && afterTabs == beforeTabs + 1, [NSString stringWithFormat:@"OnTabAdded=%d new tab URL has ?blank-link=%d windows before=%d after=%d (must be unchanged) GetTabs before=%zu after=%zu (must be +1)", (int)added, (int)linked, before, after, beforeTabs, afterTabs]);
+        });
       });
     } else if ([g_check isEqualToString:@"per-tab-client"]) {
       CefRefPtr<CefBrowser> a = g_view->AddTab(g_url.UTF8String, new TabClient(0), CefBrowserSettings(), nullptr, false);
@@ -782,6 +811,32 @@ static void RunTabsCheck() {
                 Finish(closed2 && gone2 && activeId != target && n2 == 18 && changed && alive2 && WindowCount() == before, [NSString stringWithFormat:@"%@; phase 2 (active tab): OnTabClosed=%d gone=%d GetActiveTab id=%d (closed %d) GetTabs=%zu (want 18) OnActiveTabChanged after close=%d window alive=%d", d1, (int)closed2, (int)gone2, activeId, target, n2, (int)changed, (int)alive2]);
               });
             });
+          });
+        });
+      });
+    } else if ([g_check isEqualToString:@"close-active-previous"]) {
+      // Engine review I1: close the ACTIVE tab; OnActiveTabChanged must never name as |previous| a tab whose OnBeforeClose
+      // already ran (header contract: previous is NULL if it had already closed). The closing tab is an AddTab tab with its
+      // own client so its OnBeforeClose is seen; it is made active first.
+      CefRefPtr<CefBrowser> t = g_view->AddTab(g_url.UTF8String, new ClosingClient(), CefBrowserSettings(), nullptr, /*activate=*/true);
+      if (!t) { Finish(false, @"AddTab returned NULL"); return; }
+      const int target = t->GetIdentifier();
+      t = nullptr;
+      WaitFor([target]{ return g_last_active_id == target; }, 5000, [target](bool activated) {
+        if (!activated) { Finish(false, @"the added tab did not become active"); return; }
+        const int changed0 = g_active_changed, closed0 = g_tab_closed;
+        auto cur = Tabs();
+        for (auto& c : cur) if (c->GetIdentifier() == target) c->GetHost()->CloseBrowser(true);
+        cur.clear();
+        WaitFor([closed0]{ return g_tab_closed > closed0; }, 8000, [=](bool closed) {
+          // The notification is a posted task: give it a second to run before judging.
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            auto act = g_view ? g_view->GetActiveTab() : nullptr;
+            const int activeId = act ? act->GetIdentifier() : -1;
+            act = nullptr;
+            const bool changed = g_active_changed > changed0;
+            Finish(closed && changed && activeId != -1 && activeId != target && g_stale_previous == 0,
+                   [NSString stringWithFormat:@"closed active tab %d: OnTabClosed=%d OnActiveTabChanged after close=%d GetActiveTab id=%d; OnActiveTabChanged calls with a previous already past OnBeforeClose=%d (want 0)", target, (int)closed, (int)changed, activeId, g_stale_previous]);
           });
         });
       });
@@ -949,11 +1004,12 @@ class WinDelegate : public CefWindowDelegate {
   void OnWindowDestroyed(CefRefPtr<CefWindow>) override {
     g_window_gone = true;
     // close-last: pending OnTabClosed callbacks may still arrive, so report a second later and shut down after that.
-    const bool deferred = [g_check isEqualToString:@"close-last"] && !g_done;
+    const bool deferred = ([g_check isEqualToString:@"close-last"] || [g_check isEqualToString:@"popup-close-last"]) && !g_done;
     g_regs.clear(); g_alloy.clear(); g_browser = nullptr; g_view = nullptr; g_window = nullptr;
     if (deferred)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         // OnTabClosed is skipped once the view is gone, so its count is info only.
+        if ([g_check isEqualToString:@"popup-close-last"]) { Finish(true, @"window closed with the last tab while the extension popup was showing, no crash"); return; }
         Finish(true, [NSString stringWithFormat:@"window closed with the last tab (documented behavior), no crash; OnTabClosed=%d of 3 (info only)", g_tab_closed]);
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, deferred ? 2 * NSEC_PER_SEC : 0), dispatch_get_main_queue(), ^{ [NCEngine shutdown]; exit(g_ok ? 0 : 1); });
@@ -1014,7 +1070,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

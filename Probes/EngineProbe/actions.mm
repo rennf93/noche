@@ -8,7 +8,7 @@
 
 #ifndef NOCHE_ACTIONS_API
 bool RunActionsCheck(NSString* check, const ActionsHost& host) {
-  static NSSet* names = [NSSet setWithObjects:@"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", nil];
+  static NSSet* names = [NSSet setWithObjects:@"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", nil];
   if (![names containsObject:check]) return false;
   host.finish(false, @"built without NOCHE_ACTIONS_API (needs the B5 engine)");
   return true;
@@ -218,8 +218,10 @@ void PopupAnchor(const H& h) {
       PopupState(h, ^bool(NSDictionary* s) { return [s[@"clicks"] intValue] >= 1; }, 10000, [=](NSDictionary* s) {
         const int clicks = [s[@"clicks"] intValue];
         NSString* act2 = act ?: ActivationProblem(h->window(), popup);
-        Done(h, delta <= 2.0 && clicks >= 1 && !act2,
-             [NSString stringWithFormat:@"popup content top %.1f (view %@; frame top %.1f incl. shadow) vs button bottom %.1f (delta %.1f pt, limit 2), CDP click reached popup.js %d time(s), tabId=%@, activation problem: %@", NSMaxY(content), which, NSMaxY(f), btn.origin.y, delta, clicks, s[@"tabId"], act2 ?: @"none"]);
+        // The guard makes NSApp.isActive read false whatever the engine asked for, so the blocked-call counter is the proof.
+        const int blocked = h->activateBlocked();
+        Done(h, delta <= 2.0 && clicks >= 1 && !act2 && blocked == 0,
+             [NSString stringWithFormat:@"popup content top %.1f (view %@; frame top %.1f incl. shadow) vs button bottom %.1f (delta %.1f pt, limit 2), CDP click reached popup.js %d time(s), tabId=%@, activation problem: %@, activate calls blocked=%d (want 0)", NSMaxY(content), which, NSMaxY(f), btn.origin.y, delta, clicks, s[@"tabId"], act2 ?: @"none", blocked]);
       });
     });
   });
@@ -235,8 +237,10 @@ void PopupTabId(const H& h) {
           NSNumber* tab = s[@"tabId"];
           NSNumber* active = t[@"activeId"];
           NSNumber* first = [t[@"ids"] firstObject];
-          const bool ok = [tab isKindOfClass:NSNumber.class] && [tab isEqual:active] && ![tab isEqual:first];
-          Done(h, ok, [NSString stringWithFormat:@"popup resolved tabId=%@, active tab (chrome.tabs) id=%@, first tab id=%@ (must differ), activation problem: %@", tab, active, first, ActivationProblem(h->window(), popup) ?: @"none"]);
+          const int blocked = h->activateBlocked();
+          NSString* act = ActivationProblem(h->window(), popup);
+          const bool ok = [tab isKindOfClass:NSNumber.class] && [tab isEqual:active] && ![tab isEqual:first] && !act && blocked == 0;
+          Done(h, ok, [NSString stringWithFormat:@"popup resolved tabId=%@, active tab (chrome.tabs) id=%@, first tab id=%@ (must differ), activation problem: %@, activate calls blocked=%d (want 0)", tab, active, first, act ?: @"none", blocked]);
         });
       });
     });
@@ -266,10 +270,27 @@ void PopupCloses(const H& h) {
   });
 }
 
+// Engine review M6: the popup is alive when the last tab goes. Closing every tab closes the window (as close-last); the
+// run must end through WinDelegate::OnWindowDestroyed with no crash, no crash report and no leftover process.
+void PopupCloseLast(const H& h) {
+  OpenPopup(h, [h](NSString* err, NSRect, NSWindow*) {
+    if (err) { Done(h, false, err); return; }
+    std::vector<CefRefPtr<CefBrowser>> tabs;
+    h->view()->GetTabs(tabs);
+    Crumb("popup-close-last: closing every tab");
+    for (auto& t : tabs) t->GetHost()->CloseBrowser(true);
+    tabs.clear();
+    // The window going away ends the run (main.mm); only a window that stays open is a verdict here.
+    WaitFor(h, 8000, [h] { return h->window() == nil; }, [h](bool gone) {
+      if (!gone) Done(h, false, @"window stayed open after the last tab closed with the popup showing");
+    });
+  });
+}
+
 }  // namespace
 
 bool RunActionsCheck(NSString* check, const ActionsHost& host) {
-  static NSSet* names = [NSSet setWithObjects:@"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", nil];
+  static NSSet* names = [NSSet setWithObjects:@"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", nil];
   if (![names containsObject:check]) return false;
   H h = std::make_shared<const ActionsHost>(host);
   // The observer must exist before the extension loads; adding it also needs the first browser, which exists here.
@@ -280,6 +301,7 @@ bool RunActionsCheck(NSString* check, const ActionsHost& host) {
     else if ([check isEqualToString:@"badge-observer"]) BadgeObserver(h);
     else if ([check isEqualToString:@"popup-anchor"]) PopupAnchor(h);
     else if ([check isEqualToString:@"popup-tabid"]) PopupTabId(h);
+    else if ([check isEqualToString:@"popup-close-last"]) PopupCloseLast(h);
     else PopupCloses(h);
   });
   return true;

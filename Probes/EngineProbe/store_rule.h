@@ -1,7 +1,7 @@
 // Pass rule of the install-no-window check (task B4), kept free of AppKit so a unit harness can replay recorded runs
 // (Probes/store-rule-test, scripts/test-store-rule.sh). Narrowest correct rule: the stray window P3 removes is a
 // Chrome browser window, class BrowserNativeWidgetWindow. The probe's own window is a CefNSWindow, the install sheet and
-// the post-install dialog are NativeWidgetMacNSWindow, so counting that one class cannot be satisfied by a stock engine
+// the post-install dialog are NativeWidgetMacNSWindow (the dialog a sheet of the probe window), so counting that one class cannot be satisfied by a stock engine
 // (the stock run showed one 1200x1396 BrowserNativeWidgetWindow and two activation attempts).
 #pragma once
 #include <string>
@@ -11,8 +11,9 @@ struct InstallFacts {
   int browserWindowsAfter = 0;   // ... after the install and the post-install wait
   int browserWindowOrders = 0;   // guard hits (order-in or makeKey) on that class during the whole run
   int staleTabTargets = 0;       // CDP targets at chrome://newtab, chrome://new-tab-page or chrome://apps; -1 if Target.getTargets failed
-  bool dialogSeen = false;       // a new NativeWidgetMacNSWindow (the post-install dialog) appeared after the install sheet closed
+  bool dialogSeen = false;       // a new sheet of the probe window, other than the install sheet, appeared (the post-install dialog)
   bool sameTabs = true;          // CefBrowserView tab count unchanged
+  int activateBlocked = 0;       // activation calls the probe's guard turned into no-ops (the engine asked for focus)
 };
 
 inline bool InstallNoWindowOk(const InstallFacts& f, std::string* why) {
@@ -25,6 +26,8 @@ inline bool InstallNoWindowOk(const InstallFacts& f, std::string* why) {
   if (f.staleTabTargets < 0) w += "Target.getTargets failed, new-tab rule unchecked; ";
   if (!f.dialogSeen) w += "post-install dialog window never appeared (UI path skipped); ";
   if (!f.sameTabs) w += "tab count changed; ";
+  // The guard hides the attempt from AppKit, so NSApp.isActive can no longer show it; the counter is the proof.
+  if (f.activateBlocked != 0) w += "engine asked to activate the app " + std::to_string(f.activateBlocked) + " time(s) (want 0); ";
   if (why) *why = w;
   return w.empty();
 }

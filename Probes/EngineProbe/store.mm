@@ -249,10 +249,11 @@ void Verdict(H h, bool installed, NSString* summary) {
   Info(@"tabs before=%d after=%d; activate calls blocked=%d; appActive=%d", g_tabs_before, tabs, h->activateBlocked(), (int)NSApp.isActive);
   const bool sameTabs = g_tabs_before < 0 || tabs == g_tabs_before;
   if (NSApp.isActive) { h->finish(false, [summary stringByAppendingString:@" APP BECAME ACTIVE"]); return; }
-  if (![g_chk isEqualToString:@"install-no-window"]) { h->finish(true, summary); return; }
+  // The four store-* experiments are only evidence if the install ran; a missing button or sheet must not read as a pass.
   if (!installed) { h->finish(false, [summary stringByAppendingString:@" install did not complete"]); return; }
+  if (![g_chk isEqualToString:@"install-no-window"]) { h->finish(true, summary); return; }
   // The pass rule (store_rule.h): no browser window at all, no guard hit on one, no new-tab/apps target, the
-  // post-install dialog really showed, same tab count. Blocked activation attempts are printed as info only.
+  // post-install dialog really showed, same tab count, no activation attempt (guard counter).
   h->send(@"Target.getTargets", @{}, [=](NSDictionary* r) {
     int stale = -1;
     NSArray* infos = r[@"result"][@"targetInfos"];
@@ -273,9 +274,10 @@ void Verdict(H h, bool installed, NSString* summary) {
     f.staleTabTargets = stale;
     f.dialogSeen = g_dialog_seen;
     f.sameTabs = sameTabs;
+    f.activateBlocked = h->activateBlocked();
     std::string why;
     const bool ruleOk = InstallNoWindowOk(f, &why);
-    Info(@"install-no-window facts: browserWindows %d -> %d, browser-window guard hits %d, stale targets %d, dialog seen %d, same tabs %d, activate calls blocked %d (info)",
+    Info(@"install-no-window facts: browserWindows %d -> %d, browser-window guard hits %d, stale targets %d, dialog seen %d, same tabs %d, activate calls blocked %d",
          f.browserWindowsBefore, f.browserWindowsAfter, f.browserWindowOrders, f.staleTabTargets, (int)f.dialogSeen, (int)f.sameTabs, h->activateBlocked());
     if (!ruleOk) { h->finish(false, [NSString stringWithFormat:@"%@ RULE FAILED: %s", summary, why.c_str()]); return; }
     Verdict2(h, summary, ruleOk);
@@ -285,7 +287,10 @@ void Verdict(H h, bool installed, NSString* summary) {
 void WatchDialog(H h, int left, dispatch_block_t done) {
   for (NSWindow* w in NSApp.windows) {
     if ([g_known containsObject:@((uintptr_t)(__bridge void*)w)] || (uintptr_t)(__bridge void*)w == g_install_sheet) continue;
-    if ([NSStringFromClass([w class]) isEqualToString:@"NativeWidgetMacNSWindow"] && (w.isVisible || w.isSheet)) {
+    // A views bubble, menu or toast has the same class; the post-install dialog is a sheet of the probe window. If AppKit
+    // reused the install sheet's address for it, this misses and the rule fails (never a false pass).
+    NSWindow* main = h->window();
+    if ([NSStringFromClass([w class]) isEqualToString:@"NativeWidgetMacNSWindow"] && w.isSheet && main && w.sheetParent == main) {
       if (!g_dialog_seen) Info(@"post-install dialog window seen: NativeWidgetMacNSWindow vis=%d sheet=%d %.0fx%.0f", (int)w.isVisible, (int)w.isSheet, w.frame.size.width, w.frame.size.height);
       g_dialog_seen = true;
     }
@@ -313,7 +318,7 @@ void AfterInstallClick(H h, NSDictionary* st) {
       WaitFor(h, 40000, [] { g_ext_id = InstalledId(); return g_ext_id != nil; }, [=](bool installed) {
         Info(@"install result: extension on disk=%d id=%@", (int)installed, g_ext_id ?: @"-");
         // The post-install UI (stray window, dialog) shows up within a moment: watch 6 s for a window that did not exist
-        // before the click (the install sheet itself excluded), of the dialog's class (NativeWidgetMacNSWindow), visible or a sheet.
+        // before the click (the install sheet itself excluded), that is a NativeWidgetMacNSWindow sheet of the probe window.
         WatchDialog(h, 24, ^{
           h->eval(kStateJS, false, [=](NSString* s) {
             NSDictionary* fin = Json(s);

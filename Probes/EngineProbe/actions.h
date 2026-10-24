@@ -14,8 +14,9 @@ struct ActionsHost {
   std::function<NSWindow*()> window;  // the probe's alpha-0 window
   std::function<bool()> done;         // g_done
   std::function<NSString*()> url;     // page URL for extra tabs
+  std::function<int()> activateBlocked;  // activation calls the guard turned into no-ops so far
 };
 
-// Returns true if |check| is one of: actions-list badge-observer popup-anchor popup-tabid popup-closes (it then owns
+// Returns true if |check| is one of: actions-list badge-observer popup-anchor popup-tabid popup-closes popup-close-last (it then owns
 // the run and ends it through host.finish), false for any other name.
 bool RunActionsCheck(NSString* check, const ActionsHost& host);
