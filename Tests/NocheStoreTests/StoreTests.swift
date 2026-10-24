@@ -35,7 +35,7 @@ final class StoreTests: XCTestCase {
         try store.db.read { db in
             let tables = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'"))
             for t in ["profile", "space", "window", "tabGroup", "tab", "setting", "grdb_migrations"] { XCTAssertTrue(tables.contains(t), t) }
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1", "v2"])
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM profile"), 1)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM space"), 1)
         }

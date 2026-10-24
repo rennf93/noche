@@ -47,6 +47,25 @@ enum Schema {
             CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
             """)
         }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: """
+            CREATE TABLE page (
+              id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+              url TEXT NOT NULL, host TEXT NOT NULL,
+              title TEXT NOT NULL DEFAULT '',
+              visitCount INTEGER NOT NULL DEFAULT 0, typedCount INTEGER NOT NULL DEFAULT 0,
+              lastVisitAt REAL NOT NULL,
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE UNIQUE INDEX page_url ON page(profileId, url) WHERE deletedAt IS NULL;
+            CREATE INDEX page_host ON page(profileId, host, lastVisitAt DESC) WHERE deletedAt IS NULL;
+            CREATE INDEX page_recent ON page(profileId, lastVisitAt DESC) WHERE deletedAt IS NULL;
+            CREATE TABLE visit (
+              id TEXT PRIMARY KEY, pageId TEXT NOT NULL REFERENCES page(id),
+              visitedAt REAL NOT NULL, transition TEXT NOT NULL DEFAULT 'link',
+              createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+            CREATE INDEX visit_page ON visit(pageId, visitedAt DESC);
+            """)
+        }
         return m
     }
 }

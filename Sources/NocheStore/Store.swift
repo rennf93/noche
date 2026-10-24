@@ -4,7 +4,7 @@ import NocheCore
 
 public final class Store: Sendable {
     let db: any DatabaseWriter
-    private let now: @Sendable () -> Date
+    let now: @Sendable () -> Date
     static let closedCap = 25
 
     private init(_ db: any DatabaseWriter, now: @escaping @Sendable () -> Date) throws {
