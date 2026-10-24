@@ -26,6 +26,21 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }).catch((e) => reply({ error: "activate rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
+  if (msg && msg.what === "click") {  // a left click at (x, y) of the n-th tab (1-based, tab strip order) over the debugger API
+    chrome.tabs.query({}).then((all) => {
+      all.sort((a, b) => a.index - b.index);
+      const t = all[msg.n - 1];
+      if (!t) { reply({ error: "no tab " + msg.n }); return; }
+      const target = { tabId: t.id };
+      return chrome.debugger.attach(target, "1.3").then(async () => {
+        for (const type of ["mousePressed", "mouseReleased"])
+          await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: msg.x, y: msg.y, button: "left", clickCount: 1 });
+        await chrome.debugger.detach(target);
+        reply({ ok: true });
+      });
+    }).catch((e) => reply({ error: "click failed: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
   if (msg && msg.what === "windowNormal") {  // what the extension sees as window type, and what the "normal" filters return
     Promise.all([chrome.windows.getAll({ populate: true }), chrome.windows.getAll({ windowTypes: ["normal"], populate: true }),
                  chrome.tabs.query({ windowType: "normal" }), chrome.tabs.query({})]).then(([all, normal, qNormal, qAll]) =>

@@ -13,6 +13,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     /// The tab our own last action made active, until the engine's callback confirms it: the engine's active tab lags behind
     /// a burst of Cmd+T and Cmd+W.
     private var intendedActive: NCTab?
+    private var typed: [Int: String] = [:]      // URL we navigated to from the address field, per tab
+    private var failed: [Int: String] = [:]     // the URL whose load failed: the tab keeps its old URL while the error page shows
     private var closing = Set<Int>()           // close requested, OnBeforeClose not yet seen
 
     private let backdrop = BackdropView(frame: .zero)
@@ -26,9 +28,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     private var animation: (start: TimeInterval, from: CGFloat, to: CGFloat, duration: TimeInterval, overshoot: Bool)?
     private var animationTimer: Timer?
 #if NOCHE_TESTHOOKS
-    /// Test support: how many times each Noche action ran, and where the card was every time it moved.
-    var actionCounts: [String: Int] = [:]
-    var commandLog: [Int] = []
+    /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
+    /// every time it moved, and where Copy URL writes.
+    static var actionCounts: [String: Int] = [:]
+    static var commandLog: [Int] = []
+    static var pasteboard = NSPasteboard.general
     var toggleStart: TimeInterval = 0, toggleEnd: TimeInterval = 0
     var cardLog: [(t: TimeInterval, x: CGFloat)] = []
 #endif
@@ -44,9 +48,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     var nsWindow: NSWindow? { window.nsWindow }
     private var activeTab: NCTab? { window.activeTab }
 
-    private func note(_ action: String) {
+    static func note(_ action: String) {
 #if NOCHE_TESTHOOKS
         actionCounts[action, default: 0] += 1
+#endif
+    }
+    private func note(_ action: String) { Self.note(action) }
+    private var pasteboard: NSPasteboard {
+#if NOCHE_TESTHOOKS
+        Self.pasteboard
+#else
+        NSPasteboard.general
 #endif
     }
 
@@ -106,6 +118,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 #endif
     }
 
+    private func shownURL(_ tab: NCTab) -> String { failed[tab.identifier] ?? tab.url }
+
     func refresh() {
         guard installed else { return }
         let entries = list.items.map { (title: list.displayTitle(of: $0.id), favicon: tabs[$0.engineID]?.favicon) }
@@ -114,7 +128,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toolbar.back.isEnabled = tab?.canGoBack ?? false
         toolbar.forward.isEnabled = tab?.canGoForward ?? false
         if toolbar.address.currentEditor() == nil {
-            toolbar.address.stringValue = tab.map { $0.url == "about:blank" ? "" : AddressInput.displayHost($0.url) } ?? ""
+            toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : AddressInput.displayHost(shownURL($0)) } ?? ""
         }
     }
 
@@ -209,21 +223,31 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toolbar.address.currentEditor()?.selectAll(nil)
     }
 
-    func goBack() { note("back"); activeTab?.goBack() }
-    func goForward() { note("forward"); activeTab?.goForward() }
-    func reload() { note("reload"); activeTab?.reload() }
-    func forceReload() { note("forceReload"); activeTab?.reloadIgnoringCache() }
+    /// Our own navigation actions end the "failed load" display: the error page's load end says nothing about the next page.
+    private func navigated() { if let tab = activeTab { failed[tab.identifier] = nil } }
+    func goBack() { note("back"); navigated(); activeTab?.goBack() }
+    func goForward() { note("forward"); navigated(); activeTab?.goForward() }
+    func reload() { note("reload"); navigated(); activeTab?.reload() }
+    func forceReload() { note("forceReload"); navigated(); activeTab?.reloadIgnoringCache() }
     func zoom(_ delta: Double?) {
         note("zoom")
         guard let tab = activeTab else { return }
         tab.zoomLevel = delta.map { min(5, max(-5, tab.zoomLevel + $0)) } ?? 0
     }
-    func showDevTools() { note("devTools"); activeTab?.showDevTools() }
+    func showDevTools() {
+        note("devTools")
+#if NOCHE_TESTHOOKS
+        // Test only: a DevTools window left open crashes the engine at close (see the task 4 fix report), so the self-test counts the action only.
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_REAL_DEVTOOLS"] != "1", app.hidden { return }
+#endif
+        activeTab?.showDevTools()
+    }
     func copyURL() {
         note("copyURL")
         guard let url = activeTab?.url else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url, forType: .string)
+        let board = pasteboard
+        board.clearContents()
+        board.setString(url, forType: .string)
     }
 
     private func selectRow(_ i: Int) {
@@ -242,7 +266,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
             let text = toolbar.address.stringValue
-            if let url = AddressInput.resolve(text, searchTemplate: app.searchTemplate) { activeTab?.loadURL(url.absoluteString) }
+            if let url = AddressInput.resolve(text, searchTemplate: app.searchTemplate), let tab = activeTab {
+                typed[tab.identifier] = url.absoluteString
+                failed[tab.identifier] = nil
+                tab.loadURL(url.absoluteString)
+            }
             endEditing()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
@@ -290,6 +318,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         if let id = ids[tab.identifier] { _ = list.remove(id) }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
+        typed[tab.identifier] = nil
+        failed[tab.identifier] = nil
         closing.remove(tab.identifier)
         if intendedActive === tab { intendedActive = nil }
         refresh()
@@ -297,7 +327,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 
     func window(_ window: NCWindow, didUpdate tab: NCTab) {
-        if let id = ids[tab.identifier] { list.update(id, url: tab.url, title: tab.title, isLoading: tab.isLoading) }
+        if let id = ids[tab.identifier] { list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading) }
         refresh()
         app.tabUpdated(tab)
     }
@@ -307,14 +337,18 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 
     func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int) {
-        app.tabLoadFailed(code: code)
+        if let url = typed[tab.identifier], let id = ids[tab.identifier] {
+            failed[tab.identifier] = url
+            list.update(id, url: url, title: tab.title, isLoading: false)
+        }
         refresh()
+        app.tabLoadFailed(code: code)
     }
 
     /// Chrome commands that duplicate a Noche action run the Noche action and are answered YES.
     func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool {
 #if NOCHE_TESTHOOKS
-        commandLog.append(commandId)
+        Self.commandLog.append(commandId)
 #endif
         switch commandId {
         case ChromeCommand.newTab: newTab()

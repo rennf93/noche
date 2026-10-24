@@ -10,10 +10,8 @@ import CefBridge
 final class SelfTest {
     struct Options { let check: String; let url: String }
 
-    /// 2368x1436 at the left edge of the usable area of the first screen (a Dock on the left narrows it; Chromium clamps to it).
-    static var windowFrame: NSRect {
-        NSRect(x: 192, y: 0, width: 2368, height: 1436)
-    }
+    /// The reference window size at the top-left of the first screen. The engine may open the window narrower; the checks set the frame.
+    static let windowFrame = NSRect(x: 0, y: 0, width: 2368, height: 1436)
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -83,6 +81,8 @@ final class SelfTest {
             case "load-error": await loadError()
             case "menu": await menu()
             case "sidebar-toggle": await sidebarToggle()
+            case "sidebar-scroll": await sidebarScroll()
+            case "shortcuts-once": await shortcutsOnce()
             default: finish(false, "unknown check")
             }
         }
@@ -262,20 +262,31 @@ final class SelfTest {
         ns.firstResponder?.keyDown(with: ev)
     }
 
-    /// A left click (or a middle click) delivered straight to the view, the way the window would after hit testing.
-    private func click(_ v: NSView, middle: Bool = false) {
-        guard let ns = ctl?.nsWindow else { return }
+    /// A left click (or a middle click) at the middle of |v|: found by hit testing the window's frame view, the way the window
+    /// would, then delivered to the view that was hit. False when |v| is not what is under that point (clipped, covered).
+    @discardableResult
+    private func click(_ v: NSView, middle: Bool = false) -> Bool {
+        guard let ns = ctl?.nsWindow, let host = ctl?.window.chromeHost else { return false }
         let p = v.convert(NSPoint(x: v.bounds.midX, y: v.bounds.midY), to: nil)
+        guard let hit = host.hitTest(host.convert(p, from: nil)), hit === v || hit.isDescendant(of: v) else { return false }
         func ev(_ t: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(with: t, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                windowNumber: ns.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
         }
         if middle {
-            if let up = ev(.otherMouseUp) { v.otherMouseUp(with: up) }
+            if let up = ev(.otherMouseUp) { hit.otherMouseUp(with: up) }
         } else {
-            if let down = ev(.leftMouseDown) { v.mouseDown(with: down) }
-            if let up = ev(.leftMouseUp) { v.mouseUp(with: up) }
+            if let down = ev(.leftMouseDown) { hit.mouseDown(with: down) }
+            if let up = ev(.leftMouseUp) { hit.mouseUp(with: up) }
         }
+        return true
+    }
+
+    private func findView(ofClass name: String, in view: NSView?) -> NSView? {
+        guard let view else { return nil }
+        if NSStringFromClass(type(of: view)) == name { return view }
+        for s in view.subviews { if let v = findView(ofClass: name, in: s) { return v } }
+        return nil
     }
 
     private func ownWindows() -> Int {
@@ -406,12 +417,13 @@ final class SelfTest {
         let selectedRow = ctl.sidebar.rows[safe: selected ?? 0]
         var samples: [String] = []
         // (name, view drawn by AppKit, sample point, the color it must be, a free spot of the view for the swatch)
-        for (name, view, p, color, free) in [("divider", ctl.toolbar as NSView, CGPoint(x: 100, y: 41), ChromeStyle.dividerColor, CGPoint(x: 400, y: 20)),
-                                             ("toolbar", ctl.view(withIdentifier: "card") ?? host, CGPoint(x: 600, y: 14), ChromeStyle.cardFill, CGPoint(x: 800, y: 20)),
-                                             ("selected row", (selectedRow ?? host) as NSView, CGPoint(x: 100, y: 3), ChromeStyle.rowSelectedFill, CGPoint(x: 120, y: 20))] {
+        for (name, view, p, color, free, literal) in [("divider", ctl.toolbar as NSView, CGPoint(x: 100, y: 41), ChromeStyle.dividerColor, CGPoint(x: 400, y: 20), UInt32(0x252525)),
+                                             ("toolbar", ctl.view(withIdentifier: "card") ?? host, CGPoint(x: 600, y: 14), ChromeStyle.cardFill, CGPoint(x: 800, y: 20), UInt32(0x1F1F1F)),
+                                             ("selected row", (selectedRow ?? host) as NSView, CGPoint(x: 100, y: 3), ChromeStyle.rowSelectedFill, CGPoint(x: 120, y: 20), UInt32(0x1B1D21))] {
             let got = pixel(view, p), want = swatchPixel(view, color: color, at: free)
             samples.append("\(name)=\(got.map { "\($0)" } ?? "nil") swatch=\(want.map { "\($0)" } ?? "nil")")
-            guard let want else { bad.append("no swatch for \(name)"); continue }
+            guard let want, let spec = swatchPixel(view, color: NSColor(hex: literal), at: free) else { bad.append("no swatch for \(name)"); continue }
+            if !close(got, spec) { bad.append("pixel \(name) is \(got.map { "\($0)" } ?? "nil"), the literal #\(String(literal, radix: 16)) renders as \(spec)") }
             if !close(got, want) { bad.append("pixel \(name) at \(p) is \(got.map { "\($0)" } ?? "nil"), the same color through the same pipeline is \(want)") }
         }
         line("info", "pixels \(samples.joined(separator: " "))")
@@ -426,36 +438,36 @@ final class SelfTest {
         guard await ready(), let ctl, let win else { return }
         for _ in 0..<3 { cmdT() }
         guard await until(10, { rowCount == 4 && win.tabs.count == 4 && selected == 3 }) else {
-            return finish(false, "3x Cmd+T: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") actions=\(ctl.actionCounts)")
+            return finish(false, "3x Cmd+T: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") actions=\(BrowserWindowController.actionCounts)")
         }
         guard win.activeTab === win.tabs.last else { return finish(false, "newest tab is not the engine's active tab") }
         try? await Task.sleep(for: .milliseconds(500))  // a second action per shortcut would add rows now
-        guard rowCount == 4, win.tabs.count == 4, ctl.actionCounts["newTab"] == 3 else {
-            return finish(false, "Cmd+T acted more than once: rows=\(rowCount) engine tabs=\(win.tabs.count) actions=\(ctl.actionCounts)")
+        guard rowCount == 4, win.tabs.count == 4, BrowserWindowController.actionCounts["newTab"] == 3 else {
+            return finish(false, "Cmd+T acted more than once: rows=\(rowCount) engine tabs=\(win.tabs.count) actions=\(BrowserWindowController.actionCounts)")
         }
         var trail: [Int] = []
         for (step, want) in [(nextTab, 0), (nextTab, 1), (previousTab, 0), (previousTab, 3)] as [(() -> Void, Int)] {
             step()
-            guard await until(5, { selected == want }) else { return finish(false, "tab keys: selected=\(selected.map(String.init) ?? "nil") engine active \(win.tabs.firstIndex { $0 === win.activeTab }.map(String.init) ?? "nil") want \(want) after \(trail) actions \(ctl.actionCounts) chrome commands \(ctl.commandLog) keys \(keyLog)") }
+            guard await until(5, { selected == want }) else { return finish(false, "tab keys: selected=\(selected.map(String.init) ?? "nil") engine active \(win.tabs.firstIndex { $0 === win.activeTab }.map(String.init) ?? "nil") want \(want) after \(trail) actions \(BrowserWindowController.actionCounts) chrome commands \(BrowserWindowController.commandLog) keys \(keyLog)") }
             trail.append(want)
         }
-        guard ctl.actionCounts["nextTab"] == 2, ctl.actionCounts["previousTab"] == 2 else { return finish(false, "next/previous acted \(ctl.actionCounts)") }
+        guard BrowserWindowController.actionCounts["nextTab"] == 2, BrowserWindowController.actionCounts["previousTab"] == 2 else { return finish(false, "next/previous acted \(BrowserWindowController.actionCounts)") }
         // Cmd+W on row 1 closes that tab, the row below (old row 2) becomes active.
         click(ctl.sidebar.rows[1])
         guard await until(5, { selected == 1 }) else { return finish(false, "row click did not select row 1") }
         let below = ctl.list.items[2].id
         cmdW()
         guard await until(10, { rowCount == 3 && win.tabs.count == 3 && ctl.list.activeID == below }) else {
-            return finish(false, "Cmd+W: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") actions=\(ctl.actionCounts)")
+            return finish(false, "Cmd+W: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") actions=\(BrowserWindowController.actionCounts)")
         }
         try? await Task.sleep(for: .milliseconds(500))
-        guard rowCount == 3, ctl.actionCounts["closeTab"] == 1 else { return finish(false, "Cmd+W acted more than once: rows=\(rowCount) \(ctl.actionCounts)") }
+        guard rowCount == 3, BrowserWindowController.actionCounts["closeTab"] == 1 else { return finish(false, "Cmd+W acted more than once: rows=\(rowCount) \(BrowserWindowController.actionCounts)") }
         // Mouse: New Tab row adds a tab, a middle click closes a row.
         click(ctl.sidebar.newTabRow)
         guard await until(10, { rowCount == 4 && win.tabs.count == 4 }) else { return finish(false, "New Tab row: rows=\(rowCount)") }
         click(ctl.sidebar.rows[0], middle: true)
         guard await until(10, { rowCount == 3 && win.tabs.count == 3 }) else { return finish(false, "middle click: rows=\(rowCount) engine tabs=\(win.tabs.count)") }
-        finish(maxOwnWindows == 1 && violations.isEmpty, "Cmd+T x3 -> 4 rows, newest active; next/previous wrap \(trail); Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max \(maxOwnWindows); actions \(ctl.actionCounts) \(violations)")
+        finish(maxOwnWindows == 1 && violations.isEmpty, "Cmd+T x3 -> 4 rows, newest active; next/previous wrap \(trail); Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max \(maxOwnWindows); actions \(BrowserWindowController.actionCounts) \(violations)")
     }
 
     private func tabsRapid() async {
@@ -463,12 +475,12 @@ final class SelfTest {
         for _ in 0..<20 { cmdT() }
         for _ in 0..<20 { cmdW() }  // 21 tabs with the first: the brief's 19 would leave two
         guard await until(30, { rowCount == 1 && win.tabs.count == 1 }) else {
-            return finish(false, "rapid: rows=\(rowCount) engine tabs=\(win.tabs.count) actions=\(ctl.actionCounts)")
+            return finish(false, "rapid: rows=\(rowCount) engine tabs=\(win.tabs.count) actions=\(BrowserWindowController.actionCounts)")
         }
         guard win.tabs.first === first else { return finish(false, "the surviving tab is not the first one") }
         let count = await extensionTabCount(first, want: 1)
-        finish(count == 1 && ctl.actionCounts["newTab"] == 20 && ctl.actionCounts["closeTab"] == 20 && maxOwnWindows == 1 && violations.isEmpty,
-               "20x Cmd+T then 20x Cmd+W: 1 row, 1 engine tab, extension count \(count.map(String.init) ?? "nil"), actions \(ctl.actionCounts), own windows max \(maxOwnWindows) \(violations)")
+        finish(count == 1 && BrowserWindowController.actionCounts["newTab"] == 20 && BrowserWindowController.actionCounts["closeTab"] == 20 && maxOwnWindows == 1 && violations.isEmpty,
+               "20x Cmd+T then 20x Cmd+W: 1 row, 1 engine tab, extension count \(count.map(String.init) ?? "nil"), actions \(BrowserWindowController.actionCounts), own windows max \(maxOwnWindows) \(violations)")
     }
 
     private func extCount() async {
@@ -532,7 +544,12 @@ final class SelfTest {
         click(ctl.sidebar.rows[0])
         guard await until(5, { selected == 0 }) else { return finish(false, "could not select the opener row") }
         let rows = rowCount
-        _ = await evaluate(opener, "document.getElementById('l').click()")
+        // A real mouse click on the link through DevTools input (the probe extension's debugger), not element.click().
+        let spot = await evaluate(opener, "JSON.stringify((() => { const r = document.getElementById('l').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })())")
+        guard let spot, let raw = try? JSONSerialization.jsonObject(with: Data(spot.utf8), options: .fragmentsAllowed) as? String,
+              let xy = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [Double], xy.count == 2 else { return finish(false, "link position \(spot ?? "nil")") }
+        let reply = await extension_(opener, #"{"what":"click","n":1,"x":\#(xy[0]),"y":\#(xy[1])}"#)
+        guard reply?["ok"] as? Bool == true else { return finish(false, "extension click \(String(describing: reply))") }
         guard await until(10, { rowCount == rows + 1 }) else { return finish(false, "no new row after the click (rows=\(rowCount))") }
         try? await Task.sleep(for: .milliseconds(500))
         finish(rowCount == rows + 1 && selected == 1 && win.tabs.count == rows + 1 && ownWindows() == 1 && violations.isEmpty,
@@ -556,6 +573,10 @@ final class SelfTest {
             if !row.bounds.contains(f.frame) { bad.append("row \(i) title frame \(f.frame) outside \(row.bounds)") }
             if f.stringValue.contains("…") { bad.append("row \(i) has an ellipsis") }
             if f.layer?.mask == nil { bad.append("row \(i) title has no fade mask") }
+            if f.frame.width <= 100 { bad.append("row \(i) title view is only \(f.frame.width) wide") }
+            let w = Double(f.bounds.width)
+            if let stop = row.fade.locations?[safe: 1]?.doubleValue, abs(stop - (w - 20) / w) > 0.001 { bad.append("row \(i) fade starts at \(stop), want \((w - 20) / w)") }
+            else if row.fade.locations?[safe: 1] == nil { bad.append("row \(i) has no fade stops") }
             let want = CGRect(x: 6, y: 93 + 37 * CGFloat(i), width: 185, height: 37)
             if ctl.frame(ofIdentifier: "sidebar.tab.\(i)").map({ !near($0, want.minX, want.minY, want.width, want.height) }) ?? true { bad.append("row \(i) frame is not \(want)") }
             if !row.showsPlaceholder { bad.append("row \(i) has no placeholder although the page has no favicon") }
@@ -563,28 +584,40 @@ final class SelfTest {
         finish(bad.isEmpty && violations.isEmpty, "titles of 300 W, Arabic and emoji stay inside rows of pitch 37, no ellipsis, fade mask, placeholder favicon \(bad) \(violations)")
     }
 
+    /// Cmd+L, the text, Return: the way a person navigates. False when the address field did not take the text.
+    private func submitAddress(_ text: String) -> Bool {
+        guard let ctl else { return false }
+        cmdL()
+        guard ctl.toolbar.address.currentEditor() != nil else { return false }
+        typeText(text)
+        if ctl.toolbar.address.stringValue != text { ctl.toolbar.address.currentEditor()?.insertText(text) }
+        pressReturn()
+        return true
+    }
+
     private func loadError() async {
         guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
         let good = tab.url
         let failures = loadFailures
-        tab.loadURL("http://127.0.0.1:1/")
+        // localhost, not 127.0.0.1: the fixture is on 127.0.0.1, so a failing 127.0.0.1 could not tell old from new.
+        guard submitAddress("http://localhost:1/") else { return finish(false, "address field did not take the text") }
         guard await until(15, { loadFailures > failures }) else { return finish(false, "no load error for a closed port") }
-        _ = await until(5, { ctl.toolbar.back.isEnabled })
-        line("info", "back enabled=\(ctl.toolbar.back.isEnabled) canGoBack=\(tab.canGoBack)")
+        _ = await until(5, { ctl.list.displayTitle(of: ctl.list.items[0].id) == "localhost" && ctl.toolbar.address.stringValue == "localhost" })
         let title = ctl.list.displayTitle(of: ctl.list.items[0].id)
         let address = ctl.toolbar.address.stringValue
-        line("info", "after the error: tab url \(tab.url) title \(tab.title) row title \(title) address \(address)")
-        guard title == "127.0.0.1", address == "127.0.0.1" else { return finish(false, "row title \(title) address \(address)") }
+        line("info", "after the error: tab url \(tab.url) tab title \(tab.title) row title \(title) address \(address) back enabled \(ctl.toolbar.back.isEnabled)")
+        guard title == "localhost", address == "localhost" else { return finish(false, "row title \(title) address \(address)") }
+        guard await until(10, { tab.canGoBack }) else { return finish(false, "Back is not available after the error") }
         shortcut("Go Back")
-        // The tab keeps the old URL while the error page shows, so the page itself is the evidence.
         var pageTitle: String?
         for _ in 0..<40 {
             pageTitle = await evaluate(tab, "document.title")
             if pageTitle == "\"Noche App Fixture\"" { break }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        guard pageTitle == "\"Noche App Fixture\"" else { return finish(false, "back enabled=\(ctl.toolbar.back.isEnabled) canGoBack=\(tab.canGoBack) keys=\(keyLog) Back shows the page titled \(pageTitle ?? "nil") (row title \(ctl.list.displayTitle(of: ctl.list.items[0].id)))") }
-        finish(violations.isEmpty, "closed port: row title and address are the host, Back returns to \(good) \(violations)")
+        guard pageTitle == "\"Noche App Fixture\"" else { return finish(false, "Back shows the page titled \(pageTitle ?? "nil") (back enabled \(ctl.toolbar.back.isEnabled), keys \(keyLog))") }
+        _ = await until(5, { ctl.toolbar.address.stringValue == "127.0.0.1" })
+        finish(ctl.toolbar.address.stringValue == "127.0.0.1" && violations.isEmpty, "closed port on localhost: row title and address show localhost, Back returns to \(good) (address \(ctl.toolbar.address.stringValue)) \(violations)")
     }
 
     private static let expectedMenu = [
@@ -611,29 +644,138 @@ final class SelfTest {
 
     private func sidebarToggle() async {
         guard await ready(), let ctl else { return }
-        func run(hide: Bool, limit: Double, viaButton: Bool = false) async -> (ms: Double, max: CGFloat, done: Bool) {
-            let target: CGFloat = hide ? 6 : 197
+        /// Milliseconds from the synthesized key event (or click) to the settled frame: cmdS is synchronous, so this is exact.
+        func run(viaButton: Bool = false) async -> (ms: Double, max: CGFloat) {
             ctl.cardLog = []
             let t0 = ProcessInfo.processInfo.systemUptime
             if viaButton { click(ctl.toolbar.toggle) } else { cmdS() }
-            var reached: Double?
-            while ProcessInfo.processInfo.systemUptime - t0 < 0.6 {
-                if ctl.cardX == target { reached = (ProcessInfo.processInfo.systemUptime - t0) * 1000; break }
-                try? await Task.sleep(for: .milliseconds(1))
-            }
-            // From the action starting to the settled frame (the key dispatch before it is reported apart).
-            let animated = ctl.toggleEnd > 0 ? (ctl.toggleEnd - ctl.toggleStart) * 1000 : .infinity
-            line("info", "\(hide ? "hide" : "show") key to action \(String(format: "%.0f", (ctl.toggleStart - t0) * 1000)) ms, action to settled frame \(String(format: "%.0f", animated)) ms, seen by the poll after \(String(format: "%.0f", reached ?? -1)) ms")
-            return (reached != nil ? animated : .infinity, ctl.cardLog.map(\.x).max() ?? 0, reached != nil)
+            _ = await until(1, { ctl.toggleEnd > 0 })
+            let ms = ctl.toggleEnd > 0 ? (ctl.toggleEnd - t0) * 1000 : .infinity
+            return (ms, ctl.cardLog.map(\.x).max() ?? 0)
         }
-        let hide = await run(hide: true, limit: 145)
+        let hide = await run()
         let lightsHidden = ctl.sidebar.lights.allSatisfy(\.isHidden)
-        let show = await run(hide: false, limit: 125)
+        let hiddenAt = ctl.frame(ofIdentifier: "card")?.minX
+        let show = await run()
+        let shownAt = ctl.frame(ofIdentifier: "card")?.minX
         let overshoot = show.max - 197
-        let hideAgain = await run(hide: true, limit: 145, viaButton: true)
-        line("info", "hide \(String(format: "%.0f", hide.ms)) ms (limit 145), show \(String(format: "%.0f", show.ms)) ms (limit 125), overshoot \(String(format: "%.2f", overshoot)) pt, button hide \(String(format: "%.0f", hideAgain.ms)) ms")
-        let ok = hide.ms <= 145 && lightsHidden && show.ms <= 125 && overshoot > 0.3 && overshoot <= 2.5 && ctl.actionCounts["toggleSidebar"] == 3 && hideAgain.ms <= 145
-        finish(ok && violations.isEmpty, "Cmd+S hides in \(String(format: "%.0f", hide.ms)) ms with the lights hidden, shows in \(String(format: "%.0f", show.ms)) ms with \(String(format: "%.2f", overshoot)) pt overshoot ending at 197; the toggle button hides again in \(String(format: "%.0f", hideAgain.ms)) ms; actions \(ctl.actionCounts) \(violations)")
+        let hideAgain = await run(viaButton: true)
+        func f(_ v: Double) -> String { String(format: "%.0f", v) }
+        line("info", "hide \(f(hide.ms)) ms (limit 145), show \(f(show.ms)) ms (limit 125), overshoot \(String(format: "%.2f", overshoot)) pt, button hide \(f(hideAgain.ms)) ms")
+        let ok = hide.ms <= 145 && lightsHidden && hiddenAt == 6 && show.ms <= 125 && shownAt == 197 && overshoot > 0.3 && overshoot <= 2.5
+            && BrowserWindowController.actionCounts["toggleSidebar"] == 3 && hideAgain.ms <= 145
+        finish(ok && violations.isEmpty, "Cmd+S hides in \(f(hide.ms)) ms with the lights hidden, shows in \(f(show.ms)) ms with \(String(format: "%.2f", overshoot)) pt overshoot ending at 197; the toggle button hides again in \(f(hideAgain.ms)) ms; actions \(BrowserWindowController.actionCounts) \(violations)")
+    }
+
+    private func sidebarScroll() async {
+        guard await ready(), let ctl, let win, let ns = ctl.nsWindow else { return }
+        let scroll = ctl.sidebar.scroll
+        func toTop() { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
+        var bad: [String] = []
+        var seen: [String] = []
+        for height in [1436.0, 800.0] {
+            ns.setFrame(NSRect(x: 0, y: 4, width: 2368, height: height), display: false)
+            guard await until(5, { Double(ctl.window.chromeHost?.bounds.height ?? 0) == height }) else { return finish(false, "window never got height \(height)") }
+            if rowCount < 40 {
+                for _ in 0..<(40 - rowCount) { _ = win.addTab(withURL: "about:blank", activate: false) }
+                guard await until(30, { rowCount == 40 && win.tabs.count == 40 }) else { return finish(false, "40 rows never appeared (rows=\(rowCount))") }
+            }
+            toTop()
+            guard await until(5, { ctl.frame(ofIdentifier: "sidebar.tab.0")?.minY == 93 }) else { return finish(false, "list not at the top: \(String(describing: ctl.frame(ofIdentifier: "sidebar.tab.0")))") }
+            // Select tab 1 by clicking its row (it is on screen), then Shift+Cmd+[ wraps to tab 40.
+            guard click(ctl.sidebar.rows[0]), await until(5, { selected == 0 }) else { return finish(false, "could not click row 0 at height \(height)") }
+            previousTab()
+            guard await until(5, { selected == 39 }) else { return finish(false, "Shift+Cmd+[ from tab 1 selected \(selected.map(String.init) ?? "nil") at height \(height)") }
+            let r39 = ctl.frame(ofIdentifier: "sidebar.tab.39")
+            let visible = ctl.frame(ofIdentifier: "sidebar")
+            let inside = r39.map { $0.minY >= 48 && $0.maxY <= (visible?.maxY ?? 0) } ?? false
+            if !inside { bad.append("h\(Int(height)): row 40 at \(String(describing: r39)) is not inside the sidebar \(String(describing: visible))") }
+            // The pitch holds in the scrolled list.
+            let p = zip(ctl.sidebar.rows, ctl.sidebar.rows.dropFirst()).allSatisfy { abs($1.frame.minY - $0.frame.minY - 37) < 0.01 }
+            if !p { bad.append("h\(Int(height)): row pitch is not 37") }
+            // Row 39 (tab 39) is out of reach at the top, and a click reaches it once scrolled to.
+            toTop()
+            let hiddenAtTop = (ctl.frame(ofIdentifier: "sidebar.tab.38")?.maxY ?? 0) > height - 0.5
+            if !hiddenAtTop { bad.append("h\(Int(height)): row 39 is not out of reach at the top") }
+            ctl.sidebar.document.scrollToVisible(ctl.sidebar.rows[39].frame)
+            let clicked = click(ctl.sidebar.rows[38])
+            let ok = clicked ? await until(5, { selected == 38 }) : false
+            if !ok { bad.append("h\(Int(height)): clicking row 39 after scrolling to it: hit=\(clicked) selected=\(selected.map(String.init) ?? "nil")") }
+            seen.append("h\(Int(height)): row 40 at y \(r39.map { "\($0.minY)-\($0.maxY)" } ?? "nil") of \(Int(visible?.maxY ?? 0))")
+        }
+        finish(bad.isEmpty && violations.isEmpty, "40 tabs at 1436 and 800 pt: Shift+Cmd+[ wraps to tab 40 and its row is fully visible (\(seen.joined(separator: "; "))), pitch 37, a scrolled-to row takes the click \(bad) \(violations)")
+    }
+
+    private func shortcutsOnce() async {
+        guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
+        BrowserWindowController.pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.noche.selftest"))
+        let general = NSPasteboard.general
+        let savedClipboard = general.string(forType: .string)
+        defer { general.clearContents(); if let savedClipboard { general.setString(savedClipboard, forType: .string) } }
+        var bad: [String] = []
+        var passed: [String] = []
+
+        // An unclaimed Cmd combo (no menu item) reaches the page as a keydown, the way AppKit falls through to the first responder.
+        if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "k",
+               charactersIgnoringModifiers: "k", isARepeat: false, keyCode: 40) {
+            ns.makeFirstResponder(page)
+            if !ns.performKeyEquivalent(with: ev), NSApp.mainMenu?.performKeyEquivalent(with: ev) != true { ns.firstResponder?.keyDown(with: ev) }
+            var keys = ""
+            _ = await until(5, { true })
+            for _ in 0..<20 {
+                keys = await evaluate(tab, "JSON.stringify(window.__keys || [])") ?? ""
+                if keys.contains("k+meta") { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            if keys.contains("k+meta") { passed.append("Cmd+K reached the page") } else { bad.append("Cmd+K never reached the page (page saw \(keys))") }
+        } else { bad.append("no web view for the Cmd+K case") }
+
+        func reset() { BrowserWindowController.actionCounts = [:]; BrowserWindowController.commandLog = [] }
+        func verify(_ name: String, _ action: String) {
+            let counts = BrowserWindowController.actionCounts, log = BrowserWindowController.commandLog
+            if counts != [action: 1] { bad.append("\(name): actions \(counts), want exactly [\(action): 1]") }
+            else if Set(log).count != log.count { bad.append("\(name): Chrome commands repeated \(log)") }
+            else { passed.append(name) }
+        }
+        func settle() async { try? await Task.sleep(for: .milliseconds(300)) }
+
+        // History for Back and Forward.
+        let before = loads
+        tab.loadURL(fixture("b.html"))
+        guard await until(10, { loads > before && tab.canGoBack }) else { return finish(false, "no history for Back") }
+
+        reset(); key("r", code: 15); await settle(); verify("Cmd+R", "reload")
+        reset(); key("r", code: 15, [.command, .shift]); await settle(); verify("Shift+Cmd+R", "forceReload")
+        reset(); key("=", code: 24, [.command, .shift], chars: "+"); await settle(); verify("Cmd+Shift+= (Zoom In)", "zoom")
+        if tab.zoomLevel != 0.5 { bad.append("Zoom In left the zoom at \(tab.zoomLevel)") }
+        reset(); key("-", code: 27); await settle(); verify("Cmd+- (Zoom Out)", "zoom")
+        reset(); key("0", code: 29); await settle(); verify("Cmd+0 (Actual Size)", "zoom")
+        if tab.zoomLevel != 0 { bad.append("Zoom Out and Actual Size left the zoom at \(tab.zoomLevel)") }
+        reset(); key("c", code: 8, [.command, .shift], chars: "C"); await settle(); verify("Shift+Cmd+C", "copyURL")
+        if BrowserWindowController.pasteboard.string(forType: .string) != tab.url { bad.append("Copy URL put \(BrowserWindowController.pasteboard.string(forType: .string) ?? "nil") on the pasteboard, want \(tab.url)") }
+        reset(); shortcut("Go Back"); await settle(); verify("Cmd+[", "back")
+        guard await until(10, { tab.canGoForward && !tab.url.hasSuffix("b.html") }) else { return finish(false, "Back did not go back (\(tab.url))") }
+        reset(); shortcut("Go Forward"); await settle(); verify("Cmd+]", "forward")
+        reset(); cmdL(); await settle(); verify("Cmd+L", "focusAddress")
+        if ctl.toolbar.address.currentEditor() == nil { bad.append("Cmd+L did not focus the address field") }
+        // Address editing: type, select all, copy; the clipboard holds the text.
+        general.clearContents()
+        typeText("hello noche")
+        key("a", code: 0)
+        key("c", code: 8)
+        if general.string(forType: .string) != "hello noche" { bad.append("address field: Cmd+A, Cmd+C left \(general.string(forType: .string) ?? "nil") on the pasteboard") } else { passed.append("address field Cmd+A, Cmd+C") }
+        ctl.toolbar.address.currentEditor()?.string = ""
+        if let ns = ctl.nsWindow { ns.makeFirstResponder(ns.contentView) }
+        reset(); cmdS(); await settle(); verify("Cmd+S", "toggleSidebar")
+        reset(); cmdT(); guard await until(5, { rowCount == 2 }) else { return finish(false, "Cmd+T made no row") }; await settle(); verify("Cmd+T", "newTab")
+        reset(); nextTab(); await settle(); verify("Shift+Cmd+]", "nextTab")
+        reset(); previousTab(); await settle(); verify("Shift+Cmd+[", "previousTab")
+        reset(); cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W closed no tab") }; await settle(); verify("Cmd+W", "closeTab")
+        reset(); key("n", code: 45); guard await until(15, { app.controllers.count == 2 && app.controllers[1].nsWindow != nil }) else { return finish(false, "Cmd+N opened no second window") }; await settle(); verify("Cmd+N", "newWindow")
+        reset(); key("w", code: 13, [.command, .shift], chars: "W"); guard await until(15, { app.controllers.count == 1 }) else { return finish(false, "Shift+Cmd+W did not close the second window") }; await settle(); verify("Shift+Cmd+W (second window)", "closeWindow")
+        reset(); key("i", code: 34, [.command, .option]); await settle(); verify("Opt+Cmd+I", "devTools")
+        finish(bad.isEmpty && violations.isEmpty, "\(passed.count) shortcuts acted exactly once with no repeated Chrome command: \(passed.joined(separator: ", ")) \(bad) \(violations)")
     }
 
     // MARK: helpers

@@ -1,8 +1,8 @@
 import AppKit
 
 /// The M1.1 main menu (titles and shortcuts from live-ui.md section 9, the reference's app menu named Noche). App actions
-/// target the AppDelegate, which routes them to the active window's controller; the edit items use nil targets so they
-/// reach the first responder (the address field or the page).
+/// target the AppDelegate, which routes them to the active window's controller; the edit items go to that window's first responder
+/// (the address field's editor or the page), key window or not.
 @MainActor
 enum MainMenu {
     static func build(app: AppDelegate) -> NSMenu {
@@ -32,14 +32,14 @@ enum MainMenu {
             a("Close Tab", #selector(AppDelegate.closeTab(_:)), "w"),
         ]))
         main.addItem(submenu("Edit", [
-            item("Undo", Selector(("undo:")), "z"),
-            item("Redo", Selector(("redo:")), "z", shift),
+            a("Undo", #selector(AppDelegate.undo(_:)), "z"),
+            a("Redo", #selector(AppDelegate.redo(_:)), "z", shift),
             .separator(),
-            item("Cut", #selector(NSText.cut(_:)), "x"),
-            item("Copy", #selector(NSText.copy(_:)), "c"),
+            a("Cut", #selector(AppDelegate.cut(_:)), "x"),
+            a("Copy", #selector(AppDelegate.copy(_:)), "c"),
             a("Copy URL", #selector(AppDelegate.copyURL(_:)), "c", shift),
-            item("Paste", #selector(NSText.paste(_:)), "v"),
-            item("Select All", #selector(NSText.selectAll(_:)), "a"),
+            a("Paste", #selector(AppDelegate.paste(_:)), "v"),
+            a("Select All", #selector(AppDelegate.selectAll(_:)), "a"),
         ]))
         let developer = submenu("Developer", [
             a("Developer Tools", #selector(AppDelegate.developerTools(_:)), "i", [.command, .option]),
@@ -112,7 +112,13 @@ final class ShortcutMenu: NSMenu {
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let typed = [event.charactersIgnoringModifiers, event.characters].compactMap { $0?.lowercased() }.compactMap(\.first)
         let keys = Set(typed + typed.compactMap { Self.unshifted[$0] } + typed.compactMap { Self.shifted[$0] })
-        if let item = match(self, keys, mods), let menu = item.menu {
+#if NOCHE_TESTHOOKS
+        // Negative control: AppKit's own matching only.
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NOEXACT"] == "1" { return super.performKeyEquivalent(with: event) }
+#endif
+        // A shifted key typed with Shift (Cmd+Shift+= is "+" on a US layout) matches the item keyed "+" that has no Shift of its own.
+        let viaShift = Set(typed.compactMap { Self.shifted[$0] })
+        if let item = match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil), let menu = item.menu {
             menu.update()
             if item.isEnabled, let i = menu.items.firstIndex(of: item) { menu.performActionForItem(at: i) }
             return true
