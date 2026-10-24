@@ -134,7 +134,9 @@ final class SelfTest {
         maxOwnWindows = max(maxOwnWindows, ownWindows())
         func note(_ s: String) { if violations.count < 5, !violations.contains(s) { violations.append(s) } }
         if NSApp.isActive { note("NSApp.isActive") }
-        for w in NSApp.windows {
+        // TUINSWindow is macOS's own text-input window (it sits at alpha 1 and is not ours); every other window counts. Our own windows at alpha 1 are caught by hidden's
+        // alpha-attempt count (setAlphaValue: is clamped), see the NOCHE_TEST_NEGATIVE=alpha pair in app-test.sh.
+        for w in NSApp.windows where !NSStringFromClass(type(of: w)).hasPrefix("TUI") {
             if w.alphaValue != 0 { note("alpha=\(w.alphaValue) on \(type(of: w))") }
             if w.isKeyWindow { note("key window \(type(of: w))") }
         }
@@ -176,8 +178,9 @@ final class SelfTest {
         }.count
     }
 
-    /// A person who quits right after the first page loaded must not crash the engine (its startup tasks are still pending);
-    /// the verdict is the exit and the crash-report diff in scripts/app-test.sh.
+    /// A person who quits as soon as the first page loaded must not crash the engine (its startup tasks are still pending);
+    /// the verdict is the exit and the crash-report diff in scripts/app-test.sh. The first load end is where the crash window is:
+    /// quitting at the first tab (earlier) or 0.3 s or more later never hit it.
     func quitEarly() async {
         guard await until(15, { loads >= 1 }) else { return finish(false, "first tab never finished loading") }
         finish(true, "quit right after the first load")
