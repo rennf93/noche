@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
+# Two-phase checks (names ending in -relaunch): phase 1 runs with `--selftest-phase 1` on the wiped profile, phase 2 with
+# `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` and every control below covers both.
 # Controls the app cannot give itself: new Noche*.ips crash reports (diffed per launch after a 3 s settle), the frontmost
 # app (lsappinfo every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s). The app's own limit is
 # 40 s (90 s for quit-100); this script kills the one app PID (TERM, then KILL) 20 s after that.
@@ -79,55 +81,63 @@ for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
 
 FAILED=0
 for CHECK in "$@"; do
-  : > "$OUTF"; : > "$ERRF"
-  rm -rf "$PROFILE"
-  REPORTS_BEFORE="$(crash_reports)"
-  BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit
-  LIMIT=$((BASE + ${NOCHE_TEST_SLACK:-20}))
-  # The throttling switches keep timers and renderers running in a window nobody sees.
-  (cd / && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" \
-      --load-extension="$ROOT/Probes/fixtures/probe-extension" \
-      --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
-      --disable-background-timer-throttling --mute-audio >"$OUTF" 2>"$ERRF") &
-  APP_PID=$!
-  WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0
-  for _ in $(seq 1 $((LIMIT * 10))); do
-    kill -0 "$APP_PID" 2>/dev/null || break
-    if [ $((TICK % 5)) = 0 ]; then
-      SAMPLES=$((SAMPLES + 1)); FP="$(front_pid)"
-      if [ -z "$FP" ]; then UNKNOWN=$((UNKNOWN + 1)); elif [ "$FP" = "$APP_PID" ]; then FRONT=$((FRONT + 1)); fi
+  # Checks ending in -relaunch run twice on one profile (phase 1, then 2); each phase must print its own pass line.
+  PHASES=""; case "$CHECK" in *-relaunch) PHASES="1 2" ;; esac
+  for PHASE in ${PHASES:-none}; do
+    [ "$PHASE" != none ] || PHASE=""
+    : > "$OUTF"; : > "$ERRF"
+    # Only phase 1 (or a one-phase check) starts from a wiped profile: phase 2 relaunches on what phase 1 left.
+    if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then rm -rf "$PROFILE"; fi
+    REPORTS_BEFORE="$(crash_reports)"
+    BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit
+    LIMIT=$((BASE + ${NOCHE_TEST_SLACK:-20}))
+    # The throttling switches keep timers and renderers running in a window nobody sees.
+    (cd / && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" ${PHASE:+--selftest-phase $PHASE} \
+        --load-extension="$ROOT/Probes/fixtures/probe-extension" \
+        --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
+        --disable-background-timer-throttling --mute-audio >"$OUTF" 2>"$ERRF") &
+    APP_PID=$!
+    WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0
+    for _ in $(seq 1 $((LIMIT * 10))); do
+      kill -0 "$APP_PID" 2>/dev/null || break
+      if [ $((TICK % 5)) = 0 ]; then
+        SAMPLES=$((SAMPLES + 1)); FP="$(front_pid)"
+        if [ -z "$FP" ]; then UNKNOWN=$((UNKNOWN + 1)); elif [ "$FP" = "$APP_PID" ]; then FRONT=$((FRONT + 1)); fi
+      fi
+      TICK=$((TICK + 1))
+      sleep 0.1
+    done
+    if kill -0 "$APP_PID" 2>/dev/null; then
+      # APP_PID is this script's own unreaped child, so it cannot have been reused.
+      WATCHDOG=1
+      kill -TERM "$APP_PID" 2>/dev/null || true  # the one PID, then the same PID hard after 5 s
+      for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
+      kill -0 "$APP_PID" 2>/dev/null && kill -KILL "$APP_PID" 2>/dev/null || true
     fi
-    TICK=$((TICK + 1))
-    sleep 0.1
+    set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
+    APP_PID=""
+    [ "$WATCHDOG" = 1 ] && echo "NOCHE_TEST $CHECK fail watchdog" >> "$OUTF"
+    grep '^NOCHE_TEST ' "$OUTF" || echo "NOCHE_TEST $CHECK fail no-output"
+    grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || FAILED=1
+    if grep -q '^NOCHE shutdown watchdog' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail NOCHE shutdown watchdog fired"; fi
+    if grep -q '^NOCHE devtools still open' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail $(grep -m1 '^NOCHE devtools still open' "$ERRF")"; fi
+    if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then
+      FAILED=1; echo "NOCHE_TEST $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"
+      grep '^NOCHE' "$ERRF" | head -20 || true
+      echo "--- last stderr lines:"; tail -15 "$ERRF" || true
+    fi
+    echo "NOCHE_TEST $CHECK info frontmost samples=$SAMPLES noche-frontmost=$FRONT unknown=$UNKNOWN"
+    [ "$FRONT" = 0 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail noche-was-frontmost in $FRONT of $SAMPLES samples"; }
+    [ "$UNKNOWN" -lt "$SAMPLES" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail frontmost-unreadable (lsappinfo gave no pid in $SAMPLES samples)"; }
+    sleep 3  # crash reports land seconds after the crash
+    NEW="$(comm -13 <(printf '%s\n' "$REPORTS_BEFORE") <(crash_reports))"
+    if [ -n "$NEW" ]; then FAILED=1; echo "NOCHE_TEST $CHECK fail new-crash-report: $(echo "$NEW" | tr '\n' ',')"; else echo "NOCHE_TEST $CHECK info crash reports: none new"; fi
+    LEFT=""
+    for _ in $(seq 1 10); do LEFT="$(helpers | tr '\n' ' ')"; [ -z "$LEFT" ] && break; sleep 0.5; done
+    if [ -n "$LEFT" ]; then FAILED=1; echo "NOCHE_TEST leftover-helpers fail pids: $LEFT"; fi
+    # A phase 1 without its pass line leaves nothing for phase 2 to check.
+    grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || break
   done
-  if kill -0 "$APP_PID" 2>/dev/null; then
-    # APP_PID is this script's own unreaped child, so it cannot have been reused.
-    WATCHDOG=1
-    kill -TERM "$APP_PID" 2>/dev/null || true  # the one PID, then the same PID hard after 5 s
-    for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
-    kill -0 "$APP_PID" 2>/dev/null && kill -KILL "$APP_PID" 2>/dev/null || true
-  fi
-  set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
-  APP_PID=""
-  [ "$WATCHDOG" = 1 ] && echo "NOCHE_TEST $CHECK fail watchdog" >> "$OUTF"
-  grep '^NOCHE_TEST ' "$OUTF" || echo "NOCHE_TEST $CHECK fail no-output"
-  grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || FAILED=1
-  if grep -q '^NOCHE shutdown watchdog' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail NOCHE shutdown watchdog fired"; fi
-  if grep -q '^NOCHE devtools still open' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail $(grep -m1 '^NOCHE devtools still open' "$ERRF")"; fi
-  if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then
-    FAILED=1; echo "NOCHE_TEST $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"
-    grep '^NOCHE' "$ERRF" | head -20 || true
-    echo "--- last stderr lines:"; tail -15 "$ERRF" || true
-  fi
-  echo "NOCHE_TEST $CHECK info frontmost samples=$SAMPLES noche-frontmost=$FRONT unknown=$UNKNOWN"
-  [ "$FRONT" = 0 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail noche-was-frontmost in $FRONT of $SAMPLES samples"; }
-  [ "$UNKNOWN" -lt "$SAMPLES" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail frontmost-unreadable (lsappinfo gave no pid in $SAMPLES samples)"; }
-  sleep 3  # crash reports land seconds after the crash
-  NEW="$(comm -13 <(printf '%s\n' "$REPORTS_BEFORE") <(crash_reports))"
-  if [ -n "$NEW" ]; then FAILED=1; echo "NOCHE_TEST $CHECK fail new-crash-report: $(echo "$NEW" | tr '\n' ',')"; else echo "NOCHE_TEST $CHECK info crash reports: none new"; fi
-  LEFT=""
-  for _ in $(seq 1 10); do LEFT="$(helpers | tr '\n' ' ')"; [ -z "$LEFT" ] && break; sleep 0.5; done
-  if [ -n "$LEFT" ]; then FAILED=1; echo "NOCHE_TEST leftover-helpers fail pids: $LEFT"; fi
 done
 rm -rf "$PROFILE"
 # The app left on disk is the plain one (no test hooks), unless --negative asked to keep the hook build between runs.

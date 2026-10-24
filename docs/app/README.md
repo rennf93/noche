@@ -21,7 +21,7 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 - Controls the app cannot give itself: new `Noche*.ips` crash reports (after a 3 s settle), the frontmost app (every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s).
 - A hidden window gets no frames while the screen is locked, and a loaded CPU can trip the watchdog: a timeout then is not necessarily a code fault. Check `ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` and `uptime`.
 
-## Checks (27)
+## Checks (28)
 
 | Check | What it asserts |
 |---|---|
@@ -51,11 +51,18 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 | no-zombie-tab | 20 tabs opened and closed in the same turn leave 1 tab and 1 row, and no closed tab is announced or listed again |
 | devtools-quit | with DevTools open (Opt+Cmd+I), the Quit menu action ends cleanly and every DevTools browser ended before shutdown (hidden; see Owner checks) |
 | devtools-close-tab | closing a tab with DevTools open (Cmd+W) closes the tab and its DevTools, the app is alive 2 s later |
+| chromium-restore-relaunch | two-phase: 3 tabs open at quit, then the relaunch on the same profile has exactly 1 engine tab and 1 window (Chromium's own session restore adds none) |
 | a11y-labels | tab rows are buttons labelled with the tab title and carry the selected state, the New Tab row, the 4 toolbar buttons (Toggle Sidebar, Back, Forward, Reload) and the 3 window buttons are labelled buttons; also, a row's favicon goes back to the placeholder when the next page has none |
 
 Negative controls (`--negative`): `no-zombie-tab` with `NOCHE_TEST_NO_CLOSED_FILTER=1`, `hidden` with `NOCHE_TEST_NEGATIVE=activate` and `shortcuts-once` with `NOCHE_TEST_NOEXACT=1` must fail; `devtools-quit` with `NOCHE_TEST_DEVTOOLS_LAST=1` is recorded only (the engine crash it targets has not reproduced in a hidden run). A pair counts as failed-as-expected only when the check printed its own `NOCHE_TEST <check> fail` line and the app exited 1 on it: a build failure, crash, timeout or missing binary fails `--negative`. The switches exist only in test-hook builds (`NOCHE_TESTHOOKS=1`; the bridge's declarations and counters follow the same switch), and `scripts/app-test.sh` ends by rebuilding `build/Noche.app` without them.
 
 Tab-switch latency on an unlocked screen is in the evidence file (median 11.9 ms, p90 12.9 ms, limits 16.7 and 33.3 ms).
+
+## Two-phase checks and Chromium session restore (M1.2)
+
+A check whose name ends in `-relaunch` runs twice on one profile: `--selftest <check> --selftest-phase 1` on a wiped profile, then `--selftest-phase 2` on what phase 1 left. Each phase prints its own `NOCHE_TEST <check> pass`, and the check passes only if both did (a failed phase 1 skips phase 2). The crash-report diff, leftover-helper poll, frontmost poll and stderr tail cover both phases. The harness argument is in `SelfTest.swift`, the checks in `SelfTestStore.swift`.
+
+`chromium-restore-relaunch`: phase 1 opens 3 tabs and quits normally; phase 2 waits 5 s after the first load, then counts engine tabs (`NCWindow.tabs`), NSWindows of the process and window controllers, before Noche restores anything. Result: 1 engine tab, 1 NSWindow, 1 controller. Chromium's own session restore adds nothing in our Chrome-style windows, so no startup preference is set and no engine or bridge code changed. (Had it added tabs, the pref is `session.restore_on_startup` = 5, new tab page, from `chrome/common/pref_names.h` and `session_startup_pref.h`, set on the request context before the first browser.) The check keeps asserting exactly 1 tab and 1 window in phase 2.
 
 ## Builder calls and rulings
 

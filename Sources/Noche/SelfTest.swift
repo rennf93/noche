@@ -8,7 +8,7 @@ import CefBridge
 /// screen gives a hidden window none (load-end and CEF callbacks still arrive).
 @MainActor
 final class SelfTest {
-    struct Options { let check: String; let url: String }
+    struct Options { let check: String; let url: String; let phase: Int }
 
     /// The first window's frame (AppKit global coordinates, origin bottom-left): 1436 high from the top of the 2560x1440 screen.
     /// It starts 300 pt in because macOS Stage Manager keeps windows out of its strip at the screen's left edge (see windowFrame()).
@@ -21,11 +21,14 @@ final class SelfTest {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
         var url = "about:blank"
         if let u = args.firstIndex(of: "--selftest-url"), u + 1 < args.count { url = args[u + 1] }
-        return Options(check: args[i + 1], url: url)
+        var phase = 1  // two-phase checks (names ending in -relaunch) run twice on one profile: --selftest-phase 1, then 2
+        if let p = args.firstIndex(of: "--selftest-phase"), p + 1 < args.count, let n = Int(args[p + 1]) { phase = n }
+        return Options(check: args[i + 1], url: url, phase: phase)
     }
 
     let check: String
     let url: String
+    let phase: Int
     unowned let app: AppDelegate
     private(set) var verdictPrinted = false
     var violations: [String] = []
@@ -38,6 +41,7 @@ final class SelfTest {
     init(_ options: Options, app: AppDelegate) {
         check = options.check
         url = options.url
+        phase = options.phase
         self.app = app
     }
 
@@ -125,6 +129,7 @@ final class SelfTest {
             case "a11y-labels": await a11yLabels()
             case "no-window": await noWindow()
             case "close-beforeunload": await closeBeforeUnload()
+            case "chromium-restore-relaunch": await chromiumRestoreRelaunch()
             default: finish(false, "unknown check")
             }
         }
