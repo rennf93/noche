@@ -60,18 +60,20 @@ extension Store {
     }
 
     /// Newest first. Matches host prefix, url prefix (also without the scheme and "www."), title word prefix and title prefix.
+    /// URLs are stored verbatim (a #fragment makes a separate row; normalizing is the caller's policy).
     /// The scheme-less url match is four LIKEs on |url|, no extra column. Ranking is the caller's job.
     public func pageCandidates(prefix: String, limit: Int = 50) throws -> [PageCandidate] {
         guard !prefix.isEmpty else { return [] }
-        let q = Self.escapeLike(prefix)
+        let q = Self.escapeLike(prefix.lowercased()), tq = q
         return try db.read { db in
             try PageRow.all().live()
                 .filter(sql: """
                     profileId = :pid AND (host LIKE :q || '%' ESCAPE '\\' OR url LIKE 'http://' || :q || '%' ESCAPE '\\'
                      OR url LIKE 'https://' || :q || '%' ESCAPE '\\' OR url LIKE 'https://www.' || :q || '%' ESCAPE '\\'
                      OR url LIKE 'http://www.' || :q || '%' ESCAPE '\\'
-                     OR title LIKE '% ' || :q || '%' ESCAPE '\\' OR title LIKE :q || '%' ESCAPE '\\')
-                    """, arguments: ["q": q, "pid": Schema.defaultProfileID])
+                     OR swiftLowercaseString(title) LIKE '% ' || :tq || '%' ESCAPE '\\'
+                     OR swiftLowercaseString(title) LIKE :tq || '%' ESCAPE '\\')
+                    """, arguments: ["q": q, "tq": tq, "pid": Schema.defaultProfileID])
                 .order(Column("lastVisitAt").desc, Column("rowid").desc)
                 .limit(limit)
                 .fetchAll(db).map(\.candidate)

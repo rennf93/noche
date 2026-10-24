@@ -96,6 +96,14 @@ final class PageStoreTests: XCTestCase {
         XCTAssertTrue(try s.pageCandidates(prefix: "\\").isEmpty)
     }
 
+    func testNonAsciiTitlesMatchCaseInsensitively() throws {
+        let s = try Store.inMemory()
+        try s.recordVisit(url: "https://a.com/", title: "Élan Vital", typed: false, at: at(1))
+        try s.recordVisit(url: "https://b.com/", title: "Привет мир", typed: false, at: at(2))
+        for q in ["él", "ÉL", "vit"] { XCTAssertEqual(try s.pageCandidates(prefix: q).map(\.url), ["https://a.com/"], q) }
+        for q in ["прив", "ПРИВ", "мир"] { XCTAssertEqual(try s.pageCandidates(prefix: q).map(\.url), ["https://b.com/"], q) }
+    }
+
     func testHostCandidatesGroupPerHost() throws {
         let s = try Store.inMemory()
         try s.recordVisit(url: "https://a.com/1", title: "One", typed: true, at: at(1))

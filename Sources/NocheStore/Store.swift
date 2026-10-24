@@ -23,7 +23,10 @@ public final class Store: Sendable {
     private static func configuration() -> Configuration {
         var c = Configuration()
         c.foreignKeysEnabled = true
-        c.prepareDatabase { db in try db.execute(sql: "PRAGMA synchronous = NORMAL") }
+        c.prepareDatabase { db in
+            db.add(function: .lowercase)
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+        }
         return c
     }
 
