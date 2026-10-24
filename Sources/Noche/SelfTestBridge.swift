@@ -187,7 +187,14 @@ extension SelfTest {
         }
         win.focusActiveContent()
         let back = await until(5, { inPage() && field.currentEditor() == nil })
-        finish(back, "field editor first responder, then focusActiveContent: page view first responder=\(inPage()) field editing=\(field.currentEditor() != nil) responder=\(String(describing: ns.firstResponder))")
+        // Again with DevTools open (it opens as its own window here, never docked in this one), counting activations of this call only.
+        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools") }
+        guard ns.makeFirstResponder(field), field.currentEditor() != nil, !inPage() else { return finish(false, "the field did not take first responder with DevTools open") }
+        let blocked0 = NCWindow.activationsBlocked(), alpha0 = NCWindow.alphaAttemptsOnOwnWindows()
+        win.focusActiveContent()
+        let backAgain = await until(5, { inPage() && field.currentEditor() == nil })
+        let guards = NCWindow.activationsBlocked() == blocked0 && NCWindow.alphaAttemptsOnOwnWindows() == alpha0 && violations.isEmpty
+        finish(back && backAgain && guards && win.devToolsCount == 1, "field editor first responder, then focusActiveContent: page view first responder=\(back), again with DevTools open (devToolsCount=\(win.devToolsCount))=\(backAgain), activation guards quiet during the call=\(guards) responder=\(String(describing: ns.firstResponder))")
     }
 
     /// webContentHidden hides the page view and keeps the tab alive; NO restores the view, its insets and the corner mask.
@@ -204,8 +211,23 @@ extension SelfTest {
         win.webContentHidden = false
         let shown = await until(5, { rect().map { self.near($0, before.minX, before.minY, before.width, before.height) } ?? false })
         let masked = await until(5, { win.webMaskExists })
-        finish(hid && alive && sum == "3" && shown && masked && win.tabs.count == 1,
-               "hidden: view gone=\(hid) tabs=\(win.tabs.count) same tab=\(alive) JS in the hidden tab=\(sum ?? "nil"); shown again at \(before): \(shown) mask=\(masked)")
+        let first = win.tabs.count == 1 && hid && alive && sum == "3" && shown && masked
+        // Rule R13: any switch of the active tab shows the page again, and the flag reads NO.
+        win.webContentHidden = true
+        _ = await until(5, { win.webView == nil })
+        guard let second = win.addTab(withURL: url, activate: true) else { return finish(false, "no second tab") }
+        let openShown = await until(10, { win.webView != nil && win.activeTab === second && !win.webContentHidden })
+        _ = await until(15, { !second.isLoading && second.url.hasPrefix("http") })
+        let secondJS = await evaluate(second, "40 + 2")
+        win.webContentHidden = true
+        _ = await until(5, { win.webView == nil })
+        win.activateTab(tab)
+        let switchShown = await until(10, { win.webView != nil && win.activeTab === tab && !win.webContentHidden })
+        let origJS = await evaluate(tab, "5 + 6")
+        win.webContentHidden = true  // the caller sets it again for its own blank tab
+        let again = await until(5, { win.webView == nil && win.webContentHidden })
+        finish(first && openShown && secondJS == "42" && switchShown && origJS == "11" && again && win.tabs.count == 2,
+               "hidden: view gone=\(hid) tabs=\(win.tabs.count) same tab=\(alive) JS in the hidden tab=\(sum ?? "nil"); shown again at \(before): \(shown) mask=\(masked); hide then open a tab: visible=\(openShown) JS=\(secondJS ?? "nil"); hide then activate the first: visible=\(switchShown) JS=\(origJS ?? "nil"); hidden again by the caller=\(again)")
     }
 }
 #endif

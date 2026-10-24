@@ -16,6 +16,7 @@
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
 - (void)applyMask;
+- (void)showWebContent;
 - (void)devToolsGone:(CefRefPtr<CefBrowser>)browser;
 - (void)devToolsAbout:(CefRefPtr<CefBrowser>)browser;
 - (void)closeWindowNow;
@@ -294,11 +295,13 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 
 - (NCTab*)addTabWithURL:(NSString*)url activate:(BOOL)activate {
   if (!_view) return nil;
+  if (activate) [self showWebContent];
   CefRefPtr<CefBrowser> b = _view->AddTab(url.UTF8String, nullptr, TabSettings(), nullptr, activate);
   return [self tabFor:b create:YES];
 }
 
 - (void)activateTab:(NCTab*)tab {
+  [self showWebContent];
   if (_view && tab.browser) _view->SetActiveTab(tab.browser);
 }
 
@@ -367,6 +370,12 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (_window) _window->Layout();
 }
 
+// Any switch of the active tab shows the page again (rule R13): the caller sets the flag again for a tab that wants it hidden.
+- (void)showWebContent {
+  if (NC_TEST_FLAG("NOCHE_TEST_NO_UNHIDE")) return;  // negative control: a switch leaves the view hidden
+  if (_webContentHidden) [self setWebContentHidden:NO];
+}
+
 - (void)focusActiveContent {
   if (NC_TEST_FLAG("NOCHE_TEST_NO_FOCUS")) return;  // negative control: focus stays where it is
   if (!_view) return;
@@ -374,6 +383,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (CefRefPtr<CefBrowser> b = _view->GetActiveTab()) b->GetHost()->SetFocus(true);
   // Views records the focus but leaves AppKit's first responder alone while the window is not key (hidden runs, a window
   // behind another): then the page's own responder takes it, as content would on a key window.
+  // DevTools opens as its own window here (focus-return opens one and still lands in this window's page), so the only
+  // WebContentsViewCocoa under the chrome host is the active tab's; CefBrowserHost::GetWindowHandle returns the window's
+  // content view, not the page's. nil (a crashed or loading renderer): Views focus still applies, the responder stays.
   NSView* page = self.webView;
   NSResponder* r = _nsWindow.firstResponder;
   if (page && !([r isKindOfClass:NSView.class] && [(NSView*)r isDescendantOf:page])) {
@@ -595,6 +607,7 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
 }
 
 - (void)activeTabChangedFrom:(CefRefPtr<CefBrowser>)previous to:(CefRefPtr<CefBrowser>)active {
+  [self showWebContent];
   NCTab* tab = [self tabFor:active create:YES];
   NCTab* prev = [self tabFor:previous create:NO];
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self didActivateTab:tab previous:prev]; }];
