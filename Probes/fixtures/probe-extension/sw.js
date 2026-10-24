@@ -1,13 +1,17 @@
 // Answers {what:"tabs"} with what chrome.tabs sees, runs the probe commands create/activate, and keeps the tabId the popup resolved.
 let popupTab = null;
+console.log("NOCHE-SW loaded v1.2");
+self.addEventListener("unhandledrejection", (e) => console.log("NOCHE-SW unhandledrejection", String(e.reason)));
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  console.log("NOCHE-SW msg", JSON.stringify(msg));
   if (msg && msg.what === "tabs") {
     Promise.all([chrome.tabs.query({}), chrome.tabs.query({ active: true })]).then(([all, act]) =>
-      reply({ count: all.length, ids: all.map((t) => t.id), activeId: act.length ? act[0].id : null }));
+      reply({ sw: "1.2", count: all.length, ids: all.map((t) => t.id), activeId: act.length ? act[0].id : null }));
     return true;
   }
   if (msg && msg.what === "create") {
     try {
+      console.log("NOCHE-SW calling tabs.create");
       chrome.tabs.create({ url: msg.url }).then((t) => reply({ id: t.id, windowId: t.windowId, index: t.index }), (e) => reply({ error: "create rejected: " + ((e && e.message) || String(e)) }));
     } catch (e) { reply({ error: "create threw: " + ((e && e.message) || String(e)) }); }
     return true;
