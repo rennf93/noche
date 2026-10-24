@@ -71,6 +71,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// Test support for the corner mask: YES when a mask exists; whether a point (window base coordinates, origin bottom-left) is inside it.
 @property(nonatomic, readonly) BOOL webMaskExists;
 - (BOOL)webMaskContainsWindowPoint:(NSPoint)point;
+#ifdef NOCHE_TESTHOOKS
+/// Test support: how many times the window layout was rebuilt and the corner mask path recomputed.
+@property(nonatomic, readonly) NSInteger testLayoutPasses, testMaskPasses;
+#endif
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR

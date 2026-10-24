@@ -200,10 +200,20 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   NSEdgeInsets _webInsets;
   CGFloat _webCornerRadius;
   CAShapeLayer* _mask;
+  // What the layout and the mask were last built from, so the same inputs build nothing (the sidebar motion sets insets every tick).
+  CefInsets _layoutInsets;
+  BOOL _layoutBuilt;
+  NSRect _maskKey;
+  CGFloat _maskRadius;
+  NSInteger _layoutPasses, _maskPasses;
 }
 
 @synthesize nsWindow = _nsWindow;
 @synthesize webInsets = _webInsets, webCornerRadius = _webCornerRadius;
+#ifdef NOCHE_TESTHOOKS
+- (NSInteger)testLayoutPasses { return _layoutPasses; }
+- (NSInteger)testMaskPasses { return _maskPasses; }
+#endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
   if ((self = [super init])) {
@@ -342,16 +352,23 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 // Views overrides SetBounds on the browser view (spike S1), so the rect is the window's box layout inside border.
+// CEF has no way to change a box layout's insets after the fact (CefBoxLayoutSettings only go in through SetToBoxLayout), so a
+// changed inset needs a new layout; unchanged insets, which are most calls, build nothing.
 - (void)applyLayout {
   if (!_window || !_view) return;
+  const CefInsets insets((int)lround(_webInsets.top), (int)lround(_webInsets.left), (int)lround(_webInsets.bottom),
+                         (int)lround(_webInsets.right));
+  if (_layoutBuilt && insets == _layoutInsets) return;
   CefBoxLayoutSettings st;
   st.horizontal = true;
-  st.inside_border_insets = CefInsets((int)lround(_webInsets.top), (int)lround(_webInsets.left),
-                                      (int)lround(_webInsets.bottom), (int)lround(_webInsets.right));
+  st.inside_border_insets = insets;
   st.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
   CefRefPtr<CefBoxLayout> bl = _window->SetToBoxLayout(st);
   bl->SetFlexForView(_view, 1);
   _window->Layout();
+  _layoutInsets = insets;
+  _layoutBuilt = YES;
+  _layoutPasses++;
   [self applyMask];
 }
 
@@ -369,6 +386,15 @@ static NSView* FindByClass(NSView* v, NSString* cls) {
   NSView* host = self.chromeHost;
   NSView* csv = host ? FindByClass(host, @"ViewsCompositorSuperview") : nil;
   if (!csv) return;
+  // The path depends on the content rect, the insets, the radius and the layer's own size: the same again changes nothing.
+  const NSRect key = NSMakeRect(_webInsets.left, _webInsets.bottom, _nsWindow.contentView.bounds.size.width - _webInsets.right,
+                                _nsWindow.contentView.bounds.size.height - _webInsets.top);
+  if (_mask && csv.layer.mask == _mask && _mask.path && NSEqualRects(key, _maskKey) && _webCornerRadius == _maskRadius &&
+      CGRectEqualToRect(_mask.frame, csv.layer.bounds))
+    return;
+  if (_webCornerRadius > 0 || _mask) _maskPasses++;
+  _maskKey = key;
+  _maskRadius = _webCornerRadius;
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
   csv.wantsLayer = YES;

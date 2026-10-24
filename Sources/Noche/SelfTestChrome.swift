@@ -9,6 +9,13 @@ extension SelfTest {
         guard await until(15, { loads >= 1 }) else { return finish(false, "first tab never finished loading") }
         guard let win = app.windows.first, let ns = win.nsWindow, let content = ns.contentView else { return finish(false, "no window") }
         win.webInsets = NSEdgeInsets(top: 48, left: 198, bottom: 7, right: 7)
+        // The same insets again must not rebuild the layout or the mask (they are set on every tick of the sidebar motion).
+        _ = await until(5, { win.testLayoutPasses > 0 })
+        let passes = (win.testLayoutPasses, win.testMaskPasses)
+        for _ in 0..<5 { win.webInsets = NSEdgeInsets(top: 48, left: 198, bottom: 7, right: 7) }
+        guard (win.testLayoutPasses, win.testMaskPasses) == passes else {
+            return finish(false, "setting the same insets 5 times rebuilt the layout \(win.testLayoutPasses - passes.0) times and the mask \(win.testMaskPasses - passes.1) times")
+        }
         // Window base coordinates have the origin bottom-left, so the bottom inset is the rect's minY.
         let size = content.convert(content.bounds, to: nil).size
         let want = NSRect(x: 198, y: 7, width: size.width - 198 - 7, height: size.height - 48 - 7)
