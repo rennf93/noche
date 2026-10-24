@@ -76,6 +76,30 @@ static void TeardownCalls(const char* where) {
 #endif
 }
 
+// Positive control for TeardownCalls: the same calls, made while tabs are alive, must answer non-empty. Returns the counts
+// line, or empty (and notes the problem in g_cb_bad) when any of them is NULL / 0 / empty. Actions only with the actions API.
+static NSString* LiveCounts(const char* when) {
+#ifdef NOCHE_TABS_API
+  auto a = g_view ? g_view->GetActiveTab() : nullptr;
+  std::vector<CefRefPtr<CefBrowser>> t;
+  if (g_view) g_view->GetTabs(t);
+  const size_t n = g_view ? g_view->GetTabCount() : 0;
+  size_t acts = 1;
+#ifdef NOCHE_ACTIONS_API
+  std::vector<CefRefPtr<CefExtensionAction>> v;
+  if (g_view) g_view->GetExtensionActions(v);
+  acts = v.size();
+#endif
+  NSString* line = [NSString stringWithFormat:@"%s: GetActiveTab=%d GetTabs=%zu GetTabCount=%zu GetExtensionActions=%zu", when, a ? a->GetIdentifier() : -1, t.size(), n, acts];
+  if (!a || t.empty() || !n || !acts) { [g_cb_bad appendFormat:@"positive control empty (%@); ", line]; }
+  printf("PROBE close-callbacks info live control %s\n", line.UTF8String);
+  fflush(stdout);
+  return line;
+#else
+  return @"";
+#endif
+}
+
 // A crash must not reach macOS (.ips report, Problem Reporter window): print one line and leave with 128+signal.
 static void CrashHandler(int sig, siginfo_t* si, void* uc) {
   alarm(3);  // backtrace() can allocate and hang inside a malloc crash; SIGALRM's default action ends the process
@@ -880,12 +904,22 @@ static void RunTabsCheck() {
       WaitFor([target]{ return g_last_active_id == target; }, 5000, [target](bool activated) {
         if (!activated) { Finish(false, @"the added tab did not become active"); return; }
         const int closed0 = g_tab_closed;
+        WaitFor([]{
+#ifdef NOCHE_ACTIONS_API
+          return g_view && g_view->GetExtensionActionCount() > 0;
+#else
+          return true;
+#endif
+        }, 15000, [target, closed0](bool) {
+        LiveCounts("before non-last close");
         auto cur = Tabs();
         for (auto& c : cur) if (c->GetIdentifier() == target) c->GetHost()->CloseBrowser(true);
         cur.clear();
         WaitFor([closed0]{ return g_tab_closed > closed0; }, 8000, [](bool closed) {
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             if (!closed || g_cb_bad.length) { Finish(false, [NSString stringWithFormat:@"non-last close: OnTabClosed=%d %@", (int)closed, g_cb_bad]); return; }
+            LiveCounts("before last close");
+            if (g_cb_bad.length) { Finish(false, [NSString stringWithFormat:@"%@", g_cb_bad]); return; }
             g_cb_last = true;
             auto last = Tabs();
             if (last.size() != 1) { Finish(false, [NSString stringWithFormat:@"expected 1 tab left, GetTabs=%zu", last.size()]); return; }
@@ -895,6 +929,7 @@ static void RunTabsCheck() {
               if (!gone) Finish(false, @"window stayed open after the last tab closed");
             });
           });
+        });
         });
       });
     } else if ([g_check isEqualToString:@"close-last"]) {

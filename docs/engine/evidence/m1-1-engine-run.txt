@@ -501,3 +501,176 @@ rc=0
 - Launch 1 close-callbacks: pass line printed, then exit-rc=2. The probe log of the rc=2 run shows "Teardown watchdog expired; recording dump and terminating." (Chromium's shutdown watchdog, host load averages 13 to 90 from unrelated jobs). Four later solo runs of close-callbacks: pass, rc 0 each (5 of 6 launches rc 0, same code).
 - Launch 3 switch-latency and switch-latency-ab: fail timeout (40 s watchdog). Every SWITCH line in the probe log is 1007 to 1015 ms (the per-switch frame wait falling back to its 1 s limit) and the window reports occlusionVisible=0 at 3 s, so no frames reached the hidden window. Rerun solo twice at load 11 to 38: same fail. The launch cap (10) is spent, so it was NOT rerun on the previous engine to separate environment from engine. blank-link, per-tab-client, close-non-last and close-last (same launch) pass.
 - Solo close-callbacks green runs after the fix (rc 0, pass): see launches above. RED on the old engine (4839fc4): "window stayed open after the last tab closed" then crash signal=06 with "FATAL tab_strip_model.cc:142 Check failed: !*guard_flag" (AddTab from OnBeforeClose of the last tab re-enters the tab strip mid-removal).
+
+## Fix round 1 (raw output; every probe line, guard lines omitted). Positive control added to close-callbacks (live control lines). Screen was LOCKED for every launch.
+
+## switch-latency pair on OLD engine: cef_binary_156.0.13-noche.3658+g4839fc4+chromium-156.0.8078.48_macosarm64_minimal
+[15:01:05] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 23.49 15.63 19.17
+scripts/probe-engine.sh switch-latency
+PROBE switch-latency info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency info alpha-guard hooked calls=7
+PROBE switch-latency info activate calls blocked=0
+PROBE switch-latency fail timeout
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE switch-latency fail exit-rc=134 watchdog=0
+PROBE switch-latency info frontmost samples=85 probe-frontmost=0 unknown=0
+PROBE switch-latency info crash reports: none new
+rc=1
+[15:02:07] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 16.41 15.09 18.73
+[15:02:07] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 16.41 15.09 18.73
+scripts/probe-engine.sh switch-latency-ab
+PROBE switch-latency-ab info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency-ab info alpha-guard hooked calls=7
+PROBE switch-latency-ab info activate calls blocked=0
+PROBE switch-latency-ab fail timeout
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE switch-latency-ab fail exit-rc=134 watchdog=0
+PROBE switch-latency-ab info frontmost samples=86 probe-frontmost=0 unknown=0
+PROBE switch-latency-ab info crash reports: none new
+rc=1
+[15:03:09] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 12.09 14.12 18.10
+
+## switch-latency pair on NEW engine: cef_binary_156.0.14-noche.3659+g18b1359+chromium-156.0.8078.48_macosarm64_minimal
+[15:03:30] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 26.43 17.22 19.11
+scripts/probe-engine.sh switch-latency
+PROBE switch-latency info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency info alpha-guard hooked calls=7
+PROBE switch-latency info activate calls blocked=0
+PROBE switch-latency fail timeout
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE switch-latency fail exit-rc=134 watchdog=0
+PROBE switch-latency info frontmost samples=89 probe-frontmost=0 unknown=0
+PROBE switch-latency info crash reports: none new
+rc=1
+[15:04:36] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 14.77 15.59 18.36
+[15:04:36] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 14.77 15.59 18.36
+scripts/probe-engine.sh switch-latency-ab
+PROBE switch-latency-ab info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency-ab info alpha-guard hooked calls=7
+PROBE switch-latency-ab info activate calls blocked=0
+PROBE switch-latency-ab fail timeout
+PROBE switch-latency-ab fail exit-rc=1 watchdog=0
+PROBE switch-latency-ab info frontmost samples=80 probe-frontmost=0 unknown=0
+PROBE switch-latency-ab info crash reports: none new
+rc=1
+[15:05:38] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 36.19 21.46 20.34
+
+## close-callbacks x10 on NEW engine
+[15:05:38] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 36.19 21.46 20.34
+run 1
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=43 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:06:14] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 51.98 26.90 22.36
+run 2
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=21 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:06:36] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 69.65 32.78 24.58
+run 3
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=33 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:07:07] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 58.95 33.82 25.25
+run 4
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=25 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:07:35] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 44.90 32.87 25.20
+run 5
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=26 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:08:04] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 36.40 32.11 25.20
+run 6
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=35 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:08:38] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 25.15 29.76 24.62
+run 7
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=26 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:09:06] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 22.13 28.68 24.38
+run 8
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=35 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:09:41] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 27.58 29.03 24.66
+run 9
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=35 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+[15:10:13] lock: "CGSSessionScreenIsLocked"=Yes  load averages: 22.57 27.62 24.32
+run 10
+PROBE close-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-callbacks info live control before non-last close: GetActiveTab=2 GetTabs=2 GetTabCount=2 GetExtensionActions=1
+PROBE close-callbacks info live control before last close: GetActiveTab=1 GetTabs=1 GetTabCount=1 GetExtensionActions=1
+PROBE close-callbacks info alpha-guard hooked calls=7
+PROBE close-callbacks info activate calls blocked=0
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+PROBE close-callbacks info frontmost samples=35 probe-frontmost=0 unknown=0
+PROBE close-callbacks info crash reports: none new
+rc=0
+
+## Earlier rc=2 watchdog run: probe.log tail captured at the time (previous round)
+[83971] ...ERROR:base/process/kill_posix.cc:33] waitpid(84118): No child processes (10)
+Teardown watchdog expired; recording dump and terminating.
+(that log was from a switch-latency-ab run under a locked screen with 20 tabs closing at shutdown, not from close-callbacks; the close-callbacks rc=2 run's log was overwritten by the next launch and not kept)
