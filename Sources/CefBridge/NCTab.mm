@@ -19,6 +19,7 @@ class NCFaviconCallback : public CefDownloadImageCallback {
  public:
   NCFaviconCallback(NCTab* tab, void (^done)(void)) : tab_(tab), done_(done) {}
   void OnDownloadImageFinished(const CefString&, int, CefRefPtr<CefImage> image) override {
+    NC_CEF_CALLBACK;
     NCTab* tab = tab_;
     if (!tab || !image) return;
     int w = 0, h = 0;
@@ -45,6 +46,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 @interface NCTab ()
 - (instancetype)initPrivate;
 - (BOOL)handleDevToolsMessage:(NSData*)data;
+- (void)closeAfterDevTools:(int)left;
 @end
 
 @implementation NCTab {
@@ -97,12 +99,29 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 }
 
 - (void)close {
-  if (_browser) _browser->GetHost()->CloseBrowser(false);
+  if (!_browser) return;
+  CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+  // The DevTools browser of a closing tab goes first (closing the tab under it can leave it alive until the profile dies).
+  if (host->HasDevTools()) {
+    host->CloseDevTools();
+    [self closeAfterDevTools:40];
+  } else {
+    host->CloseBrowser(false);
+  }
+}
+
+- (void)closeAfterDevTools:(int)left {
+  if (!_browser) return;
+  if (left > 0 && _browser->GetHost()->HasDevTools()) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeAfterDevTools:left - 1]; });
+    return;
+  }
+  _browser->GetHost()->CloseBrowser(false);
 }
 
 - (void)evaluateJavaScript:(NSString*)script completion:(NCEvalCompletion)completion {
   if (!_browser) {
-    completion(nil, @"tab closed");
+    dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"tab closed"); });
     return;
   }
   const int rid = ++_nextId;
@@ -127,22 +146,26 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   NCEvalCompletion cb = _pending[key];
   if (!cb) return NO;
   [_pending removeObjectForKey:key];
+  // Completions never run inside the CEF callback that carries the reply.
+  void (^done)(NSString*, NSString*) = ^(NSString* json, NSString* error) {
+    dispatch_async(dispatch_get_main_queue(), ^{ cb(json, error); });
+  };
   if (NSDictionary* err = j[@"error"]) {
-    cb(nil, [err isKindOfClass:NSDictionary.class] ? (err[@"message"] ?: @"CDP error") : @"CDP error");
+    done(nil, [err isKindOfClass:NSDictionary.class] ? (err[@"message"] ?: @"CDP error") : @"CDP error");
     return YES;
   }
   NSDictionary* result = j[@"result"];
   if (NSDictionary* ex = result[@"exceptionDetails"]) {
-    cb(nil, ex[@"exception"][@"description"] ?: ex[@"text"] ?: @"exception");
+    done(nil, ex[@"exception"][@"description"] ?: ex[@"text"] ?: @"exception");
     return YES;
   }
   id value = result[@"result"][@"value"];
   if (!value) {  // undefined
-    cb(@"null", nil);
+    done(@"null", nil);
     return YES;
   }
   NSData* out = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingFragmentsAllowed error:nil];
-  cb(out ? [[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding] : @"null", nil);
+  done(out ? [[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding] : @"null", nil);
   return YES;
 }
 
@@ -151,7 +174,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   _browser = nullptr;
   NSArray<NCEvalCompletion>* callbacks = _pending.allValues;
   [_pending removeAllObjects];
-  for (NCEvalCompletion cb in callbacks) cb(nil, @"tab closed");
+  for (NCEvalCompletion cb in callbacks) dispatch_async(dispatch_get_main_queue(), ^{ cb(nil, @"tab closed"); });
 }
 
 - (void)loadFaviconFromURL:(NSString*)url done:(void (^)(void))done {
@@ -163,6 +186,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 namespace {
 
 bool NCDevToolsObserver::OnDevToolsMessage(CefRefPtr<CefBrowser>, const void* message, size_t size) {
+  NC_CEF_CALLBACK;
   NCTab* tab = tab_;
   if (!tab) return false;
   return [tab handleDevToolsMessage:[NSData dataWithBytes:message length:size]];

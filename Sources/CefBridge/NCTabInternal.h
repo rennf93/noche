@@ -5,6 +5,14 @@
 // Bridge-private side of NCTab: NCWindow.mm mutates the state, the public header only reads it.
 NS_ASSUME_NONNULL_BEGIN
 
+/// Depth of CEF handler calls in progress on the UI thread (test support: +[NCWindow insideCefCallback]).
+inline int g_nc_cef_depth = 0;
+struct NCCefScope {
+  NCCefScope() { g_nc_cef_depth++; }
+  ~NCCefScope() { g_nc_cef_depth--; }
+};
+#define NC_CEF_CALLBACK NCCefScope nc_cef_scope_
+
 @interface NCTab ()
 @property(nonatomic, readwrite) NSInteger identifier;
 @property(nonatomic, readwrite, copy) NSString* url;

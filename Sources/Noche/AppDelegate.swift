@@ -104,14 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func developerTools(_ s: Any?) { active?.showDevTools() }
     @objc func goBack(_ s: Any?) { active?.goBack() }
     @objc func goForward(_ s: Any?) { active?.goForward() }
-    // Edit actions go to the active window's first responder (the address field's editor or the page), key window or not.
-    @objc func undo(_ s: Any?) { forwardEdit(Selector(("undo:"))) }
-    @objc func redo(_ s: Any?) { forwardEdit(Selector(("redo:"))) }
-    @objc func cut(_ s: Any?) { forwardEdit(#selector(NSText.cut(_:))) }
-    @objc func copy(_ s: Any?) { forwardEdit(#selector(NSText.copy(_:))) }
-    @objc func paste(_ s: Any?) { forwardEdit(#selector(NSText.paste(_:))) }
-    @objc func selectAll(_ s: Any?) { forwardEdit(#selector(NSText.selectAll(_:))) }
-    private func forwardEdit(_ action: Selector) { _ = active?.nsWindow?.firstResponder?.tryToPerform(action, with: nil) }
     @objc func nextTab(_ s: Any?) { active?.selectNextTab() }
     @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
 
@@ -132,15 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: events from the window controllers
 
-    func tabAdded() {
+    func tabAdded(_ tab: NCTab) {
 #if NOCHE_TESTHOOKS
-        selfTest?.didAddTab()
+        selfTest?.didAddTab(tab)
 #endif
     }
 
-    func tabClosed() {
+    func tabActivated(_ tab: NCTab) {
 #if NOCHE_TESTHOOKS
-        selfTest?.didCloseTab()
+        selfTest?.didActivateTab(tab)
+#endif
+    }
+
+    func tabClosed(_ tab: NCTab) {
+#if NOCHE_TESTHOOKS
+        selfTest?.didCloseTab(tab)
 #endif
     }
 

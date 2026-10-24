@@ -18,7 +18,7 @@ NS_SWIFT_UI_ACTOR
 - (void)window:(NCWindow *)window didCloseTab:(NCTab *)tab;
 - (void)window:(NCWindow *)window didUpdateTab:(NCTab *)tab;                            // title, url, loading, back/forward, favicon
 - (void)window:(NCWindow *)window tab:(NCTab *)tab didFinishLoadWithStatus:(NSInteger)status;
-- (void)window:(NCWindow *)window tab:(NCTab *)tab didFailLoadWithCode:(NSInteger)code;
+- (void)window:(NCWindow *)window tab:(NCTab *)tab didFailLoadWithCode:(NSInteger)code url:(NSString *)failedURL;  // not for ERR_ABORTED
 /// Called synchronously inside CEF's command handler. YES: Noche handled it, CEF must not.
 - (BOOL)window:(NCWindow *)window shouldHandleChromeCommand:(NSInteger)commandId;
 - (void)windowDidClose:(NCWindow *)window;
@@ -36,6 +36,7 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (0: no mask), re-applied on every bounds change
 @property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
 @property(nonatomic, readonly, nullable) NCTab *activeTab;
+@property(nonatomic, readonly) NSInteger devToolsCount;          // DevTools browsers open for this window's tabs
 - (nullable NCTab *)addTabWithURL:(NSString *)url activate:(BOOL)activate;
 - (void)activateTab:(NCTab *)tab;
 - (void)close;                                                    // closes every tab, then the window
@@ -44,6 +45,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// ignored whoever orders a window in, and every NSApplication/NSRunningApplication activation call becomes a counted no-op.
 + (void)installHiddenGuards;
 + (NSInteger)activationsBlocked;
+/// Test support: YES while a CEF handler of the bridge is on the stack.
++ (BOOL)insideCefCallback;
 /// Attempts to set alpha above 0 (clamped to 0), on windows of NCWindow and on any other window.
 + (NSInteger)alphaAttemptsOnOwnWindows;
 + (NSInteger)alphaAttemptsOnOtherWindows;

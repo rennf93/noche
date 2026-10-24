@@ -13,8 +13,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     /// The tab our own last action made active, until the engine's callback confirms it: the engine's active tab lags behind
     /// a burst of Cmd+T and Cmd+W.
     private var intendedActive: NCTab?
-    private var typed: [Int: String] = [:]      // URL we navigated to from the address field, per tab
-    private var failed: [Int: String] = [:]     // the URL whose load failed: the tab keeps its old URL while the error page shows
+    /// The URL whose load failed, with the URL the tab had then: the tab keeps its old URL while the error page shows.
+    private var failed: [Int: (url: String, shown: String)] = [:]
     private var closing = Set<Int>()           // close requested, OnBeforeClose not yet seen
 
     private let backdrop = BackdropView(frame: .zero)
@@ -118,7 +118,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 #endif
     }
 
-    private func shownURL(_ tab: NCTab) -> String { failed[tab.identifier] ?? tab.url }
+    private func shownURL(_ tab: NCTab) -> String { failed[tab.identifier]?.url ?? tab.url }
 
     func refresh() {
         guard installed else { return }
@@ -218,7 +218,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func focusAddress() {
         note("focusAddress")
         guard installed, let ns = nsWindow else { return }
-        toolbar.address.stringValue = activeTab.map { $0.url == "about:blank" ? "" : $0.url } ?? ""
+        toolbar.address.stringValue = activeTab.map { shownURL($0) == "about:blank" ? "" : shownURL($0) } ?? ""
         ns.makeFirstResponder(toolbar.address)
         toolbar.address.currentEditor()?.selectAll(nil)
     }
@@ -236,10 +236,6 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
     func showDevTools() {
         note("devTools")
-#if NOCHE_TESTHOOKS
-        // Test only: a DevTools window left open crashes the engine at close (see the task 4 fix report), so the self-test counts the action only.
-        if ProcessInfo.processInfo.environment["NOCHE_TEST_REAL_DEVTOOLS"] != "1", app.hidden { return }
-#endif
         activeTab?.showDevTools()
     }
     func copyURL() {
@@ -267,7 +263,6 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         case #selector(NSResponder.insertNewline(_:)):
             let text = toolbar.address.stringValue
             if let url = AddressInput.resolve(text, searchTemplate: app.searchTemplate), let tab = activeTab {
-                typed[tab.identifier] = url.absoluteString
                 failed[tab.identifier] = nil
                 tab.loadURL(url.absoluteString)
             }
@@ -305,28 +300,30 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         let before = strip.firstIndex(where: { $0 === tab }).flatMap { $0 > 0 ? strip[$0 - 1] : nil }
         list.insert(item(for: tab), after: before.flatMap { ids[$0.identifier] }, activate: active)
         refresh()
-        app.tabAdded()
+        app.tabAdded(tab)
     }
 
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
         if let id = ids[tab.identifier] { list.activate(id) }
         if intendedActive === tab { intendedActive = nil }
         refresh()
+        app.tabActivated(tab)
     }
 
     func window(_ window: NCWindow, didClose tab: NCTab) {
         if let id = ids[tab.identifier] { _ = list.remove(id) }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
-        typed[tab.identifier] = nil
         failed[tab.identifier] = nil
         closing.remove(tab.identifier)
         if intendedActive === tab { intendedActive = nil }
         refresh()
-        app.tabClosed()
+        app.tabClosed(tab)
     }
 
     func window(_ window: NCWindow, didUpdate tab: NCTab) {
+        // The next committed navigation of the tab, whatever caused it, ends the failed display.
+        if let f = failed[tab.identifier], tab.url != f.shown, tab.url != f.url { failed[tab.identifier] = nil }
         if let id = ids[tab.identifier] { list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading) }
         refresh()
         app.tabUpdated(tab)
@@ -336,11 +333,10 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         app.tabLoaded(tab, status: status)
     }
 
-    func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int) {
-        if let url = typed[tab.identifier], let id = ids[tab.identifier] {
-            failed[tab.identifier] = url
-            list.update(id, url: url, title: tab.title, isLoading: false)
-        }
+    func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int, url: String) {
+        guard code != -3 else { return }  // ERR_ABORTED: a navigation replaced by another, not a failure
+        failed[tab.identifier] = (url, tab.url)
+        if let id = ids[tab.identifier] { list.update(id, url: url, title: tab.title, isLoading: false) }
         refresh()
         app.tabLoadFailed(code: code)
     }

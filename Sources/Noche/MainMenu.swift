@@ -1,8 +1,8 @@
 import AppKit
 
 /// The M1.1 main menu (titles and shortcuts from live-ui.md section 9, the reference's app menu named Noche). App actions
-/// target the AppDelegate, which routes them to the active window's controller; the edit items go to that window's first responder
-/// (the address field's editor or the page), key window or not.
+/// target the AppDelegate, which routes them to the active window's controller; the edit items have no target: they go to the key window's first responder
+/// through the responder chain (the address field's editor or the page).
 @MainActor
 enum MainMenu {
     static func build(app: AppDelegate) -> NSMenu {
@@ -32,14 +32,14 @@ enum MainMenu {
             a("Close Tab", #selector(AppDelegate.closeTab(_:)), "w"),
         ]))
         main.addItem(submenu("Edit", [
-            a("Undo", #selector(AppDelegate.undo(_:)), "z"),
-            a("Redo", #selector(AppDelegate.redo(_:)), "z", shift),
+            item("Undo", Selector(("undo:")), "z"),
+            item("Redo", Selector(("redo:")), "z", shift),
             .separator(),
-            a("Cut", #selector(AppDelegate.cut(_:)), "x"),
-            a("Copy", #selector(AppDelegate.copy(_:)), "c"),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
+            item("Copy", #selector(NSText.copy(_:)), "c"),
             a("Copy URL", #selector(AppDelegate.copyURL(_:)), "c", shift),
-            a("Paste", #selector(AppDelegate.paste(_:)), "v"),
-            a("Select All", #selector(AppDelegate.selectAll(_:)), "a"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Select All", #selector(NSText.selectAll(_:)), "a"),
         ]))
         let developer = submenu("Developer", [
             a("Developer Tools", #selector(AppDelegate.developerTools(_:)), "i", [.command, .option]),

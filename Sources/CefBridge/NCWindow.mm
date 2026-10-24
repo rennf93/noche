@@ -13,6 +13,8 @@
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
 - (void)applyMask;
+- (void)closeWindowNow;
+- (void)closeWindowWhenDevToolsGone:(int)left;
 - (void)cefWindowCreated:(CefRefPtr<CefWindow>)window;
 - (void)cefWindowDestroyed;
 - (void)browserCreated:(CefRefPtr<CefBrowserView>)view browser:(CefRefPtr<CefBrowser>)browser;
@@ -21,7 +23,7 @@
 - (void)browserClosing:(CefRefPtr<CefBrowser>)browser;
 - (void)browser:(CefRefPtr<CefBrowser>)browser update:(void (^)(NCTab*))mutate;
 - (void)browser:(CefRefPtr<CefBrowser>)browser finishedLoadWithStatus:(int)status;
-- (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code;
+- (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url;
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (BOOL)chromeCommand:(int)commandId;
 @end
@@ -50,9 +52,10 @@ class NCClient : public CefClient,
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
 
-  void OnBeforeClose(CefRefPtr<CefBrowser> b) override { [w_ browserClosing:b]; }
+  void OnBeforeClose(CefRefPtr<CefBrowser> b) override { NC_CEF_CALLBACK; [w_ browserClosing:b]; }
 
   void OnLoadingStateChange(CefRefPtr<CefBrowser> b, bool loading, bool back, bool forward) override {
+    NC_CEF_CALLBACK;
     [w_ browser:b update:^(NCTab* t) {
       t.isLoading = loading;
       t.canGoBack = back;
@@ -60,25 +63,31 @@ class NCClient : public CefClient,
     }];
   }
   void OnLoadEnd(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, int status) override {
+    NC_CEF_CALLBACK;
     if (f->IsMain()) [w_ browser:b finishedLoadWithStatus:status];
   }
   void OnLoadError(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, ErrorCode code, const CefString&,
-                   const CefString&) override {
-    if (f->IsMain() && code != ERR_ABORTED) [w_ browser:b failedLoadWithCode:(int)code];
+                   const CefString& failedUrl) override {
+    NC_CEF_CALLBACK;
+    if (f->IsMain() && code != ERR_ABORTED) [w_ browser:b failedLoadWithCode:(int)code url:@(failedUrl.ToString().c_str())];
   }
   void OnTitleChange(CefRefPtr<CefBrowser> b, const CefString& title) override {
+    NC_CEF_CALLBACK;
     NSString* s = @(title.ToString().c_str());
     [w_ browser:b update:^(NCTab* t) { t.title = s; }];
   }
   void OnAddressChange(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, const CefString& url) override {
+    NC_CEF_CALLBACK;
     if (!f->IsMain()) return;
     NSString* s = @(url.ToString().c_str());
     [w_ browser:b update:^(NCTab* t) { t.url = s; }];
   }
   void OnFaviconURLChange(CefRefPtr<CefBrowser> b, const std::vector<CefString>& urls) override {
+    NC_CEF_CALLBACK;
     [w_ browser:b faviconURLs:urls];
   }
   bool OnChromeCommand(CefRefPtr<CefBrowser>, int command_id, cef_window_open_disposition_t) override {
+    NC_CEF_CALLBACK;
     return [w_ chromeCommand:command_id];
   }
 
@@ -94,13 +103,16 @@ class NCViewDelegate : public CefBrowserViewDelegate {
   // Noche draws its own toolbar; the engine's stays off.
   ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override { return CEF_CTT_NONE; }
   void OnBrowserCreated(CefRefPtr<CefBrowserView> v, CefRefPtr<CefBrowser> b) override {
+    NC_CEF_CALLBACK;
     [w_ browserCreated:v browser:b];
   }
   void OnTabAdded(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab, bool active) override {
+    NC_CEF_CALLBACK;
     [w_ tabAdded:tab active:active];
   }
   void OnActiveTabChanged(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> previous,
                           CefRefPtr<CefBrowser> active) override {
+    NC_CEF_CALLBACK;
     [w_ activeTabChangedFrom:previous to:active];
   }
 
@@ -112,9 +124,9 @@ class NCViewDelegate : public CefBrowserViewDelegate {
 class NCWindowDelegate_ : public CefWindowDelegate {
  public:
   explicit NCWindowDelegate_(NCWindow* w) : w_(w) {}
-  void OnWindowCreated(CefRefPtr<CefWindow> w) override { [w_ cefWindowCreated:w]; }
-  void OnWindowDestroyed(CefRefPtr<CefWindow>) override { [w_ cefWindowDestroyed]; }
-  void OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect&) override { [w_ applyMask]; }
+  void OnWindowCreated(CefRefPtr<CefWindow> w) override { NC_CEF_CALLBACK; [w_ cefWindowCreated:w]; }
+  void OnWindowDestroyed(CefRefPtr<CefWindow>) override { NC_CEF_CALLBACK; [w_ cefWindowDestroyed]; }
+  void OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect&) override { NC_CEF_CALLBACK; [w_ applyMask]; }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }  // Noche draws the chrome (M1.1 Task 4)
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return [w_ cefInitialBounds]; }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
@@ -135,6 +147,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CefRefPtr<CefBrowserView> _view;
   CefRefPtr<CefWindow> _window;
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
+  NSMutableSet<NSNumber*>* _closed;  // identifiers whose OnBeforeClose ran: a late callback must not bring them back
+  BOOL _destroyed, _windowClosing;
+  NSMutableSet<NSNumber*>* _devtools;  // popup browsers of this window (DevTools), until their OnBeforeClose
   NSWindow* _nsWindow;
   BOOL _firstEmitted, _closeRequested;
   NSEdgeInsets _webInsets;
@@ -152,6 +167,8 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     _mode = mode;
     _delegate = delegate;
     _table = [NSMutableDictionary dictionary];
+    _devtools = [NSMutableSet set];
+    _closed = [NSMutableSet set];
     _client = new NCClient(self);
     _view = CefBrowserView::CreateBrowserView(_client, url.UTF8String, TabSettings(), nullptr, nullptr,
                                               new NCViewDelegate(self));
@@ -179,11 +196,18 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (!b) return nil;
   NSNumber* key = @(b->GetIdentifier());
   NCTab* t = _table[key];
-  if (!t && create) {
+  if (!t && create && !_destroyed && ![_closed containsObject:key]) {
     t = [NCTab tabWithBrowser:b];
     _table[key] = t;
   }
   return t;
+}
+
+- (NSInteger)devToolsCount {
+  NSInteger n = 0;
+  for (NCTab* t in _table.allValues)
+    if (t.browser && t.browser->GetHost()->HasDevTools()) n++;
+  return n;
 }
 
 - (NSArray<NCTab*>*)tabs {
@@ -212,8 +236,26 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 - (void)close {
-  if (_window) _window->Close();
-  else _closeRequested = YES;
+  if (!_window) { _closeRequested = YES; return; }
+  // DevTools browsers go first; the window closes once they are gone (the cap covers one that never reports).
+  for (NCTab* t in _table.allValues)
+    if (t.browser && t.browser->GetHost()->HasDevTools()) t.browser->GetHost()->CloseDevTools();
+  [self closeWindowWhenDevToolsGone:40];
+}
+
+- (void)closeWindowWhenDevToolsGone:(int)left {
+  if (!_window) return;
+  if (left > 0 && (self.devToolsCount > 0 || _devtools.count > 0)) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeWindowWhenDevToolsGone:left - 1]; });
+    return;
+  }
+  [self closeWindowNow];
+}
+
+- (void)closeWindowNow {
+  if (!_window || _windowClosing) return;
+  _windowClosing = YES;
+  _window->Close();
 }
 
 // MARK: web view rect and corner mask
@@ -340,7 +382,7 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
     w->Show();
   }
   [self applyLayout];
-  if (_closeRequested) w->Close();
+  if (_closeRequested) [self close];
 }
 
 // Ordering the NSWindow in does not make the views::Widget visible on its own; ordering it again once it is on
@@ -357,6 +399,7 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
 }
 
 - (void)cefWindowDestroyed {
+  _destroyed = YES;
   _window = nullptr;
   _view = nullptr;
   _nsWindow = nil;
@@ -373,7 +416,11 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
 - (void)browserCreated:(CefRefPtr<CefBrowserView>)view browser:(CefRefPtr<CefBrowser>)browser {
   // Popup views (DevTools) report to the same delegate; only this window's view makes tabs. The first
   // OnBrowserCreated can fire before CreateBrowserView returned, so _view may still be unset.
-  if (_view && !view->IsSame(_view)) return;
+  if (_destroyed) return;
+  if (_view && !view->IsSame(_view)) {
+    [_devtools addObject:@(browser->GetIdentifier())];
+    return;
+  }
   NCTab* tab = [self tabFor:browser create:YES];
   if (_firstEmitted) return;  // later tabs are announced by OnTabAdded
   _firstEmitted = YES;
@@ -394,6 +441,11 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
 // OnBeforeClose reaches every tab, the last one included (OnTabClosed is skipped once the view is gone).
 - (void)browserClosing:(CefRefPtr<CefBrowser>)browser {
   NSNumber* key = @(browser->GetIdentifier());
+  [_closed addObject:key];
+  if ([_devtools containsObject:key]) {
+    [_devtools removeObject:key];
+    return;
+  }
   NCTab* tab = _table[key];
   if (!tab) return;
   [_table removeObjectForKey:key];
@@ -413,9 +465,9 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFinishLoadWithStatus:status]; }];
 }
 
-- (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code {
+- (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url {
   NCTab* tab = [self tabFor:browser create:NO];
-  if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFailLoadWithCode:code]; }];
+  if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFailLoadWithCode:code url:url]; }];
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls {
@@ -501,6 +553,10 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
       if (w.alphaValue != 0) GuardWindow(w);
   }];
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
+}
+
++ (BOOL)insideCefCallback {
+  return g_nc_cef_depth > 0;
 }
 
 + (NSInteger)activationsBlocked {

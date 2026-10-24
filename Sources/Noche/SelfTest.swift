@@ -39,8 +39,19 @@ final class SelfTest {
 
     // MARK: events from AppDelegate
 
-    func didAddTab() { added += 1 }
-    func didCloseTab() { closedTabs += 1 }
+    private var closedIDs = Set<Int>()
+    private var zombies: [String] = []
+    private var devToolsOpened = false
+    /// A tab the delegate was told is closed must never be announced again nor listed by its window.
+    private func audit(_ what: String, _ tab: NCTab) {
+        if closedIDs.contains(tab.identifier), zombies.count < 5 { zombies.append("\(what) \(tab.identifier) after its didCloseTab") }
+        for c in app.controllers where c.window.tabs.contains(where: { closedIDs.contains($0.identifier) }) {
+            if zombies.count < 5 { zombies.append("window.tabs holds a closed tab at \(what)") }
+        }
+    }
+    func didAddTab(_ tab: NCTab) { added += 1; audit("didAddTab", tab) }
+    func didActivateTab(_ tab: NCTab) { audit("didActivateTab", tab) }
+    func didCloseTab(_ tab: NCTab) { closedTabs += 1; audit("didCloseTab", tab); closedIDs.insert(tab.identifier) }
     func windowDidClose() { windowsClosed += 1 }
     func didFinishLoad() { loads += 1 }
     func didFailLoad() { loadFailures += 1 }
@@ -48,8 +59,14 @@ final class SelfTest {
     /// Last thing before the process exits. quit-many's verdict is the exit itself, so it is printed here.
     func beforeExit(watchdogFired: Bool) {
         if check == "quit-many", !verdictPrinted {
-            let ok = tabsAtQuit == 10 && !watchdogFired && violations.isEmpty
-            line(ok ? "pass" : "fail", "10 tabs, quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) watchdog=\(watchdogFired) \(violations))")
+            let ok = tabsAtQuit == 15 && closedTabs == 15 && windowsClosed == 2 && !watchdogFired && violations.isEmpty && zombies.isEmpty
+            line(ok ? "pass" : "fail", "2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) watchdog=\(watchdogFired) \(violations) \(zombies))")
+            if !ok { app.exitCodeOverride = 1 }
+        }
+        if check == "devtools-quit", !verdictPrinted {
+            let devTools = app.windows.reduce(0) { $0 + Int($1.devToolsCount) }
+            let ok = devToolsOpened && !watchdogFired && windowsClosed == 1 && violations.isEmpty && zombies.isEmpty
+            line(ok ? "pass" : "fail", "DevTools open, quit menu action, exit without the shutdown watchdog (opened=\(devToolsOpened) windowDidClose=\(windowsClosed) devtools left=\(devTools) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
         line("info", "activate-blocked=\(NCWindow.activationsBlocked())")
@@ -83,6 +100,11 @@ final class SelfTest {
             case "sidebar-toggle": await sidebarToggle()
             case "sidebar-scroll": await sidebarScroll()
             case "shortcuts-once": await shortcutsOnce()
+            case "eval-async": await evalAsync()
+            case "no-zombie-tab": await noZombieTab()
+            case "devtools-quit": await devToolsQuit()
+            case "devtools-close-tab": await devToolsCloseTab()
+            case "load-error-link": await loadErrorLink()
             default: finish(false, "unknown check")
             }
         }
@@ -175,15 +197,132 @@ final class SelfTest {
         guard await until(20, { win.tabs.count == 10 && added == 10 }) else {
             return finish(false, "tabs=\(win.tabs.count) added=\(added), wanted 10")
         }
-        _ = await until(10, { loads >= 10 })  // info only: quitting with loaded tabs is the harder case
-        tabsAtQuit = win.tabs.count
+        let second = app.newWindow(url: url)
+        guard await until(20, { second.tabs.count == 1 }) else { return finish(false, "second window has \(second.tabs.count) tabs") }
+        for _ in 1..<5 { _ = second.addTab(withURL: url, activate: false) }
+        guard await until(20, { second.tabs.count == 5 && added == 15 }) else {
+            return finish(false, "second window tabs=\(second.tabs.count) added=\(added), wanted 5 and 15")
+        }
+        _ = await until(10, { loads >= 15 })  // info only: quitting with loaded tabs is the harder case
+        tabsAtQuit = win.tabs.count + second.tabs.count
         line("info", "tabs=\(tabsAtQuit) loaded=\(loads), sending the Quit menu action")
+        quitViaMenu()
+    }
+
+    private func quitViaMenu() {
         guard let sub = NSApp.mainMenu?.items.compactMap({ $0.submenu }).first(where: { m in
             m.items.contains { $0.action == #selector(NSApplication.terminate(_:)) }
         }), let idx = sub.items.firstIndex(where: { $0.action == #selector(NSApplication.terminate(_:)) }) else {
             return finish(false, "no Quit menu item")
         }
         sub.performActionForItem(at: idx)  // the verdict is printed by beforeExit once the process really exits
+    }
+
+    // MARK: bridge hardening (M1.1 Task 6)
+
+    private func evalAsync() async {
+        guard await ready(), let win, let tab = win.activeTab else { return }
+        var inside: [String] = []
+        let reply = await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            tab.evaluateJavaScript("1 + 1") { json, _ in
+                if NCWindow.insideCefCallback() { inside.append("normal reply") }
+                c.resume(returning: json)
+            }
+        }
+        // The tab closes before the reply: the failure comes from the bridge's own close path (OnBeforeClose).
+        guard let doomed = win.addTab(withURL: fixture(""), activate: false) else { return finish(false, "no second tab") }
+        guard await until(15, { doomed.url.hasPrefix("http") && !doomed.isLoading }) else { return finish(false, "second tab never loaded") }
+        let closeError = await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            doomed.evaluateJavaScript("new Promise(r => setTimeout(r, 20000))") { _, error in
+                if NCWindow.insideCefCallback() { inside.append("tab closed (OnBeforeClose)") }
+                c.resume(returning: error)
+            }
+            doomed.close()
+        }
+        // A closed tab fails later, never before evaluateJavaScript returns.
+        var ranBeforeReturn = false, late: String?
+        let lateError = await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            var returned = false
+            doomed.evaluateJavaScript("1") { _, error in
+                ranBeforeReturn = !returned
+                if NCWindow.insideCefCallback() { inside.append("closed tab") }
+                late = error
+                c.resume(returning: error)
+            }
+            returned = true
+        }
+        _ = late
+        finish(inside.isEmpty && !ranBeforeReturn && reply == "2" && closeError == "tab closed" && lateError == "tab closed" && violations.isEmpty,
+               "completions run on a later main-queue turn: inside a CEF callback \(inside), closed-tab call ran before returning \(ranBeforeReturn), reply \(reply ?? "nil"), close error \(closeError ?? "nil"), late error \(lateError ?? "nil") \(violations)")
+    }
+
+    private func noZombieTab() async {
+        guard await ready(), let win else { return }
+        let start = added, closed = closedTabs
+        for _ in 0..<20 {
+            win.addTab(withURL: "about:blank", activate: true)?.close()  // closed in the turn it was opened
+        }
+        guard await until(30, { win.tabs.count == 1 && rowCount == 1 && closedTabs - closed >= 20 && added - start >= 20 }) else {
+            return finish(false, "tabs=\(win.tabs.count) rows=\(rowCount) added=\(added - start) closed=\(closedTabs - closed) \(zombies)")
+        }
+        try? await Task.sleep(for: .seconds(1))  // late announcements arrive after the closes
+        finish(zombies.isEmpty && win.tabs.count == 1 && rowCount == 1 && violations.isEmpty,
+               "20 tabs opened and closed in the same turn: added \(added - start) closed \(closedTabs - closed), tabs \(win.tabs.count) rows \(rowCount), zombies \(zombies) \(violations)")
+    }
+
+    private func openDevTools(_ win: NCWindow) async -> Bool {
+        key("i", code: 34, [.command, .option])
+        guard await until(20, { win.devToolsCount == 1 }) else { return false }
+        devToolsOpened = true
+        try? await Task.sleep(for: .milliseconds(500))  // the DevTools browser is up, its front end loading
+        return true
+    }
+
+    private func devToolsQuit() async {
+        guard await ready(), let win else { return }
+        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount), actions \(BrowserWindowController.actionCounts))") }
+        line("info", "DevTools open, sending the Quit menu action")
+        quitViaMenu()  // the verdict is printed by beforeExit
+    }
+
+    private func devToolsCloseTab() async {
+        guard await ready(), let win else { return }
+        cmdT()
+        guard await until(10, { rowCount == 2 }) else { return finish(false, "Cmd+T made no row") }
+        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount))") }
+        cmdW()  // closes the tab that has DevTools
+        guard await until(15, { rowCount == 1 && win.tabs.count == 1 && win.devToolsCount == 0 }) else {
+            return finish(false, "after Cmd+W: rows=\(rowCount) tabs=\(win.tabs.count) devtools=\(win.devToolsCount)")
+        }
+        try? await Task.sleep(for: .seconds(2))  // the app keeps running; the quit that follows must be clean
+        finish(violations.isEmpty && zombies.isEmpty && rowCount == 1, "DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows \(rowCount) \(violations) \(zombies)")
+    }
+
+    private func loadErrorLink() async {
+        guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
+        var before = loads
+        tab.loadURL(fixture("err.html"))
+        guard await until(10, { loads > before && tab.url.hasSuffix("err.html") }) else { return finish(false, "err.html did not load (\(tab.url))") }
+        let failures = loadFailures
+        before = loads
+        _ = await evaluate(tab, "document.getElementById('l').click()")  // a click on the link, not the address field
+        guard await until(15, { loadFailures > failures }) else { return finish(false, "no load error for the link to a closed port") }
+        _ = await until(5, { ctl.list.displayTitle(of: ctl.list.items[0].id) == "localhost" && ctl.toolbar.address.stringValue == "localhost" })
+        let title = ctl.list.displayTitle(of: ctl.list.items[0].id)
+        let address = ctl.toolbar.address.stringValue
+        guard title == "localhost", address == "localhost" else { return finish(false, "link to a closed port: row title \(title) address \(address) (tab url \(tab.url))") }
+        // Cmd+L seeds the field with the URL the tab shows, the failed one.
+        cmdL()
+        let seeded = ctl.toolbar.address.stringValue
+        if let ns = ctl.nsWindow { ns.makeFirstResponder(ns.contentView) }
+        guard seeded == "http://localhost:1/" else { return finish(false, "Cmd+L seeded \(seeded), want http://localhost:1/") }
+        guard await until(10, { tab.canGoBack }) else { return finish(false, "Back is not available after the error") }
+        shortcut("Go Back")
+        // The next committed navigation, whatever caused it, ends the failed state.
+        guard await until(10, { ctl.toolbar.address.stringValue == "127.0.0.1" && ctl.list.displayTitle(of: ctl.list.items[0].id) == "Error Link Page" }) else {
+            return finish(false, "after Back: address \(ctl.toolbar.address.stringValue) title \(ctl.list.displayTitle(of: ctl.list.items[0].id)) tab url \(tab.url)")
+        }
+        finish(violations.isEmpty, "link to a closed port: row title and address show localhost, Cmd+L seeds \(seeded), Back returns to the page and clears the failure \(violations)")
     }
 
     // MARK: chrome checks
@@ -639,7 +778,11 @@ final class SelfTest {
             let diff = zip(got, Self.expectedMenu).enumerated().first { $0.element.0 != $0.element.1 }
             return finish(false, "menu differs: \(got.count) lines vs \(Self.expectedMenu.count), first difference \(String(describing: diff)); live menu \(got)")
         }
-        finish(true, "\(got.count) menu lines equal the M1.1 list")
+        // The edit actions have no target: AppKit sends them to the key window's first responder.
+        let editTitles: Set<String> = ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
+        let edit = menu.items.first { $0.title == "Edit" }?.submenu?.items.filter { editTitles.contains($0.title) } ?? []
+        guard edit.count == 6, edit.allSatisfy({ $0.target == nil }) else { return finish(false, "edit items with a target: \(edit.filter { $0.target != nil }.map(\.title))") }
+        finish(true, "\(got.count) menu lines equal the M1.1 list, the 6 edit actions are nil-targeted")
     }
 
     private func sidebarToggle() async {
@@ -722,7 +865,6 @@ final class SelfTest {
             ns.makeFirstResponder(page)
             if !ns.performKeyEquivalent(with: ev), NSApp.mainMenu?.performKeyEquivalent(with: ev) != true { ns.firstResponder?.keyDown(with: ev) }
             var keys = ""
-            _ = await until(5, { true })
             for _ in 0..<20 {
                 keys = await evaluate(tab, "JSON.stringify(window.__keys || [])") ?? ""
                 if keys.contains("k+meta") { break }
@@ -762,8 +904,9 @@ final class SelfTest {
         // Address editing: type, select all, copy; the clipboard holds the text.
         general.clearContents()
         typeText("hello noche")
-        key("a", code: 0)
-        key("c", code: 8)
+        // The Edit menu items are nil-targeted and a hidden window is never key, so deliver the actions the way the responder chain would.
+        _ = ctl.nsWindow?.firstResponder?.tryToPerform(#selector(NSText.selectAll(_:)), with: nil)
+        _ = ctl.nsWindow?.firstResponder?.tryToPerform(#selector(NSText.copy(_:)), with: nil)
         if general.string(forType: .string) != "hello noche" { bad.append("address field: Cmd+A, Cmd+C left \(general.string(forType: .string) ?? "nil") on the pasteboard") } else { passed.append("address field Cmd+A, Cmd+C") }
         ctl.toolbar.address.currentEditor()?.string = ""
         if let ns = ctl.nsWindow { ns.makeFirstResponder(ns.contentView) }
