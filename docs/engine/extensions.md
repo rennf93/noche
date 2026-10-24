@@ -220,3 +220,35 @@ Total new surface is dominated by P1 and P2. P1 and P3 are the cheapest to prove
 - None needed: `chromium/src/cef` appeared after I started, and I read CEF from `chromium_git/cef` (identical). All cited Chromium directories (chrome/browser, extensions, components, ui/views) were present.
 - `chrome/app/theme/google_chrome/BRANDING` and any Google-branded resources are absent (closed source).
 - The Web Store page source and server logic (banner trigger) are not in any tree.
+
+## Results (M0.5 engine build)
+
+Measured on the vendored engine `cef_binary_156.0.13-noche.3658+g16c2cc0` (CEF noche `16c2cc0df`, patches 0001-0005 in `engine/patches/`), hidden probe app, `scripts/probe-engine.sh`. Raw output: `docs/engine/evidence/m05-probe-run.txt` (this engine, 5 launches), `b2-probe-run.txt` to `b5-probe-run.txt` (per patch), `b4-store-*.txt` and `b4-probe-run.txt` (Web Store), `b6-red-run.txt` (window-normal on the engine without P5). The earlier evidence files are cited where this engine did not re-measure something.
+
+### P1 result (CEF `43b3b04a0`, `0cebd6ac6`; patches 0001 and 0002)
+Many tabs in one Views-hosted Browser works. `tabs-20`: extension `chrome.tabs.query({})` count 20, `GetTabs` 20, `GetTabCount` 20, `OnTabAdded` 19. `ext-create`: `chrome.tabs.create` gives `OnTabAdded` 1, windows 1 to 1, tabs 1 to 2. `ext-activate`: `OnActiveTabChanged` 1, `GetActiveTab` is tab 7 and the callback agrees. `blank-link` (`target=_blank`, `OnBeforePopup` unhandled): windows 1 to 1, tabs +1. `per-tab-client`: each own client gets `OnAfterCreated` once for its own tab, `chrome.tabs.create` goes to the first client, windows 1 to 1. `close-non-last`: background and active tab closes keep the window and view, `GetActiveTab` moves to a live tab. `close-last`: the window closes with the last tab, no crash, `OnTabClosed` 3 of 3. `switch-latency` median 11.1 ms, p90 13.1 ms; `switch-latency-ab` median 12.0 ms, p90 12.5 ms (limits median 16.7 ms, p90 33.3 ms). `rss-20` did NOT pass on this engine (see U6).
+
+### P2 result (CEF `f4b028436`; patch 0003)
+`actions-list`: id, name and title "Noche probe action", icon 32x32 with 1024 opaque pixels, all 1024 of the fixture color #3366cc. `badge-observer`: text "7", background 0xffff0000, an `OnActionUpdated` whose payload already carried the badge (1 of 2 updates). `popup-anchor`: popup content top 1259.0 vs button bottom 1260.0 (delta 1.0 pt, limit 2), CDP click reached popup.js, no activation, no key window. `popup-tabid`: popup resolved the active tab id, not the first tab's. `popup-closes`: popup open for 1 s, then closed after `SetActiveTab`.
+
+### P3 result (CEF `2e5441225`; patch 0004)
+`install-no-window` (live Web Store, stock UA, no override): install completed, service worker alive, no stray window and no activation. See `b4-probe-run.txt` for the first run, which failed on a probe bug (the post-install sheet was taken for an unaccepted install sheet).
+
+### P4 dropped
+The Web Store banner is present in all four cases (stock, UA only, brand only, UA plus brand; `b4-store-*.txt`), so the UA brand is not the trigger, and the extension installs in all four including stock with no override (U3, U4). No patch.
+
+### P5 result (CEF `16c2cc0df`; patch 0005)
+`window-normal`: before the patch (`b6-red-run.txt`) the extension saw window type `popup`, `windows.getAll({windowTypes:["normal"]})` returned 0 windows and `tabs.query({windowType:"normal"})` 0 tabs (3 tabs open). After: raw type is normal, `windows.getAll` normal returns 1 window with 3 tabs, `tabs.query` normal 3, query all 3, `GetTabCount` 3. `tabs_api.cc` `MatchesWindow` needed no change; it compares against the controller's `GetWindowTypeText()`.
+Side effects (not fixed): `windows.getAll`, `windows.get` filters and the `type` field of Window objects now say `normal`, and window events filtered on `normal` fire for the window. Code that tests `browser->GetType() == TYPE_NORMAL` directly (`windows.create`, `tabs.move`, `tabs.update` window checks, `tabs_api.cc` lines 473, 1322, 1365, 2278, 2301) still treats the Browser as a popup. `chrome.action.openPopup` is unchanged (gated on `kFeatureToolbar` and toolbar visibility, `extension_action_api.cc:149-154`). Views-hosted `window.open` popups also report `normal`.
+
+### U-items closed
+- U1: yes. A second `ChromeBrowserHostImpl` in an existing view works with the navigator relaxed (P1); `tabs-20`, `per-tab-client`, `blank-link`. Evidence `m05-probe-run.txt`.
+- U2: `switch-latency` median 11.1 ms p90 13.1 ms and `switch-latency-ab` 12.0 / 12.5 ms on this engine, within the limits set in the ledger (Rulings 13 and 14; the 9.7 ms S1 figure came from a different harness). Evidence `m05-probe-run.txt`, same-harness hybrid control in `b5-probe-run.txt` (median 9.3 ms cycling, 4.0 ms strict A/B).
+- U3: the brand is not the banner trigger (banner present in all four cases). `b4-store-*.txt`.
+- U4: yes. Install completes with the stock UA and no override. `b4-store-stock.txt`, `m05-probe-run.txt` (`install-no-window`).
+- U5: yes. A rect-anchored, inactive popup lands 1.0 pt from the button and takes no focus. `popup-anchor`, `popup-tabid`, `popup-closes`.
+- U6: partly. On the P1 engines of `b2` to `b5`, `rss-20` was 5.40 / 5.33 GB (28 then 27 processes) against a same-harness hybrid control of 5.36-5.43 GB, limit 6400 MB. On this engine `rss-20` failed twice with "a child process went away: 29 processes at sample 1, 27 at sample 2" (the probe tolerates a drop of 1). Not diagnosed: it is either a transient extra process at sample 1 or a real helper exit, and no further launch was allowed. The memory-pressure and discard simulation was not run. Open.
+- U7: the window closes with the last tab (`close-last`); an empty window is an M1 product call (Ruling 1).
+- U8: not measured; moot under the single-Browser design (extension tabs are real tabs).
+- U9: yes. `per-tab-client`: each client gets its own tab once, `chrome.tabs.create` falls back to the first client.
+- U10 (strict A/B tab switching stalled about 1000 ms in the hidden window, found in B2): the stall is gone on the later engines; `switch-latency-ab` median 12.0 ms here.

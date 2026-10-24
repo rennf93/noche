@@ -1,0 +1,396 @@
+# M0.5 probe run on the engine with P1-P3 and P5 (distrib cef_binary_156.0.13-noche.3658+g16c2cc0), hidden, alpha guard on
+
+## Regression gate (new vendored engine)
+fetch-cef rc=0
+build-cef-wrapper rc=0
+engine-test rc=0
+test-fetch-cef rc=0
+swift-test rc=0
+build-app rc=0
+smoke-fixture rc=0
+smoke-closed-port rc=2
+check-sandbox rc=0
+test-store-rule rc=0
+(smoke closed-port expects 2, every other line expects 0)
+
+## Probe launches: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 scripts/probe-engine.sh <checks>, 5 launches (cap 5). Not run: tabs-bare*, raf-*, *-hybrid (U10 diagnostics), store-* (B4 experiments, see b4 evidence)
+
+## Launch 1: scripts/probe-engine.sh window-normal ext-loaded tabs-one tabs-20 ext-create ext-activate
+ips before=4 frontmost before: ASN:0x0-0x43f43f:
+PROBE window-normal info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info raw window types seen by the extension: normal
+PROBE window-normal info alpha-guard hooked calls=5
+PROBE window-normal pass windows.getAll normal=1 (window tabs 3) tabs.query normal=3 query all=3 GetTabCount=3 GetTabs=3
+PROBE window-normal info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE window-normal info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info alpha-guard hooked calls=5
+PROBE ext-loaded pass service worker answered {"sw":"1.3","count":1,"ids":[357987439],"activeId":357987439}
+PROBE ext-loaded info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-loaded info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info alpha-guard hooked calls=5
+PROBE tabs-one pass count=1 ids=357987491 activeId=357987491
+PROBE tabs-one info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-one info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info alpha-guard hooked calls=5
+PROBE tabs-20 pass extension count=20 GetTabs=20 GetTabCount=20 OnTabAdded=19
+PROBE tabs-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE tabs-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info alpha-guard hooked calls=5
+PROBE ext-create pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+PROBE ext-create info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-create info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info alpha-guard hooked calls=5
+PROBE ext-activate pass OnActiveTabChanged=1 GetActiveTab is tab 7=1 callback active is tab 7=1
+PROBE ext-activate info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ext-activate info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+RC=0
+ips after=4 frontmost after: ASN:0x0-0x43f43f:
+
+## Launch 2: scripts/probe-engine.sh switch-latency switch-latency-ab blank-link per-tab-client close-non-last close-last
+ips before=4 frontmost before: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+PROBE switch-latency info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE switch-latency info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info alpha-guard hooked calls=7
+PROBE switch-latency pass median=11.1ms p90=13.1ms range=9.6..13.5ms (30 timed after 3 warm-up, fixed cycle order) limits median<=16.7ms p90<=33.3ms (Ruling 14); no recent hybrid control (info only); old reference 11.6ms (S1 harness) is met
+PROBE switch-latency info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info alpha-guard hooked calls=7
+PROBE switch-latency-ab pass median=12.0ms p90=12.5ms range=8.8..13.8ms (30 timed after 3 warm-up, strict A,B order) limits median<=16.7ms p90<=33.3ms (Ruling 14); no recent hybrid control (info only); old reference 11.6ms (S1 harness) is not met
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE switch-latency-ab info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard makeKeyAndOrderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info alpha-guard hooked calls=9
+PROBE blank-link pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+PROBE blank-link info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE blank-link info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info alpha-guard hooked calls=5
+PROBE per-tab-client pass own: A=1(id 2, want 2) B=1(id 3, want 3); chrome.tabs.create: OnTabAdded=1 first client OnAfterCreated 1->2 last id=4 new tab id=4; tabs=4 windows 1->1
+PROBE per-tab-client info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE per-tab-client info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info alpha-guard hooked calls=5
+PROBE close-non-last pass phase 1 (background tab): OnTabClosed=1 id ok=1 gone=1 window and view alive=1 windows before=1 after=1 GetTabs=19 extension count=19; phase 2 (active tab): OnTabClosed=1 gone=1 GetActiveTab id=7 (closed 6) GetTabs=18 (want 18) OnActiveTabChanged after close=1 window alive=1
+PROBE close-non-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-non-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info alpha-guard hooked calls=7
+PROBE close-last pass window closed with the last tab (documented behavior), no crash; OnTabClosed=3 of 3 (info only)
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+RC=0
+ips after=4 frontmost after: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+
+## Launch 3: scripts/probe-engine.sh rss-20
+ips before=4 frontmost before: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+PROBE rss-20 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info sample2 rank=1 pid=76064 rss=445.7MB type=browser
+PROBE rss-20 info sample2 rank=2 pid=76721 rss=234.3MB type=renderer
+PROBE rss-20 info sample2 rank=3 pid=76792 rss=229.4MB type=renderer
+PROBE rss-20 info sample2 rank=4 pid=76787 rss=228.6MB type=renderer
+PROBE rss-20 info sample2 rank=5 pid=76788 rss=228.6MB type=renderer
+PROBE rss-20 info sample2 rank=6 pid=76791 rss=228.3MB type=renderer
+PROBE rss-20 info sample2 rank=7 pid=76786 rss=227.5MB type=renderer
+PROBE rss-20 info sample2 rank=8 pid=76794 rss=223.9MB type=renderer
+PROBE rss-20 info sample2 rank=9 pid=76793 rss=223.7MB type=renderer
+PROBE rss-20 info sample2 rank=10 pid=76783 rss=222.8MB type=renderer
+PROBE rss-20 info alpha-guard hooked calls=5
+PROBE rss-20 fail a child process went away: 29 processes at sample 1, 27 at sample 2
+PROBE rss-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 fail exit-rc=1 watchdog=0
+RC=1
+ips after=4 frontmost after: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+
+## Launch 4: scripts/probe-engine.sh actions-list badge-observer popup-anchor popup-tabid popup-closes
+ips before=4 frontmost before: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+PROBE actions-list info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info alpha-guard hooked calls=5
+PROBE actions-list pass id=jkpfhboimkkaeacdcajlpalajnbigldj name=Noche engine probe extension title="Noche probe action" enabled=1 pinned=0 icon=32x32 px with alpha=1024, of them #3366cc=1024
+PROBE actions-list info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE actions-list info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info alpha-guard hooked calls=5
+PROBE badge-observer pass text="7" textColor=0x00000000 background=0xffff0000 OnActionUpdated=2 (with badge 7 on red: 1, before 0) OnActionAdded=2
+PROBE badge-observer info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE badge-observer info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-anchor info alpha-guard hooked calls=8
+PROBE popup-anchor pass popup content top 1259.0 (view WebContentsViewCocoa; frame top 1264.0 incl. shadow) vs button bottom 1260.0 (delta 1.0 pt, limit 2), CDP click reached popup.js 1 time(s), tabId=357988278, activation problem: none
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-tabid info alpha-guard hooked calls=8
+PROBE popup-tabid pass popup resolved tabId=357988331, active tab (chrome.tabs) id=357988331, first tab id=357988330 (must differ), activation problem: none
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-closes info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-closes info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-closes info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info alpha-guard hooked calls=10
+PROBE popup-closes pass popup stayed open for 1 s (control), then closed after SetActiveTab to another tab
+PROBE popup-closes info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-closes info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+RC=0
+ips after=4 frontmost after: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+
+## Launch 5: scripts/probe-engine.sh rss-20 install-no-window
+ips before=4 frontmost before: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+PROBE rss-20 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info sample2 rank=1 pid=92334 rss=483.8MB type=browser
+PROBE rss-20 info sample2 rank=2 pid=93039 rss=248.3MB type=renderer
+PROBE rss-20 info sample2 rank=3 pid=93338 rss=235.3MB type=renderer
+PROBE rss-20 info sample2 rank=4 pid=93344 rss=235.2MB type=renderer
+PROBE rss-20 info sample2 rank=5 pid=93347 rss=235.2MB type=renderer
+PROBE rss-20 info sample2 rank=6 pid=93038 rss=233.6MB type=renderer
+PROBE rss-20 info sample2 rank=7 pid=93334 rss=233.6MB type=renderer
+PROBE rss-20 info sample2 rank=8 pid=93350 rss=233.6MB type=renderer
+PROBE rss-20 info sample2 rank=9 pid=93345 rss=233.6MB type=renderer
+PROBE rss-20 info sample2 rank=10 pid=93348 rss=233.6MB type=renderer
+PROBE rss-20 info alpha-guard hooked calls=5
+PROBE rss-20 fail a child process went away: 29 processes at sample 1, 27 at sample 2
+PROBE rss-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE rss-20 fail exit-rc=1 watchdog=0
+PROBE install-no-window info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info mode=stock guards installed, appActive=0
+PROBE install-no-window info override: none (stock)
+PROBE install-no-window info navigate https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=38FE4EFDD64F8B3F82058AF8025E3948)
+PROBE install-no-window info store document request headers (requestId=38FE4EFDD64F8B3F82058AF8025E3948): sec-ch-ua-arch: "arm" || sec-ch-ua-bitness: "64" || sec-ch-ua-full-version-list: "Not:A-Brand";v="8.0.0.0", "Chromium";v="156.0.8078.48" || sec-ch-ua-mobile: ?0 || sec-ch-ua-model: "" || sec-ch-ua-platform-version: "27.0.1" || sec-ch-ua-platform: "macOS" || sec-ch-ua-wow64: ?0 || sec-ch-ua: "Not:A-Brand";v="8", "Chromium";v="156" || sec-fetch-dest: document || user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE install-no-window info requestWillBeSent Document https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0 (requestId=38FE4EFDD64F8B3F82058AF8025E3948)
+PROBE install-no-window info Page.navigate reply {
+PROBE install-no-window info poll 0 url=https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0&pc=cws&cm=2&hl=en-US&src=1 ready=complete buttons=EN | Reject all | Accept all
+PROBE install-no-window info consent page: cdp click Reject all at 395,1043
+PROBE install-no-window info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mousePressed reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE install-no-window info consent page: cdp click Reject all at 395,1043
+PROBE install-no-window info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mousePressed reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE install-no-window info js click /^reject all/ -> clicked BUTTON
+PROBE install-no-window info requestWillBeSent Document https://consent.google.com/save (requestId=010DE1EE652EF5160D1B9893AF7CB501)
+PROBE install-no-window info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=010DE1EE652EF5160D1B9893AF7CB501)
+PROBE install-no-window info store state: url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh title=uBlock Origin Lite - Chrome Web Store
+PROBE install-no-window info store state: navigator.userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE install-no-window info store state: navigator.userAgentData.brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}]
+PROBE install-no-window info store state: banner count=2 text=Switch to Chrome?
+PROBE install-no-window info store state: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Add to Chrome | See more
+PROBE install-no-window info windows before click: nsapp-windows=3 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}] tabs=1
+PROBE install-no-window info click Add to Chrome at 1087,282 (disabled=0)
+PROBE install-no-window info js click /^add to / -> clicked BUTTON
+PROBE install-no-window info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info sheet up: nsapp-windows=4 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x196}]
+PROBE install-no-window info sheet ax-dump 0:AXUnknown:'':''
+PROBE install-no-window info sheet accept method=ax-press no Add button found (buttons=0)
+PROBE install-no-window info sheet accept method=return-key sent
+PROBE install-no-window info sheet accept method=click at 358,30 of 448x196
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info install result: extension on disk=1 id=ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info post-install dialog window seen: NativeWidgetMacNSWindow vis=1 sheet=1 448x132
+PROBE install-no-window info state after install: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Remove from Chrome | See more
+PROBE install-no-window info windows after: nsapp-windows=4 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x132}]
+PROBE install-no-window info windows before: nsapp-windows=3 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}]
+PROBE install-no-window info tabs before=1 after=1; activate calls blocked=0; appActive=0
+PROBE install-no-window info target type=service_worker url=chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/js/background.js
+PROBE install-no-window info target type=page url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info install-no-window facts: browserWindows 0 -> 0, browser-window guard hits 0, stale targets 0, dialog seen 1, same tabs 1, activate calls blocked 0 (info)
+PROBE install-no-window info installed manifest name=__MSG_extName__ version=2026.1021.1354 page=dashboard.html
+PROBE install-no-window info requestWillBeSent Document chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/dashboard.html (requestId=5A3EBBA97E0545FE2D542FF083A98549)
+PROBE install-no-window info extension service worker: {"name":"uBlock Origin Lite","bg":1}
+PROBE install-no-window info alpha-guard hooked calls=22
+PROBE install-no-window pass mode=stock banner=present brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}] install=completed serviceWorkerAlive=1
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+RC=1
+ips after=4 frontmost after: ASN:0x0-0x43f43f: "Claude" ASN:0x0-0x43f43f: (in front) 
+    bundleID=[ NULL ] 
+    bundle path=[ NULL ] 
+    executable path=[ NULL ] 
+ !cgsConnection !signalled type=[ NULL ]  flavor=[ NULL ]  Version=[ NULL ]  Arch=!!none 
+
