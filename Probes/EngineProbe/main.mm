@@ -438,27 +438,25 @@ static std::vector<CefRefPtr<CefBrowser>> Tabs() {
 // Latency verdict (ruling 13). The hybrid counterparts (1 Chrome-style view plus 19 Alloy-style views, same floating
 // hidden window, same URLs, warm-ups, samples and order) are the control; they always pass and write their median to a
 // file in the probe's profile dir, the tab checks read it. Simplest carry-over: the probe runs one check per launch, and
-// the four checks need only this one number each. A tab check passes at median <= 1.2 x its control's median.
+// the four checks need only this one number each (printed as info beside the tab check).
 static NSString* HybridFile(NSString* tabCheck) {
   return [NSHomeDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"Library/Application Support/Noche Probe/%@-hybrid.median", tabCheck]];
 }
 static void FinishLatency(double median, double p90, double lo, double hi, NSString* order) {
   NSString* base = [NSString stringWithFormat:@"median=%.1fms p90=%.1fms range=%.1f..%.1fms (30 timed after 3 warm-up, %@)", median, p90, lo, hi, order];
-  if ([g_check hasSuffix:@"-hybrid"]) {  // control
+  if ([g_check hasSuffix:@"-hybrid"]) {  // control: info only, the number is printed beside the tab check's
     NSString* tab = [g_check substringToIndex:g_check.length - 7];
     [[NSString stringWithFormat:@"%.3f", median] writeToFile:HybridFile(tab) atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    Finish(true, [base stringByAppendingString:@" control only: written for the tab check"]);
+    Finish(true, [base stringByAppendingString:@" control only (info)"]);
     return;
   }
   NSString* path = HybridFile(g_check);
   NSDate* mtime = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil][NSFileModificationDate];
   NSString* txt = mtime ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] : nil;
-  if (!txt || -[mtime timeIntervalSinceNow] > 900) {
-    Finish(false, [base stringByAppendingFormat:@" no hybrid control from the last 15 minutes (run %@-hybrid first); old reference 11.6 ms: %s", g_check, median <= 11.6 ? "under" : "over"]);
-    return;
-  }
-  const double hybrid = txt.doubleValue;
-  Finish(median <= 1.2 * hybrid, [base stringByAppendingFormat:@" hybrid control median=%.1fms limit=1.2x=%.1fms; info: old absolute reference 11.6ms (S1 harness) is %s", hybrid, 1.2 * hybrid, median <= 11.6 ? "met" : "not met"]);
+  NSString* info = (txt && -[mtime timeIntervalSinceNow] < 900) ? [NSString stringWithFormat:@"hybrid control median=%.1fms (info only)", txt.doubleValue] : @"no recent hybrid control (info only)";
+  // Ruling 14: absolute limits, median <= 16.7 ms (one 60 Hz frame) and p90 <= 33.3 ms (two frames). Tab activation hides the outgoing
+  // WebContents and waits for a fresh frame from the incoming renderer, so the Alloy SetVisible control measures a different mechanism.
+  Finish(median <= 16.7 && p90 <= 33.3, [base stringByAppendingFormat:@" limits median<=16.7ms p90<=33.3ms (Ruling 14); %@; old reference 11.6ms (S1 harness) is %s", info, median <= 11.6 ? "met" : "not met"]);
 }
 
 static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<double> lat) {
