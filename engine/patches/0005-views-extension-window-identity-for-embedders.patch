@@ -1,13 +1,13 @@
-From c7819196cb9a1bad0a277643fc42cec8d87e542f Mon Sep 17 00:00:00 2001
+From d525235fab28a06dd7863dfae02639e6af49b5c1 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 04:59:27 +0200
 Subject: [PATCH] views: extension window identity for embedders
 
 A CEF Views-hosted Browser is TYPE_POPUP, so the extensions API reported window type popup and windows.getAll/tabs.query with windowType normal skipped it. Report normal for those Browsers only.
 ---
- patch/patch.cfg                               |  5 +++++
- ...hrome_browser_extensions_window_type.patch | 20 +++++++++++++++++++
- 2 files changed, 25 insertions(+)
+ patch/patch.cfg                                   |  5 +++++
+ .../chrome_browser_extensions_window_type.patch   | 15 +++++++++++++++
+ 2 files changed, 20 insertions(+)
  create mode 100644 patch/patches/chrome_browser_extensions_window_type.patch
 
 diff --git a/patch/patch.cfg b/patch/patch.cfg
@@ -27,30 +27,25 @@ index 837cb8587..ec14595d4 100644
  ]
 diff --git a/patch/patches/chrome_browser_extensions_window_type.patch b/patch/patches/chrome_browser_extensions_window_type.patch
 new file mode 100644
-index 000000000..552f302aa
+index 000000000..377ca8406
 --- /dev/null
 +++ b/patch/patches/chrome_browser_extensions_window_type.patch
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,15 @@
 +diff --git chrome/browser/extensions/browser_extension_window_controller.cc chrome/browser/extensions/browser_extension_window_controller.cc
-+index b48c0452f31bf4e0456aa27af252a58ec10264f8..6f1c0985dc18aab1b8f7679cb4388f43c2ff4708 100644
++index b48c0452f31bf4e0456aa27af252a58ec10264f8..442b0518d0eb695ac9aab77ec8c9742e417c2358 100644
 +--- chrome/browser/extensions/browser_extension_window_controller.cc
 ++++ chrome/browser/extensions/browser_extension_window_controller.cc
-+@@ -76,6 +76,15 @@ constexpr char kShowStateValueLockedFullscreen[] = "locked-fullscreen";
++@@ -52,6 +52,10 @@
++ #include "chrome/common/chrome_features.h"
 + #endif
 + 
-+ api::tabs::WindowType GetTabsWindowType(const BrowserWindowInterface* browser) {
 ++#if BUILDFLAG(ENABLE_CEF)
-++  // Noche: a Browser hosted by a CEF BrowserView is TYPE_POPUP (no tab strip),
-++  // but it is the embedder's main window and holds its tabs. Report it as
-++  // 'normal' so windows.getAll and tabs.query({windowType: 'normal'}) see it.
-++  if (browser->GetType() == BrowserWindowInterface::TYPE_POPUP &&
-++      browser->cef_delegate() && browser->cef_delegate()->IsViewsHosted()) {
-++    return api::tabs::WindowType::kNormal;
-++  }
+++#include "cef/libcef/browser/chrome/browser_delegate.h"
 ++#endif
-+   switch (browser->GetType()) {
-+     case BrowserWindowInterface::TYPE_APP:
-+       return api::tabs::WindowType::kApp;
+++
++ static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
++ 
++ namespace extensions {
 -- 
 2.56.0
 
