@@ -1,0 +1,463 @@
+# Noche M1.2 persistence evidence, build/ removed first (swift .build kept, incremental), code HEAD cce72fb plus one harness fix (reopen-identity waits for the popup's address, see re-run), engine cef_binary_156.0.14-noche.3659+g18b1359+chromium-156.0.8078.48
+# lock state: CGSSessionScreenIsLocked=Yes during this run (screen locked: hidden windows get no frames)
+# uptime: 22:43  up 1 day,  7:32, 1 user, load averages: 37.24 36.88 36.02
+# gate rc per step
+# clean-build rc=0 (rm -rf build)
+# swifttest rc=0
+# buildapp-plain rc=0
+# smoke-fixture rc=0
+# smoke-closed rc=2
+# sandbox rc=0
+# buildapp-hooks rc=0
+# apptest rc=1
+# negative rc=0
+# rc 2 on smoke-closed is the expected closed-port result
+# nm positive control: inTransactionHook hits in the NOCHE_TESTHOOKS build: 7 (need >= 1); in the plain build: 0 (need 0); in the plain build left after --negative: 0
+# NOCHE_TEST strings in the plain build: 0 (expected 0); after the final plain rebuild: 0
+# app-test rc=1 is reopen-identity only: its popup row had no address yet when the check read it (load average 30 to 38, locked screen); the check now waits for the address; re-run below: rc=0 (two launches, both pass)
+# app-test: 41 checks, 48 pass lines (two-phase checks print one per phase), 1 fail (reopen-identity)
+
+## swift test (XCTest summary lines; the Swift Testing line reports 0 tests)
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.116 (0.119) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.042 (0.043) seconds
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.115 (0.116) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.032 (0.033) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.241 (0.243) seconds
+	 Executed 25 tests, with 0 failures (0 unexpected) in 1.051 (1.056) seconds
+	 Executed 69 tests, with 0 failures (0 unexpected) in 1.596 (1.610) seconds
+	 Executed 69 tests, with 0 failures (0 unexpected) in 1.596 (1.614) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.106 (0.123) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 88 tests, with 0 failures (0 unexpected) in 0.121 (0.144) seconds
+	 Executed 88 tests, with 0 failures (0 unexpected) in 0.121 (0.146) seconds
+􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.
+􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.
+## smoke fixture
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+## smoke closed-port
+NOCHE_SMOKE load_error code=-102
+## check-sandbox
+sandbox check ok: --seatbelt-client=70
+
+## persist-relaunch phase 2 store (sqlite3 CLI)
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE grdb_migrations (identifier TEXT NOT NULL PRIMARY KEY);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE profile (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, name TEXT NOT NULL, colorIndex INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   chromiumDirName TEXT NOT NULL, isDefault INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL, position INTEGER NOT NULL DEFAULT 0, shareWithProfileId TEXT REFERENCES profile(id));
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE space (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   name TEXT NOT NULL, colorTheme TEXT, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE window (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   focusedSpaceId TEXT REFERENCES space(id),
+NOCHE_TEST persist-relaunch info schema|   x REAL, y REAL, w REAL, h REAL, isFullScreen INTEGER NOT NULL DEFAULT 0, isZoomed INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   sidebarWidth REAL, sidebarMode TEXT NOT NULL DEFAULT 'shown',
+NOCHE_TEST persist-relaunch info schema|   selectedTabId TEXT,
+NOCHE_TEST persist-relaunch info schema|   zOrder INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE tabGroup (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, spaceId TEXT REFERENCES space(id), windowId TEXT REFERENCES window(id),
+NOCHE_TEST persist-relaunch info schema|   name TEXT NOT NULL DEFAULT '', colorIndex INTEGER NOT NULL DEFAULT 0, icon TEXT,
+NOCHE_TEST persist-relaunch info schema|   isCollapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE tab (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, windowId TEXT NOT NULL REFERENCES window(id),
+NOCHE_TEST persist-relaunch info schema|   spaceId TEXT REFERENCES space(id), groupId TEXT REFERENCES tabGroup(id),
+NOCHE_TEST persist-relaunch info schema|   kind TEXT NOT NULL DEFAULT 'web',
+NOCHE_TEST persist-relaunch info schema|   url TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', faviconURL TEXT,
+NOCHE_TEST persist-relaunch info schema|   position INTEGER NOT NULL, isPinned INTEGER NOT NULL DEFAULT 0, pinnedURL TEXT,
+NOCHE_TEST persist-relaunch info schema|   lastActiveAt REAL NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   closedAt REAL, closedIndex INTEGER, closedWindowId TEXT,
+NOCHE_TEST persist-relaunch info schema|   archivedAt REAL,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_window_order ON tab(windowId, position) WHERE deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_closed ON tab(closedAt DESC) WHERE closedAt IS NOT NULL AND deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_cleanup ON tab(lastActiveAt) WHERE isPinned = 0 AND deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX window_live ON window(zOrder) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE page (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   url TEXT NOT NULL, host TEXT NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   title TEXT NOT NULL DEFAULT '',
+NOCHE_TEST persist-relaunch info schema|   visitCount INTEGER NOT NULL DEFAULT 0, typedCount INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   lastVisitAt REAL NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX page_url ON page(profileId, url) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX page_host ON page(profileId, host, lastVisitAt DESC) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX page_recent ON page(profileId, lastVisitAt DESC) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE visit (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, pageId TEXT NOT NULL REFERENCES page(id),
+NOCHE_TEST persist-relaunch info schema|   visitedAt REAL NOT NULL, transition TEXT NOT NULL DEFAULT 'link',
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX visit_page ON visit(pageId, visitedAt DESC);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE sitePermission (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   origin TEXT NOT NULL, kind TEXT NOT NULL, decision TEXT NOT NULL CHECK (decision IN ('allow', 'block')),
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX sitePermission_key ON sitePermission(profileId, origin, kind) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE bookmark (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   parentId TEXT REFERENCES bookmark(id), kind TEXT NOT NULL CHECK (kind IN ('folder', 'url')) CHECK (kind = 'folder' OR url IS NOT NULL),
+NOCHE_TEST persist-relaunch info schema|   title TEXT NOT NULL DEFAULT '', url TEXT, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX bookmark_children ON bookmark(profileId, parentId, position) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX bookmark_root ON bookmark(profileId, title) WHERE parentId IS NULL AND deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info integrity_check=ok
+
+## app-test.sh, full list (stdout NOCHE_TEST lines)
+NOCHE_TEST a11y-labels pass rows (button, title label, selected state), New Tab row and 4 toolbar buttons and 3 window buttons labelled; the row favicon returns to the placeholder [] []
+NOCHE_TEST a11y-labels info activate-blocked=0
+NOCHE_TEST a11y-labels info frontmost samples=10 noche-frontmost=0 unknown=0
+NOCHE_TEST a11y-labels info crash reports: none new
+NOCHE_TEST quit-100 info tabs=100 loaded=100 devtools=1, sending the Quit menu action
+NOCHE_TEST quit-100 pass 100 tabs in 2 windows and one DevTools, closed 100 ms apart, quit menu action, clean exit without the shutdown watchdog (tabs=100 didCloseTab=100 windowDidClose=2 devtools created=1 ended=1 watchdog=false [] [])
+NOCHE_TEST quit-100 info activate-blocked=4
+NOCHE_TEST quit-100 info frontmost samples=12 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-100 info crash reports: none new
+NOCHE_TEST quit-early pass quit right after the first load
+NOCHE_TEST quit-early info activate-blocked=0
+NOCHE_TEST quit-early info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-early info crash reports: none new
+NOCHE_TEST window-frame info first window: asked (300.0, 4.0, 2200.0, 1436.0), constrainFrameRect gives (300.0, 4.0, 2200.0, 1436.0)
+NOCHE_TEST window-frame info primary screen: asked (400.0, 200.0, 1200.0, 800.0), constrainFrameRect gives (400.0, 200.0, 1200.0, 800.0)
+NOCHE_TEST window-frame info second screen: asked (-1040.0, -395.0, 900.0, 1200.0), constrainFrameRect gives (-1040.0, -395.0, 900.0, 1200.0)
+NOCHE_TEST window-frame info WindowManager windows 50 to 400 pt wide: []
+NOCHE_TEST window-frame info screens ["(0.0, 0.0, 2560.0, 1440.0) visible (0.0, 0.0, 2560.0, 1440.0)", "(-1440.0, -495.0, 1440.0, 2560.0) visible (-1440.0, -495.0, 1440.0, 2560.0)"]
+NOCHE_TEST window-frame pass 3 windows opened with the frame asked for (within 1 pt, no setFrame): first window (300.0, 4.0, 2200.0, 1436.0); primary screen (400.0, 200.0, 1200.0, 800.0); second screen (-1040.0, -395.0, 900.0, 1200.0) [] []
+NOCHE_TEST window-frame info activate-blocked=0
+NOCHE_TEST window-frame info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST window-frame info crash reports: none new
+NOCHE_TEST no-window pass no window: New Tab (menu key equivalent), Open Command Bar (address field editing) and reopen each opened one window with one tab []
+NOCHE_TEST no-window info activate-blocked=0
+NOCHE_TEST no-window info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST no-window info crash reports: none new
+NOCHE_TEST close-beforeunload pass Cmd+W with the dialog answered Stay kept the tab and its selection; the second Cmd+W (Leave) closed it, the other tab is selected (dialogs 2, closeTab 2) [] []
+NOCHE_TEST close-beforeunload info activate-blocked=0
+NOCHE_TEST close-beforeunload info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST close-beforeunload info crash reports: none new
+NOCHE_TEST chromium-restore-relaunch pass phase 1: 3 tabs open, quitting normally []
+NOCHE_TEST chromium-restore-relaunch info activate-blocked=0
+NOCHE_TEST chromium-restore-relaunch info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST chromium-restore-relaunch info crash reports: none new
+NOCHE_TEST chromium-restore-relaunch info session-file=Session_13437346956424035 fixture-urls=6
+NOCHE_TEST chromium-restore-relaunch info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 7127:./Cache/Default/Sessions/Session_13437346956424035 96:./Cache/Default/Sessions_Encrypted 7855:./Cache/Default/Sessions_Encrypted/Session_13437346956425629 
+NOCHE_TEST chromium-restore-relaunch pass phase 2: engine tabs=3 NSWindows=1 controllers=1 profile=45 entries []
+NOCHE_TEST chromium-restore-relaunch info activate-blocked=0
+NOCHE_TEST chromium-restore-relaunch info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST chromium-restore-relaunch info crash reports: none new
+NOCHE_TEST chromium-restore-crash-relaunch info phase1-ready: 3 tabs loaded, waiting to be killed
+NOCHE_TEST chromium-restore-crash-relaunch info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST chromium-restore-crash-relaunch info crash reports: none new
+NOCHE_TEST chromium-restore-crash-relaunch info session-file=Session_13437346977607418 fixture-urls=6
+NOCHE_TEST chromium-restore-crash-relaunch info sessions=4096:./Cache/Default/SessionStorage 20632:./Cache/Default/SessionStorage-wal 96:./Cache/Default/Sessions 6831:./Cache/Default/Sessions/Session_13437346977607418 96:./Cache/Default/Sessions_Encrypted 7295:./Cache/Default/Sessions_Encrypted/Session_13437346977609395 
+NOCHE_TEST chromium-restore-crash-relaunch pass phase 2: engine tabs=3 NSWindows=1 controllers=1 profile=43 entries []
+NOCHE_TEST chromium-restore-crash-relaunch info activate-blocked=0
+NOCHE_TEST chromium-restore-crash-relaunch info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST chromium-restore-crash-relaunch info crash reports: none new
+NOCHE_TEST persist-relaunch pass phase 1: 2 windows with 3 and 4 tabs, active 2 and 4, frames set, quitting at once []
+NOCHE_TEST persist-relaunch info activate-blocked=0
+NOCHE_TEST persist-relaunch info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST persist-relaunch info crash reports: none new
+NOCHE_TEST persist-relaunch info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 15328:./Cache/Default/Sessions/Session_13437347000528253 96:./Cache/Default/Sessions_Encrypted 17072:./Cache/Default/Sessions_Encrypted/Session_13437347000539326 
+NOCHE_TEST persist-relaunch pass phase 2: 2 windows with frames within 1 pt, tab urls in order, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow), lastActiveAt, favicon address and sidebarWidth kept [] []
+NOCHE_TEST persist-relaunch info activate-blocked=0
+NOCHE_TEST persist-relaunch info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST persist-relaunch info crash reports: none new
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE grdb_migrations (identifier TEXT NOT NULL PRIMARY KEY);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE profile (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, name TEXT NOT NULL, colorIndex INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   chromiumDirName TEXT NOT NULL, isDefault INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL, position INTEGER NOT NULL DEFAULT 0, shareWithProfileId TEXT REFERENCES profile(id));
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE space (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   name TEXT NOT NULL, colorTheme TEXT, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE window (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   focusedSpaceId TEXT REFERENCES space(id),
+NOCHE_TEST persist-relaunch info schema|   x REAL, y REAL, w REAL, h REAL, isFullScreen INTEGER NOT NULL DEFAULT 0, isZoomed INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   sidebarWidth REAL, sidebarMode TEXT NOT NULL DEFAULT 'shown',
+NOCHE_TEST persist-relaunch info schema|   selectedTabId TEXT,
+NOCHE_TEST persist-relaunch info schema|   zOrder INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE tabGroup (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, spaceId TEXT REFERENCES space(id), windowId TEXT REFERENCES window(id),
+NOCHE_TEST persist-relaunch info schema|   name TEXT NOT NULL DEFAULT '', colorIndex INTEGER NOT NULL DEFAULT 0, icon TEXT,
+NOCHE_TEST persist-relaunch info schema|   isCollapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE tab (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, windowId TEXT NOT NULL REFERENCES window(id),
+NOCHE_TEST persist-relaunch info schema|   spaceId TEXT REFERENCES space(id), groupId TEXT REFERENCES tabGroup(id),
+NOCHE_TEST persist-relaunch info schema|   kind TEXT NOT NULL DEFAULT 'web',
+NOCHE_TEST persist-relaunch info schema|   url TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', faviconURL TEXT,
+NOCHE_TEST persist-relaunch info schema|   position INTEGER NOT NULL, isPinned INTEGER NOT NULL DEFAULT 0, pinnedURL TEXT,
+NOCHE_TEST persist-relaunch info schema|   lastActiveAt REAL NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   closedAt REAL, closedIndex INTEGER, closedWindowId TEXT,
+NOCHE_TEST persist-relaunch info schema|   archivedAt REAL,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_window_order ON tab(windowId, position) WHERE deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_closed ON tab(closedAt DESC) WHERE closedAt IS NOT NULL AND deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX tab_cleanup ON tab(lastActiveAt) WHERE isPinned = 0 AND deletedAt IS NULL AND closedAt IS NULL AND archivedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX window_live ON window(zOrder) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE page (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   url TEXT NOT NULL, host TEXT NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   title TEXT NOT NULL DEFAULT '',
+NOCHE_TEST persist-relaunch info schema|   visitCount INTEGER NOT NULL DEFAULT 0, typedCount INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   lastVisitAt REAL NOT NULL,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX page_url ON page(profileId, url) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX page_host ON page(profileId, host, lastVisitAt DESC) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX page_recent ON page(profileId, lastVisitAt DESC) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE visit (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, pageId TEXT NOT NULL REFERENCES page(id),
+NOCHE_TEST persist-relaunch info schema|   visitedAt REAL NOT NULL, transition TEXT NOT NULL DEFAULT 'link',
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX visit_page ON visit(pageId, visitedAt DESC);
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE sitePermission (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   origin TEXT NOT NULL, kind TEXT NOT NULL, decision TEXT NOT NULL CHECK (decision IN ('allow', 'block')),
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX sitePermission_key ON sitePermission(profileId, origin, kind) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE TABLE bookmark (
+NOCHE_TEST persist-relaunch info schema|   id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
+NOCHE_TEST persist-relaunch info schema|   parentId TEXT REFERENCES bookmark(id), kind TEXT NOT NULL CHECK (kind IN ('folder', 'url')) CHECK (kind = 'folder' OR url IS NOT NULL),
+NOCHE_TEST persist-relaunch info schema|   title TEXT NOT NULL DEFAULT '', url TEXT, position INTEGER NOT NULL DEFAULT 0,
+NOCHE_TEST persist-relaunch info schema|   createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
+NOCHE_TEST persist-relaunch info schema| CREATE INDEX bookmark_children ON bookmark(profileId, parentId, position) WHERE deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info schema| CREATE UNIQUE INDEX bookmark_root ON bookmark(profileId, title) WHERE parentId IS NULL AND deletedAt IS NULL;
+NOCHE_TEST persist-relaunch info integrity_check=ok
+NOCHE_TEST quit-close-relaunch pass phase 1: 2 tabs open, quitBehavior=close (--selftest-setting), quitting []
+NOCHE_TEST quit-close-relaunch info activate-blocked=0
+NOCHE_TEST quit-close-relaunch info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-close-relaunch info crash reports: none new
+NOCHE_TEST quit-close-relaunch info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 4004:./Cache/Default/Sessions/Session_13437347020533167 96:./Cache/Default/Sessions_Encrypted 4472:./Cache/Default/Sessions_Encrypted/Session_13437347020535989 
+NOCHE_TEST quit-close-relaunch pass phase 2: quitBehavior=close left one window with one blank tab (engine tabs=1 NSWindows=1 urls=["about:blank"] restored rows=0) []
+NOCHE_TEST quit-close-relaunch info activate-blocked=0
+NOCHE_TEST quit-close-relaunch info frontmost samples=5 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-close-relaunch info crash reports: none new
+NOCHE_TEST reopen-closed pass A B C, Cmd+W on B, Shift+Cmd+T restores B at index 1 and active with its id; disabled and inert with an empty list, blank tabs never recorded; Next Tab and the Cmd+W successor follow the list order, not the engine strip []
+NOCHE_TEST reopen-closed info activate-blocked=0
+NOCHE_TEST reopen-closed info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-closed info crash reports: none new
+NOCHE_TEST reopen-closed-relaunch pass phase 1: B closed, quitting []
+NOCHE_TEST reopen-closed-relaunch info activate-blocked=0
+NOCHE_TEST reopen-closed-relaunch info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-closed-relaunch info crash reports: none new
+NOCHE_TEST reopen-closed-relaunch info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 7213:./Cache/Default/Sessions/Session_13437347048431847 96:./Cache/Default/Sessions_Encrypted 7965:./Cache/Default/Sessions_Encrypted/Session_13437347048434519 
+NOCHE_TEST reopen-closed-relaunch pass phase 2: after a relaunch Shift+Cmd+T restores B at index 1 in its original window, active []
+NOCHE_TEST reopen-closed-relaunch info activate-blocked=0
+NOCHE_TEST reopen-closed-relaunch info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-closed-relaunch info crash reports: none new
+NOCHE_TEST crash-mid-write info kill-at=pending integrity_check=ok
+NOCHE_TEST crash-mid-write info phase1-ready: snapshot 1 written (2 tabs, first selected), killing at pending
+NOCHE_TEST crash-mid-write info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST crash-mid-write info crash reports: none new
+NOCHE_TEST crash-mid-write info sessions=4096:./Cache/Default/SessionStorage 20632:./Cache/Default/SessionStorage-wal 64:./Cache/Default/Sessions 64:./Cache/Default/Sessions_Encrypted 
+NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []
+NOCHE_TEST crash-mid-write info activate-blocked=0
+NOCHE_TEST crash-mid-write info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST crash-mid-write info crash reports: none new
+NOCHE_TEST crash-mid-write info kill-at=in-transaction integrity_check=ok
+NOCHE_TEST crash-mid-write info phase1-ready: snapshot 1 written (2 tabs, first selected), killing at in-transaction
+NOCHE_TEST crash-mid-write info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST crash-mid-write info crash reports: none new
+NOCHE_TEST crash-mid-write info sessions=4096:./Cache/Default/SessionStorage 20632:./Cache/Default/SessionStorage-wal 64:./Cache/Default/Sessions 64:./Cache/Default/Sessions_Encrypted 
+NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []
+NOCHE_TEST crash-mid-write info activate-blocked=0
+NOCHE_TEST crash-mid-write info frontmost samples=5 noche-frontmost=0 unknown=0
+NOCHE_TEST crash-mid-write info crash reports: none new
+NOCHE_TEST corrupt-store pass phase 1: 2 tabs open, quitting []
+NOCHE_TEST corrupt-store info activate-blocked=0
+NOCHE_TEST corrupt-store info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST corrupt-store info crash reports: none new
+NOCHE_TEST corrupt-store info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 6082:./Cache/Default/Sessions/Session_13437347105216846 96:./Cache/Default/Sessions_Encrypted 6582:./Cache/Default/Sessions_Encrypted/Session_13437347105217624 
+NOCHE_TEST corrupt-store pass phase 2: corrupt store quarantined (["noche.sqlite.corrupt-20261024-222511-244"]), one window with one tab (engine tabs=1 NSWindows=1), real store reopened empty (fallback=none) []
+NOCHE_TEST corrupt-store info activate-blocked=0
+NOCHE_TEST corrupt-store info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST corrupt-store info crash reports: none new
+NOCHE_TEST reopen-identity fail reopened tab keeps its id and address with a Cmd+T and a popup around it (urls ["http://127.0.0.1:63411/", "http://127.0.0.1:63411/favicon.html", "http://127.0.0.1:63411/link.html", "about:blank", ""], popups 0) []
+NOCHE_TEST reopen-identity info activate-blocked=1
+NOCHE_TEST reopen-identity fail exit-rc=1 watchdog=0
+NOCHE-HELPER pid=55415 sandbox-initialize=1
+NOCHE-HELPER pid=55418 sandbox-initialize=1
+NOCHE-HELPER pid=55417 sandbox-initialize=1
+NOCHE-HELPER pid=55414 sandbox-initialize=1
+NOCHE-HELPER pid=55427 sandbox-initialize=1
+NOCHE-HELPER pid=55428 sandbox-initialize=1
+NOCHE-HELPER pid=55439 sandbox-initialize=1
+NOCHE-HELPER pid=55440 sandbox-initialize=1
+NOCHE-HELPER pid=55441 sandbox-initialize=1
+NOCHE-HELPER pid=55442 sandbox-initialize=1
+NOCHE-HELPER pid=55447 sandbox-initialize=1
+NOCHE-HELPER pid=55517 sandbox-initialize=1
+--- last stderr lines:
+NOCHE-HELPER pid=55415 sandbox-initialize=1
+NOCHE-HELPER pid=55418 sandbox-initialize=1
+NOCHE-HELPER pid=55417 sandbox-initialize=1
+NOCHE-HELPER pid=55414 sandbox-initialize=1
+NOCHE-HELPER pid=55427 sandbox-initialize=1
+NOCHE-HELPER pid=55428 sandbox-initialize=1
+NOCHE-HELPER pid=55439 sandbox-initialize=1
+NOCHE-HELPER pid=55440 sandbox-initialize=1
+NOCHE-HELPER pid=55441 sandbox-initialize=1
+NOCHE-HELPER pid=55442 sandbox-initialize=1
+NOCHE-HELPER pid=55447 sandbox-initialize=1
+NOCHE-HELPER pid=55517 sandbox-initialize=1
+NOCHE_TEST reopen-identity info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-identity info crash reports: none new
+NOCHE_TEST frame-storm pass 50 resizes updated the window row (w 849) and left the 3 tab rows untouched  []
+NOCHE_TEST frame-storm info activate-blocked=0
+NOCHE_TEST frame-storm info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST frame-storm info crash reports: none new
+NOCHE_TEST store-unavailable pass store unavailable (Error Domain=NSCocoaErrorDomain Code=516 "The file “Store” couldn’t be saved in the folder “Noche Test” because a file with the same name already exists." UserInfo={NSFilePath=/Users/renzof/Library/Application Support/Noche Test/Store, NSURL=file:///Users/renzof/Library/Application%20Support/Noche%20Test/Store, NSUnderlyingError=0x76570c9d40 {Error Domain=NSPOSIXErrorDomain Code=17 "File exists"}}): one window on an in-memory store, launch not blocked []
+NOCHE_TEST store-unavailable info activate-blocked=0
+NOCHE_TEST store-unavailable info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST store-unavailable info crash reports: none new
+NOCHE_TEST store-unavailable info variant=unwritable mode-after-run=555 file and listing unchanged
+NOCHE_TEST store-unavailable pass store unavailable (SQLite error 8: attempt to write a readonly database - while executing `PRAGMA journal_mode = WAL`): one window on an in-memory store, launch not blocked []
+NOCHE_TEST store-unavailable info activate-blocked=0
+NOCHE_TEST store-unavailable info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST store-unavailable info crash reports: none new
+NOCHE_TEST tab-chords pass list [A, B, C] over engine strip [A, C, B]: Cmd+1, 2, 3 and Cmd+9 select list positions [0, 1, 2, 2, 1, 0, 2] []
+NOCHE_TEST tab-chords info activate-blocked=0
+NOCHE_TEST tab-chords info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST tab-chords info crash reports: none new
+NOCHE_TEST move-tab-relaunch pass phase 1: B moved after C by Ctrl+Shift+Page Down, ends are no-ops, sidebar [A, C, B], quitting at once []
+NOCHE_TEST move-tab-relaunch info activate-blocked=0
+NOCHE_TEST move-tab-relaunch info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST move-tab-relaunch info crash reports: none new
+NOCHE_TEST move-tab-relaunch info sessions=20480:./Cache/Default/SessionStorage 96:./Cache/Default/Sessions 7243:./Cache/Default/Sessions/Session_13437347167151811 96:./Cache/Default/Sessions_Encrypted 8027:./Cache/Default/Sessions_Encrypted/Session_13437347167152893 
+NOCHE_TEST move-tab-relaunch pass phase 2: the order [A, C, B] and B active survived the relaunch, sidebar shows it []
+NOCHE_TEST move-tab-relaunch info activate-blocked=0
+NOCHE_TEST move-tab-relaunch info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST move-tab-relaunch info crash reports: none new
+NOCHE_TEST hidden info activations-blocked=0 alpha-attempts-own=0 alpha-attempts-other=0
+NOCHE_TEST hidden pass windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=0 title="Noche App Fixture" violations=[]
+NOCHE_TEST hidden info activate-blocked=0
+NOCHE_TEST hidden info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST hidden info crash reports: none new
+NOCHE_TEST close-last pass last tab closed its window, app alive 2 s later, new window has 1 tab []
+NOCHE_TEST close-last info activate-blocked=0
+NOCHE_TEST close-last info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST close-last info crash reports: none new
+NOCHE_TEST quit-many info tabs=15 loaded=15, sending the Quit menu action
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many info activate-blocked=0
+NOCHE_TEST quit-many info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-many info crash reports: none new
+NOCHE_TEST web-insets pass view (198.0, 7.0, 1995.0, 1381.0) window (2200.0, 1436.0): covers bounds=true top corners square=true bottom corners rounded=true
+NOCHE_TEST web-insets info activate-blocked=0
+NOCHE_TEST web-insets info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST web-insets info crash reports: none new
+NOCHE_TEST layout info window 2200.0x1436.0 frame (300.0, 4.0, 2200.0, 1436.0) screen (0.0, 0.0, 2560.0, 1440.0) visible (0.0, 0.0, 2560.0, 1440.0) screens ["(0.0, 0.0, 2560.0, 1440.0)", "(-1440.0, -495.0, 1440.0, 2560.0)"]
+NOCHE_TEST layout info pixels divider=(44, 44, 44) swatch=(44, 44, 44) toolbar=(39, 39, 39) swatch=(39, 39, 39) selected row=(34, 36, 40) swatch=(34, 36, 40)
+NOCHE_TEST layout pass window 2200.0x1436.0, 3 rows, both sidebar states within 1 pt, 3 pixel samples within 3 per channel [] []
+NOCHE_TEST layout info activate-blocked=0
+NOCHE_TEST layout info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST layout info crash reports: none new
+NOCHE_TEST tabs-keys pass Cmd+T x3 -> 4 rows, newest active; next/previous wrap [0, 1, 0, 3]; Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max 1; actions ["closeTab": 1, "newTab": 4, "previousTab": 2, "nextTab": 2] []
+NOCHE_TEST tabs-keys info activate-blocked=0
+NOCHE_TEST tabs-keys info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST tabs-keys info crash reports: none new
+NOCHE_TEST tabs-rapid pass 20x Cmd+T then 20x Cmd+W: 1 row, 1 engine tab, extension count 1, actions ["newTab": 20, "closeTab": 20], own windows max 1 []
+NOCHE_TEST tabs-rapid info activate-blocked=0
+NOCHE_TEST tabs-rapid info frontmost samples=8 noche-frontmost=0 unknown=0
+NOCHE_TEST tabs-rapid info crash reports: none new
+NOCHE_TEST ext-count pass 5 tabs: extension count 5 equals rows; tabs.create added exactly one row (6); tabs.update(active) moved the selection to row 1 []
+NOCHE_TEST ext-count info activate-blocked=0
+NOCHE_TEST ext-count info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST ext-count info crash reports: none new
+NOCHE_TEST navigate pass Cmd+L selects the URL; typed path and search loaded (http://127.0.0.1:63411/search?q=two%20words); back (Cmd+[) and forward (button) work; Cmd+R reloaded []
+NOCHE_TEST navigate info activate-blocked=0
+NOCHE_TEST navigate info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST navigate info crash reports: none new
+NOCHE_TEST blank-link pass target=_blank click: one new row at index 1 (opener 0), active; rows=4 engine tabs=4 windows=1 []
+NOCHE_TEST blank-link info activate-blocked=1
+NOCHE_TEST blank-link info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST blank-link info crash reports: none new
+NOCHE_TEST long-title pass titles of 300 W, Arabic and emoji stay inside rows of pitch 37, no ellipsis, fade mask, placeholder favicon [] []
+NOCHE_TEST long-title info activate-blocked=0
+NOCHE_TEST long-title info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST long-title info crash reports: none new
+NOCHE_TEST load-error info after the error: tab url http://127.0.0.1:63411/ tab title localhost row title localhost address localhost back enabled false
+NOCHE_TEST load-error pass closed port on localhost: row title and address show localhost, Back returns to http://127.0.0.1:63411/ (address 127.0.0.1) []
+NOCHE_TEST load-error info activate-blocked=0
+NOCHE_TEST load-error info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST load-error info crash reports: none new
+NOCHE_TEST menu pass 48 menu lines equal the M1.1 list (plus the tab by-number and move items of M1.2), the 6 edit actions are nil-targeted
+NOCHE_TEST menu info activate-blocked=0
+NOCHE_TEST menu info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST menu info crash reports: none new
+NOCHE_TEST sidebar-toggle info hide 136 ms (limit 145), show 114 ms (limit 125), overshoot 1.95 pt, button hide 128 ms
+NOCHE_TEST sidebar-toggle pass Cmd+S hides in 136 ms with the lights hidden, shows in 114 ms with 1.95 pt overshoot ending at 197; the toggle button hides again in 128 ms; actions ["toggleSidebar": 3] []
+NOCHE_TEST sidebar-toggle info activate-blocked=0
+NOCHE_TEST sidebar-toggle info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST sidebar-toggle info crash reports: none new
+NOCHE_TEST sidebar-scroll pass 40 tabs at 1436 and 800 pt: Shift+Cmd+[ wraps to tab 40 and its row is fully visible (h1436: row 40 at y 1393.0-1430.0 of 1436; h800: row 40 at y 757.0-794.0 of 800), pitch 37, a scrolled-to row takes the click [] []
+NOCHE_TEST sidebar-scroll info activate-blocked=0
+NOCHE_TEST sidebar-scroll info frontmost samples=5 noche-frontmost=0 unknown=0
+NOCHE_TEST sidebar-scroll info crash reports: none new
+NOCHE_TEST shortcuts-once pass 19 shortcuts acted exactly once with no repeated Chrome command: Cmd+K reached the page, Cmd+R, Shift+Cmd+R, Cmd+Shift+= (Zoom In), Cmd+- (Zoom Out), Cmd+0 (Actual Size), Shift+Cmd+C, Cmd+[, Cmd+], Cmd+L, address field Cmd+A, Cmd+C, Cmd+S, Cmd+T, Shift+Cmd+], Shift+Cmd+[, Cmd+W, Cmd+N, Shift+Cmd+W (second window), Opt+Cmd+I [] []
+NOCHE_TEST shortcuts-once info activate-blocked=3
+NOCHE_TEST shortcuts-once info frontmost samples=8 noche-frontmost=0 unknown=0
+NOCHE_TEST shortcuts-once info crash reports: none new
+NOCHE_TEST eval-async pass completions run on a later main-queue turn: inside a CEF callback [], closed-tab call ran before returning false, reply 2, close error tab closed, late error tab closed []
+NOCHE_TEST eval-async info activate-blocked=0
+NOCHE_TEST eval-async info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST eval-async info crash reports: none new
+NOCHE_TEST devtools-any-path info DevTools open through a Chrome command (Noche devTools action ran 0 times), sending the Quit menu action
+NOCHE_TEST devtools-any-path pass DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=1 loaded=1 ended=1 opened=true windowDidClose=1 devtools left=0 watchdog=false [] [])
+NOCHE_TEST devtools-any-path info activate-blocked=4
+NOCHE_TEST devtools-any-path info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST devtools-any-path info crash reports: none new
+NOCHE_TEST no-zombie-tab pass 20 tabs opened and closed in the same turn: added 20 closed 20, tabs 1 rows 1, zombies [] []
+NOCHE_TEST no-zombie-tab info activate-blocked=0
+NOCHE_TEST no-zombie-tab info frontmost samples=3 noche-frontmost=0 unknown=0
+NOCHE_TEST no-zombie-tab info crash reports: none new
+NOCHE_TEST devtools-quit info DevTools open, sending the Quit menu action
+NOCHE_TEST devtools-quit pass DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=1 loaded=1 ended=1 opened=true windowDidClose=1 devtools left=0 watchdog=false [] [])
+NOCHE_TEST devtools-quit info activate-blocked=4
+NOCHE_TEST devtools-quit info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST devtools-quit info crash reports: none new
+NOCHE_TEST devtools-close-tab pass DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows 1 DevTools created=1 ended=1 [] []
+NOCHE_TEST devtools-close-tab info activate-blocked=4
+NOCHE_TEST devtools-close-tab info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST devtools-close-tab info crash reports: none new
+NOCHE_TEST load-error-link pass link to a closed port: row title and address show localhost, Cmd+L seeds http://localhost:1/, Back returns to the page and clears the failure []
+NOCHE_TEST load-error-link info activate-blocked=0
+NOCHE_TEST load-error-link info frontmost samples=9 noche-frontmost=0 unknown=0
+NOCHE_TEST load-error-link info crash reports: none new
+
+## reopen-identity re-run (twice, one script call)
+NOCHE_TEST reopen-identity pass reopened tab keeps its id and address with a Cmd+T and a popup around it (urls ["http://127.0.0.1:59966/", "http://127.0.0.1:59966/favicon.html", "http://127.0.0.1:59966/link.html", "about:blank", "http://127.0.0.1:59966/b.html"], popups 1) []
+NOCHE_TEST reopen-identity info activate-blocked=1
+NOCHE_TEST reopen-identity info frontmost samples=8 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-identity info crash reports: none new
+NOCHE_TEST reopen-identity pass reopened tab keeps its id and address with a Cmd+T and a popup around it (urls ["http://127.0.0.1:59966/", "http://127.0.0.1:59966/favicon.html", "http://127.0.0.1:59966/link.html", "about:blank", "http://127.0.0.1:59966/b.html"], popups 1) []
+NOCHE_TEST reopen-identity info activate-blocked=1
+NOCHE_TEST reopen-identity info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST reopen-identity info crash reports: none new
+
+## app-test.sh --negative
+NEGATIVE no-zombie-tab with NOCHE_TEST_NO_CLOSED_FILTER=1: failed as expected: NOCHE_TEST no-zombie-tab fail tabs=1 rows=21 added=40 closed=20 ["didAddTab 2 after its didCloseTab", "didActivateTab 2 after its didCloseTab", "didAddTab 3 after its didCloseTab", "didActivateTab 3 after its didCloseTab", "didAddTab 4 after its didCloseTab"]
+NEGATIVE hidden with NOCHE_TEST_NEGATIVE=activate: failed as expected: NOCHE_TEST hidden fail windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=1 alpha-attempts-own=0 title="Noche App Fixture" violations=[]
+NEGATIVE hidden with NOCHE_TEST_NEGATIVE=alpha: failed as expected: NOCHE_TEST hidden fail windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=1 title="Noche App Fixture" violations=[]
+NEGATIVE chromium-restore-relaunch with NOCHE_TEST_RESTORE_EXPECT=1: failed as expected: NOCHE_TEST chromium-restore-relaunch fail phase 2: engine tabs=3 NSWindows=1 controllers=1 profile=44 entries, want 1 tabs, 1, 1
+NEGATIVE chromium-restore-crash-relaunch with NOCHE_TEST_RESTORE_EXPECT=1: failed as expected: NOCHE_TEST chromium-restore-crash-relaunch fail phase 2: engine tabs=3 NSWindows=1 controllers=1 profile=43 entries, want 1 tabs, 1, 1
+NEGATIVE persist-relaunch with NOCHE_TEST_NOFLUSH=1: failed as expected: NOCHE_TEST persist-relaunch fail phase 1: stored favicon rows 0 (want 1), windows with a sidebarWidth 0 (want 2)
+NEGATIVE reopen-closed with NOCHE_TEST_NO_CLOSED=1: failed as expected: NOCHE_TEST reopen-closed fail item disabled after closing B
+NEGATIVE shortcuts-once with NOCHE_TEST_NOEXACT=1: failed as expected: NOCHE_TEST shortcuts-once fail Cmd+W closed no tab
+NEGATIVE devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1: pass (recorded, not asserted)

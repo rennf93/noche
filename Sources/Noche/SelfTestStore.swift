@@ -262,6 +262,8 @@ extension SelfTest {
                "phase 2: corrupt store quarantined (\(kept)), one window with one tab (engine tabs=\(tabs) NSWindows=\(windows)), real store reopened empty (fallback=\(app.storeFallback ?? "none")) \(violations)")
     }
 
+    func c(_ c: BrowserWindowController, has url: String) -> Bool { c.list.items.contains { $0.url == url } }
+
     /// Shift+Cmd+T then Cmd+T in one run-loop turn, and a popup the page opens right after the reopen: the reopened row keeps its id and
     /// address, the other new tabs are not given them. B is favicon.html so it differs from the popup (b.html) and from the blank tab.
     func reopenIdentity() async {
@@ -288,6 +290,7 @@ extension SelfTest {
         shiftCmdT()
         _ = await evaluate(cTab, "document.getElementById('l').click()")
         guard await until(15, { self.urls(c).count == 5 && win.tabs.count == 5 }) else { return finish(false, "after reopen and popup: \(urls(c))") }
+        _ = await until(15, { self.c(c, has: b) })  // the popup's address arrives after its row (slow under load)
         let reopened = c.list.items.first { $0.id == idB }, popups = c.list.items.filter { $0.url == b }.count
         finish(reopened?.url == f && popups == 1 && violations.isEmpty, "reopened tab keeps its id and address with a Cmd+T and a popup around it (urls \(urls(c)), popups \(popups)) \(violations)")
     }
