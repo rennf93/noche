@@ -3,7 +3,7 @@ import CefBridge
 import NocheCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let smoke = SmokeOptions.parse(CommandLine.arguments)
 #if NOCHE_TESTHOOKS
     private let selfTestOptions = SelfTest.parse(CommandLine.arguments)
@@ -11,14 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
     /// Set by the self-test when its verdict is only known at exit.
     var exitCodeOverride: Int32?
 #endif
-    private(set) var windows: [NCWindow] = []
+    private(set) var controllers: [BrowserWindowController] = []
+    var windows: [NCWindow] { controllers.map(\.window) }
+    var searchTemplate = AddressInput.defaultSearchTemplate
     private var finished = false
     private var exitCode: Int32 = 0
     private var status: Int?
     private var title: String?
 
     /// Smoke and self-test runs share the owner's Mac: hidden windows, no Dock icon, never frontmost.
-    private var hidden: Bool {
+    var hidden: Bool {
 #if NOCHE_TESTHOOKS
         if selfTestOptions != nil { return true }
 #endif
@@ -43,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
             url = options.url
             frame = SelfTest.windowFrame
             selfTest = SelfTest(options, app: self)
+            searchTemplate = options.url + "search?q=%s"  // no self-test touches the network
         }
 #endif
         let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(profile + "/Cache")
@@ -66,12 +69,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
 #endif
     }
 
-    /// One window with one tab at |url|. Task 4 wires File > New Window to this.
+    /// One window with one tab at |url|.
     @discardableResult
     func newWindow(url: String = "about:blank", frame: NSRect = NSRect(x: 100, y: 100, width: 1280, height: 800)) -> NCWindow {
-        let window = NCWindow(url: url, frame: frame, mode: hidden ? .hidden : .normal, delegate: self)
-        windows.append(window)
-        return window
+        let controller = BrowserWindowController(app: self, url: url, frame: frame)
+        controllers.append(controller)
+        return controller.window
+    }
+
+    /// File > New Window: same size as the window it is opened from.
+    func newWindowAction() {
+        let frame = active.flatMap { $0.nsWindow?.frame.size }.map { NSRect(origin: NSPoint(x: 100, y: 100), size: $0) }
+        newWindow(frame: frame ?? NSRect(x: 100, y: 100, width: 1280, height: 800))
+    }
+
+    /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
+    var active: BrowserWindowController? { controllers.first { $0.nsWindow?.isKeyWindow == true } ?? controllers.last }
+
+    // MARK: menu actions
+
+    @objc func newTab(_ s: Any?) { active?.newTab() }
+    @objc func newWindowMenu(_ s: Any?) { newWindowAction() }
+    @objc func openCommandBar(_ s: Any?) { active?.focusAddress() }
+    @objc func closeWindowMenu(_ s: Any?) { active?.close() }
+    @objc func closeTab(_ s: Any?) { active?.closeActiveTab() }
+    @objc func copyURL(_ s: Any?) { active?.copyURL() }
+    @objc func refresh(_ s: Any?) { active?.reload() }
+    @objc func forceRefresh(_ s: Any?) { active?.forceReload() }
+    @objc func toggleSidebar(_ s: Any?) { active?.toggleSidebar() }
+    @objc func zoomActual(_ s: Any?) { active?.zoom(nil) }
+    @objc func zoomIn(_ s: Any?) { active?.zoom(0.5) }
+    @objc func zoomOut(_ s: Any?) { active?.zoom(-0.5) }
+    @objc func developerTools(_ s: Any?) { active?.showDevTools() }
+    @objc func goBack(_ s: Any?) { active?.goBack() }
+    @objc func goForward(_ s: Any?) { active?.goForward() }
+    @objc func nextTab(_ s: Any?) { active?.selectNextTab() }
+    @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(toggleSidebar(_:)): item.state = active?.sidebarHidden == true ? .on : .off
+        case #selector(goBack(_:)): return active?.window.activeTab?.canGoBack ?? false
+        case #selector(goForward(_:)): return active?.window.activeTab?.canGoForward ?? false
+        default: break
+        }
+        return true
     }
 
     /// Called by NCApplication.terminate (Cmd+Q).
@@ -79,28 +121,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
         beginShutdown()
     }
 
-    // MARK: NCWindowDelegate
+    // MARK: events from the window controllers
 
-    func window(_ window: NCWindow, didAdd tab: NCTab, active: Bool) {
+    func tabAdded() {
 #if NOCHE_TESTHOOKS
         selfTest?.didAddTab()
 #endif
     }
 
-    func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {}
-
-    func window(_ window: NCWindow, didClose tab: NCTab) {
+    func tabClosed() {
 #if NOCHE_TESTHOOKS
         selfTest?.didCloseTab()
 #endif
     }
 
-    func window(_ window: NCWindow, didUpdate tab: NCTab) {
+    func tabUpdated(_ tab: NCTab) {
         if !tab.title.isEmpty { title = tab.title }
         checkLoaded()
     }
 
-    func window(_ window: NCWindow, tab: NCTab, didFinishLoadWithStatus status: Int) {
+    func tabLoaded(_ tab: NCTab, status: Int) {
         self.status = status
         if !tab.title.isEmpty { title = tab.title }
         checkLoaded()
@@ -109,18 +149,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NCWindowDelegate {
 #endif
     }
 
-    func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int) {
+    func tabLoadFailed(code: Int) {
+#if NOCHE_TESTHOOKS
+        selfTest?.didFailLoad()
+#endif
         finish(.loadError(code: code))
     }
 
-    func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool { false }
-
-    func windowDidClose(_ window: NCWindow) {
-        windows.removeAll { $0 === window }
+    func controllerClosed(_ controller: BrowserWindowController) {
+        controllers.removeAll { $0 === controller }
 #if NOCHE_TESTHOOKS
         selfTest?.windowDidClose()
 #endif
-        if closing && windows.isEmpty { exitNow() }
+        if closing && controllers.isEmpty { exitNow() }
         // Otherwise the app keeps running with no window.
     }
 
