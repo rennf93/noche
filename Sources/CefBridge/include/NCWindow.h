@@ -16,6 +16,8 @@ NS_SWIFT_UI_ACTOR
 - (void)window:(NCWindow *)window didAddTab:(NCTab *)tab active:(BOOL)active;          // every tab, the first included
 - (void)window:(NCWindow *)window didActivateTab:(NCTab *)tab previous:(nullable NCTab *)previous;
 - (void)window:(NCWindow *)window didCloseTab:(NCTab *)tab;
+/// A close the host asked for ([NCTab close]) did not happen: the page's beforeunload dialog was answered "Stay".
+- (void)window:(NCWindow *)window didCancelCloseOfTab:(NCTab *)tab;
 - (void)window:(NCWindow *)window didUpdateTab:(NCTab *)tab;                            // title, url, loading, back/forward, favicon
 - (void)window:(NCWindow *)window tab:(NCTab *)tab didFinishLoadWithStatus:(NSInteger)status;
 - (void)window:(NCWindow *)window tab:(NCTab *)tab didFailLoadWithCode:(NSInteger)code url:(NSString *)failedURL;  // not for ERR_ABORTED
@@ -54,6 +56,11 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)devToolsCreated;
 + (NSInteger)devToolsLoaded;
 + (NSInteger)devToolsClosed;
+#endif
+#ifdef NOCHE_TESTHOOKS
+/// Test support: how the beforeunload dialog is answered (0: Chrome's own dialog, 1: Stay, 2: Leave), and how many were asked.
++ (void)testSetBeforeUnloadAnswer:(NSInteger)answer;
++ (NSInteger)testBeforeUnloadDialogs;
 #endif
 /// Attempts to set alpha above 0 (clamped to 0), on windows of NCWindow and on any other window.
 + (NSInteger)alphaAttemptsOnOwnWindows;

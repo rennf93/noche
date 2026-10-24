@@ -30,6 +30,8 @@ inline bool NCTestFlag(const char* name) {
 @property(nonatomic, readwrite, copy) NSString* title;
 @property(nonatomic, readwrite) BOOL isLoading, canGoBack, canGoForward;
 @property(nonatomic, readwrite, nullable) NSImage* favicon;
+/// YES from [close] until the tab ends or the close is reported cancelled (a beforeunload dialog answered Stay).
+@property(nonatomic) BOOL closeRequested;
 /// Null once the browser is closed.
 @property(nonatomic) CefRefPtr<CefBrowser> browser;
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser;

@@ -15,7 +15,13 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     private var intendedActive: NCTab?
     /// The URL whose load failed, with the URL the tab had then: the tab keeps its old URL while the error page shows.
     private var failed: [Int: (url: String, shown: String)] = [:]
-    private var closing = Set<Int>()           // close requested, OnBeforeClose not yet seen
+    /// Close requested, OnBeforeClose not yet seen: engine id to the uptime of the request. A page may cancel its close (a beforeunload
+    /// dialog answered Stay), so an entry ends when the bridge reports the cancellation, or after |closeStale| seconds as a fallback.
+    private var closing: [Int: TimeInterval] = [:]
+    /// A tab being closed as the selected one, to the tab that becomes selected once it is gone. The selection moves only when the
+    /// close is confirmed (didClose), never before.
+    private var closeNext: [Int: NCTab] = [:]
+    private static let closeStale: TimeInterval = 10
 
     private let backdrop = BackdropView(frame: .zero)
     private let overlay = ChromeOverlayView(frame: .zero)
@@ -181,6 +187,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 
     func newTab() {
         note("newTab")
+        closeNext.removeAll()  // the new tab is the selection now
         intendedActive = window.addTab(withURL: "about:blank", activate: true)
     }
 
@@ -189,18 +196,34 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         window.close()
     }
 
-    /// Closes the selected tab; the row below becomes active (the one above for the last row). Decided from the engine's
-    /// own tab strip, which is current even when callbacks lag, and never picks a tab that is already closing.
+    private func isClosing(_ tab: NCTab) -> Bool {
+        closing[tab.identifier].map { ProcessInfo.processInfo.systemUptime - $0 < Self.closeStale } ?? false
+    }
+
+    /// The first tab of |tab|'s hand-over chain that is neither closing nor gone (asked of the engine's strip, which is current
+    /// even before the delegate has heard of a tab opened in the same turn).
+    private func survivor(from tab: NCTab?) -> NCTab? {
+        var t = tab
+        let strip = window.tabs
+        for _ in 0..<100 {
+            guard let c = t else { return nil }
+            if !isClosing(c), strip.contains(where: { $0 === c }) { return c }
+            t = closeNext[c.identifier]
+        }
+        return nil
+    }
+
+    /// Closes the selected tab; once it is gone the row below becomes selected (the one above for the last row). The selection does
+    /// not move before that: a page can refuse to close. A tab that is already closing hands the focus to the tab that follows it, so
+    /// a burst of Cmd+W closes one tab each. Decided from the engine's own tab strip, which is current even when callbacks lag.
     func closeActiveTab() {
         note("closeTab")
-        let current = intendedActive.flatMap { closing.contains($0.identifier) ? nil : $0 } ?? activeTab
-        guard let active = current, !closing.contains(active.identifier) else { return }
-        let open = window.tabs.filter { !closing.contains($0.identifier) }
+        guard let active = survivor(from: intendedActive ?? activeTab) else { return }
+        let open = window.tabs.filter { !isClosing($0) }
         if let i = open.firstIndex(where: { $0 === active }) {
-            let next = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
-            if let next { intendedActive = next; window.activateTab(next) }
+            closeNext[active.identifier] = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
         }
-        closing.insert(active.identifier)
+        closing[active.identifier] = ProcessInfo.processInfo.systemUptime
         active.close()
     }
 
@@ -208,6 +231,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func selectPreviousTab() { note("previousTab"); step(-1) }
 
     private func step(_ delta: Int) {
+        closeNext.removeAll()
         guard let id = intendedActive.flatMap({ ids[$0.identifier] }) ?? list.activeID,
               let target = delta > 0 ? list.next(after: id) : list.previous(before: id),
               let engineID = list.items.first(where: { $0.id == target })?.engineID, let tab = tabs[engineID] else { return }
@@ -247,13 +271,14 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 
     private func selectRow(_ i: Int) {
+        closeNext.removeAll()
         guard i < list.items.count, let tab = tabs[list.items[i].engineID] else { return }
         window.activateTab(tab)
     }
 
     private func closeRow(_ i: Int) {
-        guard i < list.items.count, let tab = tabs[list.items[i].engineID], !closing.contains(tab.identifier) else { return }
-        if tab === activeTab { closeActiveTab() } else { closing.insert(tab.identifier); tab.close() }
+        guard i < list.items.count, let tab = tabs[list.items[i].engineID], !isClosing(tab) else { return }
+        if tab === activeTab { closeActiveTab() } else { closing[tab.identifier] = ProcessInfo.processInfo.systemUptime; tab.close() }
     }
 
     // MARK: address field
@@ -311,14 +336,23 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 
     func window(_ window: NCWindow, didClose tab: NCTab) {
+        let successor = closeNext.removeValue(forKey: tab.identifier)
         if let id = ids[tab.identifier] { _ = list.remove(id) }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
         failed[tab.identifier] = nil
-        closing.remove(tab.identifier)
+        closing[tab.identifier] = nil
         if intendedActive === tab { intendedActive = nil }
+        // The close is confirmed: the selection moves to the tab chosen when it was asked for.
+        if let next = survivor(from: successor) { intendedActive = next; window.activateTab(next) }
         refresh()
         app.tabClosed(tab)
+    }
+
+    /// The page refused to close (beforeunload answered Stay): the tab stays, selected as it was.
+    func window(_ window: NCWindow, didCancelCloseOf tab: NCTab) {
+        closing[tab.identifier] = nil
+        closeNext[tab.identifier] = nil
     }
 
     func window(_ window: NCWindow, didUpdate tab: NCTab) {

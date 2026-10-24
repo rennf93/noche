@@ -58,7 +58,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 
 @synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon;
 @synthesize isLoading = _isLoading, canGoBack = _canGoBack, canGoForward = _canGoForward;
-@synthesize browser = _browser;
+@synthesize browser = _browser, closeRequested = _closeRequested;
 
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser {
   NCTab* tab = [[NCTab alloc] initPrivate];
@@ -111,6 +111,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 
 - (void)close {
   if (!_browser) return;
+  _closeRequested = YES;
   CefRefPtr<CefBrowserHost> host = _browser->GetHost();
   // The DevTools browser of a closing tab goes first (closing the tab under it can leave it alive until the profile dies).
   // Negative control: the tab closes under its DevTools.

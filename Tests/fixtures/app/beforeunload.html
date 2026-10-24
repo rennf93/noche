@@ -1,0 +1,5 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Before Unload Page</title>
+<script>window.addEventListener("beforeunload", (e) => { e.preventDefault(); e.returnValue = ""; });</script>
+</head>
+<body><p>A page that asks before it closes.</p></body></html>

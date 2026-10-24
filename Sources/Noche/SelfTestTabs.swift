@@ -309,5 +309,33 @@ extension SelfTest {
         reset(); key("i", code: 34, [.command, .option]); await settle(); verify("Opt+Cmd+I", "devTools")
         finish(bad.isEmpty && violations.isEmpty, "\(passed.count) shortcuts acted exactly once with no repeated Chrome command: \(passed.joined(separator: ", ")) \(bad) \(violations)")
     }
+
+    /// A page that cancels its beforeunload dialog: Cmd+W leaves the tab open and selected, and a later Cmd+W (Leave) closes it.
+    func closeBeforeUnload() async {
+        guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
+        NCWindow.testSet(beforeUnloadAnswer: 1)  // Stay
+        let before = loads
+        tab.loadURL(fixture("beforeunload.html"))
+        guard await until(10, { loads > before && tab.url.hasSuffix("beforeunload.html") }) else { return finish(false, "beforeunload.html did not load (\(tab.url))") }
+        _ = await evaluate(tab, "document.body.click(); 1")  // a user gesture: without one Chrome closes the page without asking
+        guard await openTabs(2) else { return finish(false, "second tab never appeared (rows=\(rowCount))") }
+        guard selected == 0, win.activeTab === tab else { return finish(false, "the page with the dialog is not selected (selected=\(selected.map(String.init) ?? "nil"))") }
+        cmdW()
+        guard await until(10, { NCWindow.testBeforeUnloadDialogs() == 1 }) else { return finish(false, "Cmd+W raised no beforeunload dialog (\(NCWindow.testBeforeUnloadDialogs()))") }
+        try? await Task.sleep(for: .seconds(1))  // the cancellation reaches the window controller a turn later
+        guard rowCount == 2, win.tabs.count == 2, selected == 0, win.activeTab === tab else {
+            return finish(false, "after Stay: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") active is the page \(win.activeTab === tab)")
+        }
+        NCWindow.testSet(beforeUnloadAnswer: 2)  // Leave
+        cmdW()
+        guard await until(10, { rowCount == 1 && win.tabs.count == 1 }) else {
+            return finish(false, "second Cmd+W (Leave): rows=\(rowCount) engine tabs=\(win.tabs.count) dialogs=\(NCWindow.testBeforeUnloadDialogs()) actions=\(BrowserWindowController.actionCounts)")
+        }
+        guard selected == 0, NCWindow.testBeforeUnloadDialogs() == 2, BrowserWindowController.actionCounts["closeTab"] == 2 else {
+            return finish(false, "after Leave: selected=\(selected.map(String.init) ?? "nil") dialogs=\(NCWindow.testBeforeUnloadDialogs()) actions=\(BrowserWindowController.actionCounts)")
+        }
+        _ = ctl
+        finish(violations.isEmpty && zombies.isEmpty, "Cmd+W with the dialog answered Stay kept the tab and its selection; the second Cmd+W (Leave) closed it, the other tab is selected (dialogs 2, closeTab 2) \(violations) \(zombies)")
+    }
 }
 #endif

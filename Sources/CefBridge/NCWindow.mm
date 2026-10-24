@@ -6,6 +6,7 @@
 #include <set>
 #include "include/cef_client.h"
 #include "include/cef_command_handler.h"
+#include "include/cef_jsdialog_handler.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -30,6 +31,8 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url;
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (BOOL)chromeCommand:(int)commandId;
+- (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
+- (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser;
 @end
 
 namespace {
@@ -38,6 +41,9 @@ NSInteger g_devtools_created = 0, g_devtools_closed = 0;
 // DevTools has its own client, so its load end never reaches ours: loaded is read off the browser (polled by the checks).
 std::map<int, CefRefPtr<CefBrowser>> g_devtools_browsers;
 std::set<int> g_devtools_loaded_ids;
+#ifdef NOCHE_TESTHOOKS
+NSInteger g_unload_answer = 0, g_unload_dialogs = 0;
+#endif
 
 // New tabs start on the card fill (live-ui.md section 2) so a tab never flashes white.
 CefBrowserSettings TabSettings() {
@@ -52,7 +58,8 @@ class NCClient : public CefClient,
                  public CefLifeSpanHandler,
                  public CefLoadHandler,
                  public CefDisplayHandler,
-                 public CefCommandHandler {
+                 public CefCommandHandler,
+                 public CefJSDialogHandler {
  public:
   explicit NCClient(NCWindow* w) : w_(w) {}
 
@@ -60,6 +67,24 @@ class NCClient : public CefClient,
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
+  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+
+  // Chrome shows its own "Leave site?" dialog (return false). The bridge only learns how it ended: a tab that is still there
+  // after the dialog closed was told to stay. Test builds can answer the dialog themselves.
+  bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> b, const CefString&, bool, CefRefPtr<CefJSDialogCallback> callback) override {
+    NC_CEF_CALLBACK;
+#ifdef NOCHE_TESTHOOKS
+    g_unload_dialogs++;
+    if (g_unload_answer != 0) {
+      const bool leaves = g_unload_answer == 2;
+      callback->Continue(leaves, CefString());
+      [w_ unloadDialogResolved:b leaves:leaves];
+      return true;
+    }
+#endif
+    return false;
+  }
+  void OnDialogClosed(CefRefPtr<CefBrowser> b) override { NC_CEF_CALLBACK; [w_ unloadDialogClosed:b]; }
 
   // Called for every DevTools popup of a tab of this window, whoever asked for it (menu, accelerator, context menu).
   void OnBeforeDevToolsPopup(CefRefPtr<CefBrowser> b, CefWindowInfo&, CefRefPtr<CefClient>&, CefBrowserSettings&,
@@ -536,6 +561,24 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   }];
 }
 
+// A beforeunload dialog answered Stay: the close the host asked for will not happen.
+- (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves {
+  if (leaves) return;
+  NCTab* tab = [self tabFor:browser create:NO];
+  if (!tab || !tab.closeRequested) return;
+  tab.closeRequested = NO;
+  [self post:^(id<NCWindowDelegate> d) { [d window:self didCancelCloseOfTab:tab]; }];
+}
+
+// Chrome's own dialog closed, and how is not reported: Leave ends the tab (OnBeforeClose) within a moment, Stay does not.
+- (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser {
+  NCTab* tab = [self tabFor:browser create:NO];
+  if (!tab || !tab.closeRequested) return;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    if (tab.browser && self->_table[@(tab.identifier)] == tab) [self unloadDialogResolved:tab.browser leaves:NO];
+  });
+}
+
 - (BOOL)chromeCommand:(int)commandId {
   id<NCWindowDelegate> d = _delegate;
   return d && [d window:self shouldHandleChromeCommand:commandId];
@@ -620,6 +663,8 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
   return g_devtools_loaded_ids.size();
 }
 + (NSInteger)devToolsClosed { return g_devtools_closed; }
++ (void)testSetBeforeUnloadAnswer:(NSInteger)answer { g_unload_answer = answer; }
++ (NSInteger)testBeforeUnloadDialogs { return g_unload_dialogs; }
 
 + (BOOL)insideCefCallback {
   return g_nc_cef_depth > 0;
