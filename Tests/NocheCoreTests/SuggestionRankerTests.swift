@@ -109,6 +109,27 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(CommandRouter.route(rows[0], typed: "alp", searchTemplate: AddressInput.defaultSearchTemplate), .switchTo(a.id))
     }
 
+    func testTabCarryingPagesKeepTwoTabSlots() {
+        let tabs = (1...3).map { tab("https://zed.org/\($0)", "Zed \($0)") }
+        let pages = tabs.map { page($0.url, host: "zed.org", title: "Zed", visits: 1) }
+            + [page("https://other.org/p", host: "other.org", title: "Zed plain")]
+        let sites = ["a", "b", "c"].map { SiteEntry(name: "Zed \($0)", host: "zed-\($0).com") }
+        let rows = rank("zed", pages: pages, tabs: tabs, sites: sites)
+        let switchable = rows.filter { $0.tabID != nil }
+        XCTAssertEqual(switchable.count, 3, "top hit plus two tab slots")
+        XCTAssertEqual(rows.count, 6)
+        XCTAssertEqual(rows.filter { $0.kind == .site }.count, 1, "sites shrink")
+        XCTAssertEqual(rows.last?.url, "https://other.org/p", "history reserve")
+    }
+
+    func testPlainTabAndTabCarryingPageShareTabGroup() {
+        let a = tab("https://zed.org/a", "Zed a"), b = tab("https://two.example", "Zed b")
+        let rows = rank("zed", pages: [page("https://zed.org/a", host: "zed.org", title: "Zed a")], tabs: [b, a])
+        XCTAssertEqual(rows.dropFirst(2).compactMap(\.tabID), [b.id], "a is the top hit; b fills a tab slot")
+        let rows2 = rank("zed", pages: [page("https://zed.org/a", host: "zed.org", title: "Zed a"), page("https://zed.org/c", host: "zed.org", title: "Zed c", visits: 9)], tabs: [b, a])
+        XCTAssertEqual(rows2.compactMap(\.tabID), [b.id, a.id], "tab order b then a, the tab-carrying page among the tab rows")
+    }
+
     func testActiveTabUrlStaysOrdinaryPage() {
         let a = tab("https://alpha.org/x", "Alpha")
         let rows = rank("alp", pages: [page("https://alpha.org/x", host: "alpha.org", title: "Alpha")], tabs: [a], active: a.id)

@@ -27,6 +27,7 @@ public enum SuggestionRanker {
         var tabByURL: [String: TabID] = [:]
         for t in others where tabByURL[t.url] == nil { tabByURL[t.url] = t.id }
         let matchedURLs = Set(matches.map(\.0.url))
+        let tabIndex = Dictionary(others.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let tabRows = others.filter { !matchedURLs.contains($0.url)
             && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
             .map { Suggestion(kind: .tab, title: "\($0.title) - \(AddressInput.displayHost($0.url))", url: $0.url, tabID: $0.id, frecency: 0) }
@@ -59,18 +60,19 @@ public enum SuggestionRanker {
             .filter { !listed.contains("https://\($0)") }
             .map { Suggestion(kind: .site, title: "\($0) - \($0)", url: "https://\($0)", tabID: nil, frecency: hostScore[$0] ?? 0) }
 
-        // Pages that stand in for an open tab come first so the caps keep them.
+        // Pages that stand in for an open tab join the tab group, ordered with the tab rows by tab order.
         let rest = matches.filter { $0.0.url != topURL }
-        let pageRows = (rest.filter { tabByURL[$0.0.url] != nil } + rest.filter { tabByURL[$0.0.url] == nil })
-            .map { pageRow($0.0, $0.1, tabByURL[$0.0.url]) }
+        let pageRows = rest.filter { tabByURL[$0.0.url] == nil }.map { pageRow($0.0, $0.1, nil) }
+        let tabGroup = (tabRows + rest.filter { tabByURL[$0.0.url] != nil }.map { pageRow($0.0, $0.1, tabByURL[$0.0.url]) })
+            .sorted { (tabIndex[$0.tabID!] ?? 0) < (tabIndex[$1.tabID!] ?? 0) }
 
         // One slot stays for a history page, so sites shrink first, then tabs.
         let slots = maxRows - head.count
         let reserve = pageRows.isEmpty ? 0 : 1
-        let tabTake = min(tabRows.count, 2, slots - reserve)
+        let tabTake = min(tabGroup.count, 2, slots - reserve)
         let siteTake = min(siteRows.count, 3, slots - reserve - tabTake)
         let pageTake = slots - tabTake - siteTake
-        return head + tabRows.prefix(tabTake) + siteRows.prefix(siteTake) + pageRows.prefix(pageTake)
+        return head + tabGroup.prefix(tabTake) + siteRows.prefix(siteTake) + pageRows.prefix(pageTake)
     }
 
     /// Never a real URL, so a resolve that does not search is told apart by its scheme.
