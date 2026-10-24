@@ -110,6 +110,7 @@ final class SelfTest {
             case "devtools-close-tab": await devToolsCloseTab()
             case "load-error-link": await loadErrorLink()
             case "window-frame": await windowFrame()
+            case "no-window": await noWindow()
             case "close-beforeunload": await closeBeforeUnload()
             default: finish(false, "unknown check")
             }

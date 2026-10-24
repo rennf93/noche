@@ -337,5 +337,32 @@ extension SelfTest {
         _ = ctl
         finish(violations.isEmpty && zombies.isEmpty, "Cmd+W with the dialog answered Stay kept the tab and its selection; the second Cmd+W (Leave) closed it, the other tab is selected (dialogs 2, closeTab 2) \(violations) \(zombies)")
     }
+
+    /// With no window open the app is still usable: New Tab and Open Command Bar open a window, and a Dock click (reopen) does too.
+    func noWindow() async {
+        guard await ready(), let first = win?.activeTab else { return }
+        first.close()
+        guard await until(15, { windowsClosed == 1 && app.controllers.isEmpty }) else { return finish(false, "the window did not close with its last tab") }
+        try? await Task.sleep(for: .seconds(1))
+        // File > New Tab through the menu's key equivalent.
+        guard cmdT() else { return finish(false, "Cmd+T found no menu item with no window open") }
+        guard await until(15, { app.controllers.count == 1 && rowCount == 1 }) else { return finish(false, "New Tab with no window opened \(app.controllers.count) windows, \(rowCount) rows") }
+        try? await Task.sleep(for: .milliseconds(500))
+        guard app.controllers.count == 1, rowCount == 1, win?.tabs.count == 1 else { return finish(false, "New Tab with no window: windows \(app.controllers.count) rows \(rowCount) tabs \(win?.tabs.count ?? -1), want one window with one tab") }
+        // Open Command Bar with no window: a window opens and its address field is being edited.
+        win?.activeTab?.close()
+        guard await until(15, { windowsClosed == 2 && app.controllers.isEmpty }) else { return finish(false, "the second window did not close") }
+        guard cmdL() else { return finish(false, "Cmd+L found no menu item with no window open") }
+        guard await until(15, { app.controllers.count == 1 && rowCount == 1 && ctl?.toolbar.address.currentEditor() != nil }) else {
+            return finish(false, "Open Command Bar with no window: windows \(app.controllers.count) rows \(rowCount) editing \(ctl?.toolbar.address.currentEditor() != nil)")
+        }
+        // The Dock click: the delegate's reopen handler, called directly.
+        win?.activeTab?.close()
+        guard await until(15, { windowsClosed == 3 && app.controllers.isEmpty }) else { return finish(false, "the third window did not close") }
+        let handled = app.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
+        guard await until(15, { app.controllers.count == 1 && rowCount == 1 }) else { return finish(false, "reopen opened \(app.controllers.count) windows, \(rowCount) rows (handler returned \(handled))") }
+        try? await Task.sleep(for: .milliseconds(500))
+        finish(app.controllers.count == 1 && rowCount == 1 && violations.isEmpty, "no window: New Tab (menu key equivalent), Open Command Bar (address field editing) and reopen each opened one window with one tab \(violations)")
+    }
 }
 #endif

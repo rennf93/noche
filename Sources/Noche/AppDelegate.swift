@@ -93,11 +93,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
     var active: BrowserWindowController? { controllers.first { $0.nsWindow?.isKeyWindow == true } ?? controllers.last }
 
+    /// A Dock click with no window open makes one. The app never quits when its last window closes, so this is the way back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !closing, controllers.isEmpty else { return true }
+        newWindow()
+        return false  // handled: AppKit must not also try to open an untitled document
+    }
+
     // MARK: menu actions
 
-    @objc func newTab(_ s: Any?) { active?.newTab() }
+    /// With no window open, a window is the new tab: it opens with one tab.
+    @objc func newTab(_ s: Any?) { if let a = active { a.newTab() } else if !closing { newWindow() } }
     @objc func newWindowMenu(_ s: Any?) { newWindowAction() }
-    @objc func openCommandBar(_ s: Any?) { active?.focusAddress() }
+    @objc func openCommandBar(_ s: Any?) { if let a = active { a.focusAddress() } else if !closing { newWindow(); active?.focusAddress() } }
     @objc func closeWindowMenu(_ s: Any?) { active?.close() }
     @objc func closeTab(_ s: Any?) { active?.closeActiveTab() }
     @objc func copyURL(_ s: Any?) { active?.copyURL() }

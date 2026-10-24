@@ -7,15 +7,16 @@ extension SelfTest {
     /// A key equivalent the way NSApplication routes it: the window first, then the main menu.
     @discardableResult
     func key(_ ch: String, code: UInt16, _ mods: NSEvent.ModifierFlags = .command, chars: String? = nil) -> Bool {
-        guard let ns = ctl?.nsWindow, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods,
-              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil,
+        let ns = ctl?.nsWindow  // nil with no window open: the key then reaches the main menu only
+        guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods,
+              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns?.windowNumber ?? 0, context: nil,
               characters: chars ?? ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
-        let byWindow = ns.performKeyEquivalent(with: ev)
+        let byWindow = ns?.performKeyEquivalent(with: ev) ?? false
         let byMenu = byWindow ? false : (NSApp.mainMenu?.performKeyEquivalent(with: ev) ?? false)
         keyLog.append("\(ch)\(mods.contains(.shift) ? "+shift" : ""):window=\(byWindow),menu=\(byMenu) menuClass=\(NSApp.mainMenu.map { String(describing: type(of: $0)) } ?? "nil") ig=\(ev.charactersIgnoringModifiers ?? "nil") chars=\(ev.characters ?? "nil") mods=\(ev.modifierFlags.rawValue)")
         return byWindow || byMenu
     }
-    func cmdT() { key("t", code: 17) }
+    @discardableResult func cmdT() -> Bool { key("t", code: 17) }
     func cmdW() { key("w", code: 13) }
     // Shifted punctuation: the shifted character, and the plain one ignoring modifiers (the matcher accepts either).
     func nextTab() { shortcut("Next Tab") }
@@ -29,7 +30,7 @@ extension SelfTest {
         guard let item = NSApp.mainMenu.flatMap(find) else { keyLog.append("no menu item \(title)"); return }
         key(item.keyEquivalent, code: 0, item.keyEquivalentModifierMask)
     }
-    func cmdL() { key("l", code: 37) }
+    @discardableResult func cmdL() -> Bool { key("l", code: 37) }
     func cmdS() { key("s", code: 1) }
 
     /// Typed text goes to the first responder as key events.

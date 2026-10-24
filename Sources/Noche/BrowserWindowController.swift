@@ -29,6 +29,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     let sidebar = SidebarView(frame: .zero)
     let toolbar = ToolbarView(frame: .zero)
     private var installed = false
+    private var focusWhenInstalled = false     // Open Command Bar came before the chrome existed (a window opened for it)
     private(set) var sidebarHidden = false
     private(set) var cardX = ChromeStyle.sidebarWidth
     private var animation: (start: TimeInterval, from: CGFloat, to: CGFloat, duration: TimeInterval, overshoot: Bool)?
@@ -110,6 +111,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toolbar.address.delegate = self
         applyLayout()
         refresh()
+        if focusWhenInstalled { focusWhenInstalled = false; focusAddress() }
     }
 
     func applyLayout() {
@@ -241,7 +243,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 
     func focusAddress() {
         note("focusAddress")
-        guard installed, let ns = nsWindow else { return }
+        guard installed, let ns = nsWindow else { focusWhenInstalled = true; return }
         toolbar.address.stringValue = activeTab.map { shownURL($0) == "about:blank" ? "" : shownURL($0) } ?? ""
         ns.makeFirstResponder(toolbar.address)
         toolbar.address.currentEditor()?.selectAll(nil)
