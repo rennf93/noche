@@ -530,7 +530,8 @@ class WinDelegate : public CefWindowDelegate {
     nw.ignoresMouseEvents = YES;
     // CefWindow::Show() ends in NSApp activateIgnoringOtherApps (native_widget_ns_window_bridge.mm, kShowAndActivateWindow),
     // which is forbidden here. Ordering the NSWindow in directly never activates the app or makes the window key.
-    if (!getenv("NOCHE_PROBE_NO_ORDER") && [g_check isEqualToString:@"switch-latency"]) [nw orderFrontRegardless];
+    // Both latency checks need drawn frames: viz throttles a never-drawn sink to 1 BeginFrame/s after 3 undrawn frames.
+    if (!getenv("NOCHE_PROBE_NO_ORDER") && [g_check hasPrefix:@"switch-latency"]) [nw orderFrontRegardless];
   }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return CefRect(120, 120, 1000, 700); }
