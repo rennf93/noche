@@ -21,6 +21,15 @@ jobs:
       - name: Test (NocheCore only, no CEF needed)
         run: swift test
 
+      - name: Install Rust target
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Build native filter engine
+        run: scripts/build-adblock.sh
+
+      - name: Test (native filter engine and list updater)
+        run: NOCHE_BLOCKING=1 swift test
+
       # The app needs our engine's tab API, which the stock CEF download lacks. The remaining steps run only when the
       # repo variable NOCHE_ENGINE_URL points at a tar.bz2 of the engine distribution (see engine/README.md).
       - name: Cache vendored CEF

@@ -22,6 +22,8 @@ let cefFlags = sandboxFlags + [
     "-fstack-protector", "-funwind-tables", "-arch", "arm64", "-mmacosx-version-min=14.0",
     "-I", "\(root)/vendor/cef",
 ]
+// NOCHE_BLOCKING=1 adds the native filter engine and its tests; scripts/build-adblock.sh builds build/adblock/libnoche_adblock.a first.
+let withBlocking = env["NOCHE_BLOCKING"] == "1"
 let wrapper = "\(root)/build/cef/libcef_dll_wrapper.a"
 
 var products: [Product] = []
@@ -32,6 +34,18 @@ var targets: [Target] = [
     .target(name: "NocheStore", dependencies: [.product(name: "GRDB", package: "GRDB.swift"), "NocheCore"]),
     .testTarget(name: "NocheStoreTests", dependencies: ["NocheStore", "NocheCore"]),
 ]
+
+if withBlocking {
+    targets += [
+        .target(
+            name: "CNocheAdblock",
+            publicHeadersPath: "include",
+            linkerSettings: [.unsafeFlags(["-L", "\(root)/build/adblock"]), .linkedLibrary("noche_adblock")]
+        ),
+        .target(name: "NocheBlocking", dependencies: ["CNocheAdblock"]),
+        .testTarget(name: "NocheBlockingTests", dependencies: ["NocheBlocking"]),
+    ]
+}
 
 if withApp {
     products += [

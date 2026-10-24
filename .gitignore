@@ -7,3 +7,4 @@ vendor/
 .env
 .env.*
 *.log
+Native/noche_adblock/target/
