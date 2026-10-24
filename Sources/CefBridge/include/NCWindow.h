@@ -47,6 +47,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)activationsBlocked;
 /// Test support: YES while a CEF handler of the bridge is on the stack.
 + (BOOL)insideCefCallback;
+/// Test support: DevTools browsers created, whose front end finished loading, and that ended (OnBeforeClose), all windows.
++ (NSInteger)devToolsCreated;
++ (NSInteger)devToolsLoaded;
++ (NSInteger)devToolsClosed;
 /// Attempts to set alpha above 0 (clamped to 0), on windows of NCWindow and on any other window.
 + (NSInteger)alphaAttemptsOnOwnWindows;
 + (NSInteger)alphaAttemptsOnOtherWindows;

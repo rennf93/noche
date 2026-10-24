@@ -95,6 +95,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 - (void)stopLoad { if (_browser) _browser->StopLoad(); }
 
 - (void)showDevTools {
+  if (_browser && !_browser->GetHost()->HasDevTools()) g_nc_devtools_pending++;
   if (_browser) _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
 }
 
@@ -102,7 +103,8 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   if (!_browser) return;
   CefRefPtr<CefBrowserHost> host = _browser->GetHost();
   // The DevTools browser of a closing tab goes first (closing the tab under it can leave it alive until the profile dies).
-  if (host->HasDevTools()) {
+  const char* last = getenv("NOCHE_TEST_DEVTOOLS_LAST");  // negative control: the tab closes under its DevTools
+  if (host->HasDevTools() && !(last && last[0] == '1')) {
     host->CloseDevTools();
     [self closeAfterDevTools:40];
   } else {
@@ -112,8 +114,10 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 
 - (void)closeAfterDevTools:(int)left {
   if (!_browser) return;
-  if (left > 0 && _browser->GetHost()->HasDevTools()) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeAfterDevTools:left - 1]; });
+  if (_browser->GetHost()->HasDevTools()) {
+    // Past the cap: say so (the checks fail on this line) and keep waiting; the app's 5 s watchdog ends a quit.
+    if (left == 0) fprintf(stderr, "NOCHE devtools still open after 2 s, tab not closed early\n");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeAfterDevTools:MAX(left - 1, -1)]; });
     return;
   }
   _browser->GetHost()->CloseBrowser(false);

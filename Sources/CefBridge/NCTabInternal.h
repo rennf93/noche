@@ -11,6 +11,8 @@ struct NCCefScope {
   NCCefScope() { g_nc_cef_depth++; }
   ~NCCefScope() { g_nc_cef_depth--; }
 };
+/// ShowDevTools calls whose DevTools browser has not been created yet (tells DevTools popups from window.open ones).
+inline int g_nc_devtools_pending = 0;
 #define NC_CEF_CALLBACK NCCefScope nc_cef_scope_
 
 @interface NCTab ()

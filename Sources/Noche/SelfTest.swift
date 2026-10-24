@@ -65,8 +65,10 @@ final class SelfTest {
         }
         if check == "devtools-quit", !verdictPrinted {
             let devTools = app.windows.reduce(0) { $0 + Int($1.devToolsCount) }
-            let ok = devToolsOpened && !watchdogFired && windowsClosed == 1 && violations.isEmpty && zombies.isEmpty
-            line(ok ? "pass" : "fail", "DevTools open, quit menu action, exit without the shutdown watchdog (opened=\(devToolsOpened) windowDidClose=\(windowsClosed) devtools left=\(devTools) watchdog=\(watchdogFired) \(violations) \(zombies))")
+            // Before NCEngine.shutdown: every DevTools browser must already have had its OnBeforeClose.
+            let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
+            let ok = devToolsOpened && created >= 1 && ended == created && !watchdogFired && windowsClosed == 1 && violations.isEmpty && zombies.isEmpty
+            line(ok ? "pass" : "fail", "DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=\(created) loaded=\(NCWindow.devToolsLoaded()) ended=\(ended) opened=\(devToolsOpened) windowDidClose=\(windowsClosed) devtools left=\(devTools) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
         line("info", "activate-blocked=\(NCWindow.activationsBlocked())")
@@ -240,23 +242,22 @@ final class SelfTest {
             doomed.close()
         }
         // A closed tab fails later, never before evaluateJavaScript returns.
-        var ranBeforeReturn = false, late: String?
+        var ranBeforeReturn = false
         let lateError = await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
             var returned = false
             doomed.evaluateJavaScript("1") { _, error in
                 ranBeforeReturn = !returned
                 if NCWindow.insideCefCallback() { inside.append("closed tab") }
-                late = error
                 c.resume(returning: error)
             }
             returned = true
         }
-        _ = late
         finish(inside.isEmpty && !ranBeforeReturn && reply == "2" && closeError == "tab closed" && lateError == "tab closed" && violations.isEmpty,
                "completions run on a later main-queue turn: inside a CEF callback \(inside), closed-tab call ran before returning \(ranBeforeReturn), reply \(reply ?? "nil"), close error \(closeError ?? "nil"), late error \(lateError ?? "nil") \(violations)")
     }
 
     private func noZombieTab() async {
+        setenv("NOCHE_TEST_LATE_CALLBACKS", "1", 0)  // the bridge re-delivers OnTabAdded and OnActiveTabChanged after each close
         guard await ready(), let win else { return }
         let start = added, closed = closedTabs
         for _ in 0..<20 {
@@ -272,15 +273,16 @@ final class SelfTest {
 
     private func openDevTools(_ win: NCWindow) async -> Bool {
         key("i", code: 34, [.command, .option])
-        guard await until(20, { win.devToolsCount == 1 }) else { return false }
+        // The DevTools browser exists (created) and its front end reported a load end; then it stays open a while.
+        guard await until(20, { NCWindow.devToolsCreated() >= 1 && NCWindow.devToolsLoaded() >= 1 }) else { return false }
         devToolsOpened = true
-        try? await Task.sleep(for: .milliseconds(500))  // the DevTools browser is up, its front end loading
+        try? await Task.sleep(for: .seconds(1))
         return true
     }
 
     private func devToolsQuit() async {
         guard await ready(), let win else { return }
-        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount), actions \(BrowserWindowController.actionCounts))") }
+        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount), created \(NCWindow.devToolsCreated()) loaded \(NCWindow.devToolsLoaded()), actions \(BrowserWindowController.actionCounts))") }
         line("info", "DevTools open, sending the Quit menu action")
         quitViaMenu()  // the verdict is printed by beforeExit
     }
@@ -289,13 +291,14 @@ final class SelfTest {
         guard await ready(), let win else { return }
         cmdT()
         guard await until(10, { rowCount == 2 }) else { return finish(false, "Cmd+T made no row") }
-        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount))") }
+        guard await openDevTools(win) else { return finish(false, "Opt+Cmd+I opened no DevTools (devToolsCount \(win.devToolsCount), created \(NCWindow.devToolsCreated()) loaded \(NCWindow.devToolsLoaded()))") }
         cmdW()  // closes the tab that has DevTools
-        guard await until(15, { rowCount == 1 && win.tabs.count == 1 && win.devToolsCount == 0 }) else {
+        guard await until(15, { rowCount == 1 && win.tabs.count == 1 && win.devToolsCount == 0 && NCWindow.devToolsClosed() == 1 }) else {
             return finish(false, "after Cmd+W: rows=\(rowCount) tabs=\(win.tabs.count) devtools=\(win.devToolsCount)")
         }
         try? await Task.sleep(for: .seconds(2))  // the app keeps running; the quit that follows must be clean
-        finish(violations.isEmpty && zombies.isEmpty && rowCount == 1, "DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows \(rowCount) \(violations) \(zombies)")
+        let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
+        finish(violations.isEmpty && zombies.isEmpty && rowCount == 1 && created == 1 && ended == created, "DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows \(rowCount) DevTools created=\(created) ended=\(ended) \(violations) \(zombies)")
     }
 
     private func loadErrorLink() async {

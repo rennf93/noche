@@ -2,6 +2,8 @@
 #import "NCTabInternal.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
+#include <map>
+#include <set>
 #include "include/cef_client.h"
 #include "include/cef_command_handler.h"
 #include "include/views/cef_box_layout.h"
@@ -13,6 +15,7 @@
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
 - (void)applyMask;
+- (void)devToolsGone:(CefRefPtr<CefBrowser>)browser;
 - (void)closeWindowNow;
 - (void)closeWindowWhenDevToolsGone:(int)left;
 - (void)cefWindowCreated:(CefRefPtr<CefWindow>)window;
@@ -29,6 +32,17 @@
 @end
 
 namespace {
+
+// Test-only switches, read at call time (see scripts/app-test.sh and the M1.1 Task 6 fix report).
+bool TestFlag(const char* name) {
+  const char* v = getenv(name);
+  return v && v[0] == '1';
+}
+
+NSInteger g_devtools_created = 0, g_devtools_closed = 0;
+// DevTools has its own client, so its load end never reaches ours: loaded is read off the browser (polled by the checks).
+std::map<int, CefRefPtr<CefBrowser>> g_devtools_browsers;
+std::set<int> g_devtools_loaded_ids;
 
 // New tabs start on the card fill (live-ui.md section 2) so a tab never flashes white.
 CefBrowserSettings TabSettings() {
@@ -105,6 +119,10 @@ class NCViewDelegate : public CefBrowserViewDelegate {
   void OnBrowserCreated(CefRefPtr<CefBrowserView> v, CefRefPtr<CefBrowser> b) override {
     NC_CEF_CALLBACK;
     [w_ browserCreated:v browser:b];
+  }
+  void OnBrowserDestroyed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> b) override {
+    NC_CEF_CALLBACK;
+    [w_ devToolsGone:b];
   }
   void OnTabAdded(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> tab, bool active) override {
     NC_CEF_CALLBACK;
@@ -196,7 +214,8 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (!b) return nil;
   NSNumber* key = @(b->GetIdentifier());
   NCTab* t = _table[key];
-  if (!t && create && !_destroyed && ![_closed containsObject:key]) {
+  const BOOL filtered = !TestFlag("NOCHE_TEST_NO_CLOSED_FILTER");  // negative control for no-zombie-tab
+  if (!t && create && (!filtered || (!_destroyed && ![_closed containsObject:key]))) {
     t = [NCTab tabWithBrowser:b];
     _table[key] = t;
   }
@@ -238,6 +257,10 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (void)close {
   if (!_window) { _closeRequested = YES; return; }
   // DevTools browsers go first; the window closes once they are gone (the cap covers one that never reports).
+  if (TestFlag("NOCHE_TEST_DEVTOOLS_LAST")) {  // negative control: the tabs close first, as before this fix
+    [self closeWindowNow];
+    return;
+  }
   for (NCTab* t in _table.allValues)
     if (t.browser && t.browser->GetHost()->HasDevTools()) t.browser->GetHost()->CloseDevTools();
   [self closeWindowWhenDevToolsGone:40];
@@ -245,8 +268,10 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 
 - (void)closeWindowWhenDevToolsGone:(int)left {
   if (!_window) return;
-  if (left > 0 && (self.devToolsCount > 0 || _devtools.count > 0)) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeWindowWhenDevToolsGone:left - 1]; });
+  if (self.devToolsCount > 0 || _devtools.count > 0) {
+    // Past the cap: say so (the checks fail on this line) and keep waiting; the app's 5 s watchdog ends it.
+    if (left == 0) fprintf(stderr, "NOCHE devtools still open after 2 s, window not closed early\n");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeWindowWhenDevToolsGone:MAX(left - 1, -1)]; });
     return;
   }
   [self closeWindowNow];
@@ -418,13 +443,28 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   // OnBrowserCreated can fire before CreateBrowserView returned, so _view may still be unset.
   if (_destroyed) return;
   if (_view && !view->IsSame(_view)) {
-    [_devtools addObject:@(browser->GetIdentifier())];
+    // Only DevTools popups count (not window.open ones): the ones a ShowDevTools call is waiting for.
+    if (g_nc_devtools_pending > 0) {
+      g_nc_devtools_pending--;
+      [_devtools addObject:@(browser->GetIdentifier())];
+      g_devtools_created++;
+      g_devtools_browsers[browser->GetIdentifier()] = browser;
+    }
     return;
   }
   NCTab* tab = [self tabFor:browser create:YES];
   if (_firstEmitted) return;  // later tabs are announced by OnTabAdded
   _firstEmitted = YES;
   [self post:^(id<NCWindowDelegate> d) { [d window:self didAddTab:tab active:YES]; }];
+}
+
+// A DevTools browser ended (OnBeforeClose or the view's OnBrowserDestroyed, whichever comes first).
+- (void)devToolsGone:(CefRefPtr<CefBrowser>)browser {
+  NSNumber* key = @(browser->GetIdentifier());
+  if (![_devtools containsObject:key]) return;
+  [_devtools removeObject:key];
+  g_devtools_closed++;
+  g_devtools_browsers.erase(browser->GetIdentifier());
 }
 
 - (void)tabAdded:(CefRefPtr<CefBrowser>)browser active:(BOOL)active {
@@ -443,7 +483,7 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   NSNumber* key = @(browser->GetIdentifier());
   [_closed addObject:key];
   if ([_devtools containsObject:key]) {
-    [_devtools removeObject:key];
+    [self devToolsGone:browser];
     return;
   }
   NCTab* tab = _table[key];
@@ -451,6 +491,12 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   [_table removeObjectForKey:key];
   [tab browserClosed];
   [self post:^(id<NCWindowDelegate> d) { [d window:self didCloseTab:tab]; }];
+  if (TestFlag("NOCHE_TEST_LATE_CALLBACKS")) {  // simulates CEF's late async OnTabAdded / OnActiveTabChanged
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [self tabAdded:browser active:YES];
+      [self activeTabChangedFrom:nullptr to:browser];
+    });
+  }
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser update:(void (^)(NCTab*))mutate {
@@ -554,6 +600,14 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
   }];
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
 }
+
++ (NSInteger)devToolsCreated { return g_devtools_created; }
++ (NSInteger)devToolsLoaded {
+  for (auto& [id, b] : g_devtools_browsers)
+    if (!b->IsLoading() && b->HasDocument()) g_devtools_loaded_ids.insert(id);
+  return g_devtools_loaded_ids.size();
+}
++ (NSInteger)devToolsClosed { return g_devtools_closed; }
 
 + (BOOL)insideCefCallback {
   return g_nc_cef_depth > 0;
