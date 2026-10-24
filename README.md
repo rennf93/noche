@@ -2,6 +2,8 @@
 
 Noche is an open-source macOS browser written in Swift on Chromium through CEF, with AI built in through hummin. Licensed under MIT.
 
+Status: M1.1 is done (window, sidebar, toolbar and many tabs on the patched engine). Self-tests and evidence are in `docs/app/`.
+
 ## Build
 
 ```sh
