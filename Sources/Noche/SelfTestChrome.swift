@@ -164,7 +164,7 @@ extension SelfTest {
 
     static let expectedMenu = [
         "Noche||", "About Noche||", "Hide Noche|h|cmd", "Hide Others|h|opt+cmd", "Show All||", "Quit Noche|q|cmd",
-        "File||", "New Tab|t|cmd", "New Window|n|cmd", "Open Command Bar|l|cmd", "Close Window|w|shift+cmd", "Close Tab|w|cmd",
+        "File||", "New Tab|t|cmd", "New Window|n|cmd", "Reopen Closed Tab|t|shift+cmd", "Open Command Bar|l|cmd", "Close Window|w|shift+cmd", "Close Tab|w|cmd",
         "Edit||", "Undo|z|cmd", "Redo|z|shift+cmd", "Cut|x|cmd", "Copy|c|cmd", "Copy URL|c|shift+cmd", "Paste|v|cmd", "Select All|a|cmd",
         "View||", "Refresh|r|cmd", "Force Refresh the Page|r|shift+cmd", "Auto-Hide Tabs|s|cmd", "Zoom to Actual Size|0|cmd",
         "Zoom In|+|cmd", "Zoom Out|-|cmd", "Developer||", "Developer Tools|i|opt+cmd",

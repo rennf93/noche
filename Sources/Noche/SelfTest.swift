@@ -17,6 +17,9 @@ final class SelfTest {
     /// The app's own time limit for a check, in seconds (scripts/app-test.sh allows 20 s more before it kills the app).
     static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
 
+    /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
+    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "crash-mid-write" || check == "corrupt-store" }
+
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
         var url = "about:blank"
@@ -102,7 +105,7 @@ final class SelfTest {
         }
         Task { @MainActor in
             if phase == 0 { return finish(false, "bad --selftest-phase (want 1 or 2)") }
-            if check.hasSuffix("-relaunch"), phase == nil { return finish(false, "bad --selftest-phase: a -relaunch check needs it") }
+            if SelfTest.isTwoPhase(check), phase == nil { return finish(false, "bad --selftest-phase: a -relaunch check needs it") }
             switch check {
             case "hidden": await hidden()
             case "close-last": await closeLast()
@@ -133,6 +136,12 @@ final class SelfTest {
             case "no-window": await noWindow()
             case "close-beforeunload": await closeBeforeUnload()
             case "chromium-restore-relaunch", "chromium-restore-crash-relaunch": await chromiumRestoreRelaunch()
+            case "persist-relaunch": await persistRelaunch()
+            case "quit-close-relaunch": await quitCloseRelaunch()
+            case "reopen-closed": await reopenClosed()
+            case "reopen-closed-relaunch": await reopenClosedRelaunch()
+            case "crash-mid-write": await crashMidWrite()
+            case "corrupt-store": await corruptStore()
             default: finish(false, "unknown check")
             }
         }

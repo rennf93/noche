@@ -346,4 +346,15 @@ final class StoreTests: XCTestCase {
         try Store.open(at: file).save(snap)
         XCTAssertEqual(try Store.open(at: file).loadWindows(), [snap])
     }
+
+    /// saveAsync writes the same rows as save, and a synchronous save queued after it lands after it (GRDB serializes writers).
+    func testSaveAsyncThenSyncSaveKeepsOrder() throws {
+        let store = try makeStore()
+        let a = tab("https://a.example"), b = tab("https://b.example"), win = UUID()
+        store.saveAsync(snapshot([a, b], id: win, selected: a.id)) { XCTFail("\($0)") }
+        try store.save(snapshot([b], id: win, selected: b.id))
+        let loaded = try store.loadWindows()
+        XCTAssertEqual(loaded.first?.tabs.map(\.id), [b.id])
+        XCTAssertEqual(loaded.first?.selectedTabID, b.id)
+    }
 }

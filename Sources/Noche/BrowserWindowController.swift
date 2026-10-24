@@ -1,6 +1,7 @@
 import AppKit
 import CefBridge
 import NocheCore
+import NocheStore
 
 /// One window: the engine window, its tab list, and the AppKit chrome around the page.
 @MainActor
@@ -31,6 +32,27 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     private var installed = false
     private var focusWhenInstalled = false     // Open Command Bar came before the chrome existed (a window opened for it)
     private(set) var sidebarHidden = false
+    /// Restoring: the saved tabs are still being added to the engine, so a snapshot now would be partial (and would tombstone tabs).
+    private(set) var restoring = false
+    let id: UUID
+    struct PendingTab { let id: TabID; let url: String; let index: Int? }
+    struct Restore {
+        var tabs: [(id: TabID, url: String)]
+        var selected: TabID?
+        var sidebarHidden: Bool
+        var fullScreen: Bool
+        var lastActive: [TabID: Date]
+    }
+    /// Ids (and urls) the next tabs the engine adds take: restored tabs and a reopened one keep their saved identity.
+    private var pendingTabs: [PendingTab] = []
+    private var restore: Restore?
+    private var restoreAdded = 0
+    private var restoreStarted = false
+    private let initialFrame: NSRect
+    private var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
+    private var lastActive: [TabID: Date] = [:]
+    private var windowClosing = false           // close() was asked: the tabs that go with the window are not "closed tabs"
+    private var observers: [NSObjectProtocol] = []
     private(set) var cardX = ChromeStyle.sidebarWidth
     private var animation: (start: TimeInterval, from: CGFloat, to: CGFloat, duration: TimeInterval, overshoot: Bool)?
     private var animationTimer: Timer?
@@ -44,9 +66,19 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     var cardLog: [(t: TimeInterval, x: CGFloat)] = []
 #endif
 
-    init(app: AppDelegate, url: String, frame: NSRect) {
+    init(app: AppDelegate, id: UUID = UUID(), url: String, frame: NSRect, restore: Restore? = nil) {
         self.app = app
+        self.id = id
+        self.initialFrame = frame
+        self.restore = restore
         super.init()
+        if let restore {
+            restoring = true
+            pendingTabs = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil) }
+            lastActive = restore.lastActive
+            // A saved window whose tabs never arrive must not stay unsaved forever.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in MainActor.assumeIsolated { self?.restoring = false } }
+        }
         window = NCWindow(url: url, frame: frame, mode: app.hidden ? .hidden : .normal, delegate: self)
         window.webInsets = ChromeLayout(size: frame.size, cardX: cardX).webInsets
         window.webCornerRadius = ChromeStyle.cardRadius
@@ -82,6 +114,13 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
             return
         }
         installed = true
+        let center = NotificationCenter.default
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+            observers.append(center.addObserver(forName: name, object: ns, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.changed() } })
+        }
+        observers.append(center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: ns, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.normalFrame = self?.nsWindow?.frame }
+        })
         ns.isOpaque = false
         ns.backgroundColor = .clear
         ns.appearance = NSAppearance(named: .darkAqua)
@@ -112,6 +151,32 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         applyLayout()
         refresh()
         if focusWhenInstalled { focusWhenInstalled = false; focusAddress() }
+        if restore?.sidebarHidden == true { toggleSidebar() }
+        // A hidden test window never takes a Space.
+        if restore?.fullScreen == true, !app.hidden { ns.toggleFullScreen(nil) }
+    }
+
+    // MARK: persistence
+
+    /// The store's view of this window; nil while the saved tabs are still being added.
+    func snapshot(zOrder: Int) -> WindowSnapshot? {
+        guard !restoring else { return nil }
+        let ns = nsWindow
+        let full = ns?.styleMask.contains(.fullScreen) == true
+        let frame = full ? (normalFrame ?? ns?.frame ?? initialFrame) : (ns?.frame ?? initialFrame)
+        let meta = Dictionary(uniqueKeysWithValues: list.items.map { ($0.id, TabMeta(faviconURL: nil, lastActiveAt: lastActive[$0.id] ?? Date())) })
+        return WindowSnapshot(id: id, frame: frame, isFullScreen: full, isZoomed: ns?.isZoomed ?? false, sidebarWidth: nil,
+                              sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: list.items, selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta)
+    }
+
+    private func changed() { if !restoring { app.writer?.markDirty(window: id) } }
+
+    /// Reopen Closed Tab: the tab keeps its id, goes to |index| (clamped) and becomes active.
+    func reopen(_ item: TabItem, at index: Int) {
+        closeNext.removeAll()
+        pendingTabs.append(PendingTab(id: item.id, url: item.url, index: index))
+        guard let tab = window.addTab(withURL: item.url, activate: true) else { pendingTabs.removeLast(); return }
+        intendedActive = tab
     }
 
     func applyLayout() {
@@ -149,6 +214,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toggleEnd = 0
 #endif
         sidebarHidden.toggle()
+        changed()
         let to: CGFloat = sidebarHidden ? ChromeStyle.inset : ChromeStyle.sidebarWidth
         if !sidebarHidden { sidebar.setTrafficLightsHidden(false) }
         animation = (ProcessInfo.processInfo.systemUptime, cardX, to, sidebarHidden ? ChromeStyle.hideDuration : ChromeStyle.showDuration, !sidebarHidden)
@@ -195,6 +261,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 
     func close() {
         note("closeWindow")
+        windowClosing = true
         window.close()
     }
 
@@ -322,24 +389,45 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func window(_ window: NCWindow, didAdd tab: NCTab, active: Bool) {
         installChrome()
         tabs[tab.identifier] = tab
+        let pending = pendingTabs.isEmpty ? nil : pendingTabs.removeFirst()
+        if let pending { ids[tab.identifier] = pending.id }
         // Keep the rows in the engine's strip order: the new tab goes right after the tab before it in the strip.
         let strip = window.tabs
         let before = strip.firstIndex(where: { $0 === tab }).flatMap { $0 > 0 ? strip[$0 - 1] : nil }
-        list.insert(item(for: tab), after: before.flatMap { ids[$0.identifier] }, activate: active)
+        var added = item(for: tab)
+        if let pending { added.url = pending.url }   // the saved address until the engine reports its own
+        list.insert(added, after: before.flatMap { ids[$0.identifier] }, activate: active)
+        if let at = pending?.index { list.move(added.id, to: at) }
+        lastActive[added.id] = Date()
+        if let restore {
+            if !restoreStarted {
+                restoreStarted = true
+                for p in pendingTabs { _ = window.addTab(withURL: p.url, activate: false) }
+            }
+            restoreAdded += 1
+            if added.id == restore.selected, !active { window.activateTab(tab); intendedActive = tab }
+            if restoreAdded == restore.tabs.count { restoring = false; self.restore = nil }
+        }
         refresh()
+        changed()
         app.tabAdded(tab)
     }
 
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
-        if let id = ids[tab.identifier] { list.activate(id) }
+        if let id = ids[tab.identifier] { list.activate(id); lastActive[id] = Date() }
         if intendedActive === tab { intendedActive = nil }
         refresh()
+        changed()
         app.tabActivated(tab)
     }
 
     func window(_ window: NCWindow, didClose tab: NCTab) {
         let successor = closeNext.removeValue(forKey: tab.identifier)
-        if let id = ids[tab.identifier] { _ = list.remove(id) }
+        var gone: (item: TabItem, index: Int)?
+        if let id = ids[tab.identifier], let i = list.items.firstIndex(where: { $0.id == id }) {
+            gone = (list.items[i], i)
+            _ = list.remove(id)
+        }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
         failed[tab.identifier] = nil
@@ -348,6 +436,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         // The close is confirmed: the selection moves to the tab chosen when it was asked for.
         if let next = survivor(from: successor) { intendedActive = next; window.activateTab(next) }
         refresh()
+        // The tab closed alone (Cmd+W, its close button, the page): it goes on the closed list. Closing with its window or at quit does not.
+        if let gone, !windowClosing, !app.closing { app.writer?.closed(tab: gone.item, window: id, index: gone.index) }
         app.tabClosed(tab)
     }
 
@@ -362,6 +452,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         if let f = failed[tab.identifier], tab.url != f.shown, tab.url != f.url { failed[tab.identifier] = nil }
         if let id = ids[tab.identifier] { list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading) }
         refresh()
+        changed()
         app.tabUpdated(tab)
     }
 
@@ -388,6 +479,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         case ChromeCommand.selectNextTab: selectNextTab()
         case ChromeCommand.selectPreviousTab: selectPreviousTab()
         case ChromeCommand.newWindow: app.newWindowAction()
+        case ChromeCommand.restoreTab: app.reopenClosedTab(nil)
         case ChromeCommand.closeWindow: close()
         case ChromeCommand.back: goBack()
         case ChromeCommand.forward: goForward()
@@ -405,6 +497,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
         app.controllerClosed(self)
     }
 
@@ -431,6 +525,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 enum ChromeCommand {
     static var back = -1, forward = -1, reload = -1, reloadBypassingCache = -1, reloadClearingCache = -1
     static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
+    static var restoreTab = -1
     static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
 
     static func resolve() {
@@ -443,6 +538,7 @@ enum ChromeCommand {
         reloadBypassingCache = id("IDC_RELOAD_BYPASSING_CACHE"); reloadClearingCache = id("IDC_RELOAD_CLEARING_CACHE")
         newWindow = id("IDC_NEW_WINDOW"); closeWindow = id("IDC_CLOSE_WINDOW"); newTab = id("IDC_NEW_TAB"); closeTab = id("IDC_CLOSE_TAB")
         selectNextTab = id("IDC_SELECT_NEXT_TAB"); selectPreviousTab = id("IDC_SELECT_PREVIOUS_TAB")
+        restoreTab = id("IDC_RESTORE_TAB")
         zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
         focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")
     }

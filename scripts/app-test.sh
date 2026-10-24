@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
 # Two-phase checks (names ending in -relaunch): phase 1 runs with `--selftest-phase 1` on the wiped profile, phase 2 with
 # `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` (the crash variant `-crash-relaunch`: phase 1 prints `info phase1-ready` and this script SIGKILLs the one app PID) and every control below covers both.
+# Store checks: quit-close-relaunch passes `--selftest-setting quitBehavior=close` in phase 1; crash-mid-write runs both
+# NOCHE_TEST_KILL_AT variants (pending, in-transaction): phase 1 SIGKILLs itself (rc 137 expected), then `sqlite3 <store> "PRAGMA integrity_check"`
+# must print ok before phase 2; corrupt-store overwrites the store file with garbage between its phases.
 # Controls the app cannot give itself: new Noche*.ips crash reports (diffed per launch after a 3 s settle), the frontmost
 # app (lsappinfo every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s). The app's own limit is
 # 40 s (90 s for quit-100); this script kills the one app PID (TERM, then KILL) 20 s after that.
@@ -23,7 +26,7 @@ if [ "${1:-}" = "--negative" ]; then
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
   SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
   # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
-  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=3 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=3 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
   IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
@@ -81,18 +84,30 @@ for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
 
 FAILED=0
 for CHECK in "$@"; do
-  # Checks ending in -relaunch run twice on one profile (phase 1, then 2); each phase must print its own pass line.
-  PHASES=""; case "$CHECK" in *-relaunch) PHASES="1 2" ;; esac
+  # Checks ending in -relaunch (and crash-mid-write, corrupt-store) run twice on one profile (phase 1, then 2); each phase must print its own pass line.
+  PHASES=""; case "$CHECK" in *-relaunch|crash-mid-write|corrupt-store) PHASES="1 2" ;; esac
+  # crash-mid-write runs once per kill point.
+  KILLS="${NOCHE_TEST_KILL_AT:-none}"; [ "$CHECK" != crash-mid-write ] || KILLS="pending in-transaction"
+  for KILL_AT in $KILLS; do
   for PHASE in ${PHASES:-none}; do
     [ "$PHASE" != none ] || PHASE=""
     : > "$OUTF"; : > "$ERRF"
     # Only phase 1 (or a one-phase check) starts from a wiped profile: phase 2 relaunches on what phase 1 left.
     if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then rm -rf "$PROFILE"; fi
+    # corrupt-store: garbage over the store file (the WAL files stay), then phase 2 must quarantine it and start with one window.
+    if [ "$CHECK" = corrupt-store ] && [ "$PHASE" = 2 ]; then
+      [ -f "$PROFILE/Store/noche.sqlite" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail no store file left by phase 1"; break; }
+      # Fold the WAL into the file first: pages still in the WAL would shadow the garbage and the store would open fine.
+      sqlite3 "$PROFILE/Store/noche.sqlite" "PRAGMA wal_checkpoint(TRUNCATE)" >/dev/null 2>&1 || true
+      head -c 8192 /dev/urandom > "$PROFILE/Store/noche.sqlite"
+    fi
+    EXTRA=(); [ "$CHECK" != quit-close-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
+    SELFKILL=0; [ "$CHECK" != crash-mid-write ] || [ "$PHASE" != 1 ] || SELFKILL=1
     REPORTS_BEFORE="$(crash_reports)"
     BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit
     LIMIT=$((BASE + ${NOCHE_TEST_SLACK:-20}))
     # The throttling switches keep timers and renderers running in a window nobody sees.
-    (cd / && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" ${PHASE:+--selftest-phase $PHASE} \
+    (cd / && { [ "$KILL_AT" = none ] || export NOCHE_TEST_KILL_AT="$KILL_AT"; } && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" ${PHASE:+--selftest-phase $PHASE} ${EXTRA[@]+"${EXTRA[@]}"} \
         --load-extension="$ROOT/Probes/fixtures/probe-extension" \
         --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
         --disable-background-timer-throttling --mute-audio >"$OUTF" 2>"$ERRF") &
@@ -121,6 +136,14 @@ for CHECK in "$@"; do
     fi
     set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
     APP_PID=""
+    # crash-mid-write phase 1: the app SIGKILLs itself from the test hook (rc 137), then the file must pass integrity_check.
+    if [ "$SELFKILL" = 1 ]; then
+      KILLED=1
+      [ "$RC" = 137 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail app was not SIGKILLed by its kill hook (kill-at=$KILL_AT rc=$RC)"; }
+      IC="$(sqlite3 "$PROFILE/Store/noche.sqlite" "PRAGMA integrity_check" 2>&1 || true)"
+      echo "NOCHE_TEST $CHECK info kill-at=$KILL_AT integrity_check=$IC"
+      [ "$IC" = ok ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail integrity_check after kill-at=$KILL_AT: $IC"; }
+    fi
     [ "$WATCHDOG" = 1 ] && echo "NOCHE_TEST $CHECK fail watchdog" >> "$OUTF"
     grep '^NOCHE_TEST ' "$OUTF" || echo "NOCHE_TEST $CHECK fail no-output"
     if [ "$KILLED" = 1 ]; then
@@ -146,11 +169,19 @@ for CHECK in "$@"; do
     if [ -n "$LEFT" ]; then FAILED=1; echo "NOCHE_TEST leftover-helpers fail pids: $LEFT"; fi
     # What Chromium left for the relaunch (positive control: a session must exist for "no restore" to mean anything).
     if [ "$PHASE" = 1 ]; then
+      # The gate: the newest unencrypted session file must name the 3 fixture URLs, or "Chromium does not restore" proves nothing.
+      case "$CHECK" in chromium-restore-relaunch|chromium-restore-crash-relaunch)
+        NEWEST="$(ls -t "$PROFILE"/Cache/Default/Sessions/Session_* 2>/dev/null | head -1 || true)"
+        SESSION_URLS=0; [ -z "$NEWEST" ] || SESSION_URLS="$(strings "$NEWEST" | grep -o "http://127.0.0.1:$PORT/" | wc -l | tr -d ' ')" || SESSION_URLS=0
+        echo "NOCHE_TEST $CHECK info session-file=${NEWEST##*/} fixture-urls=$SESSION_URLS"
+        [ "$SESSION_URLS" -ge 3 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail session file has $SESSION_URLS of the 3 fixture URLs (${NEWEST:-no session file})"; } ;;
+      esac
       echo "NOCHE_TEST $CHECK info sessions=$(cd "$PROFILE" 2>/dev/null && find . \( -iname 'Session*' -o -iname 'Current *' -o -iname 'Last *' -o -iname 'Tabs_*' \) -exec ls -ldT {} + 2>/dev/null | awk '{print $5 ":" $NF}' | tr '\n' ' ')"
     fi
     # A phase 1 without its pass (or phase1-ready) line leaves nothing for phase 2 to check.
     if [ "$KILLED" = 1 ]; then grep -q "^NOCHE_TEST $CHECK info phase1-ready" "$OUTF" || break
     else grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || break; fi
+  done
   done
 done
 rm -rf "$PROFILE"

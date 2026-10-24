@@ -26,6 +26,7 @@ enum MainMenu {
         main.addItem(submenu("File", [
             a("New Tab", #selector(AppDelegate.newTab(_:)), "t"),
             a("New Window", #selector(AppDelegate.newWindowMenu(_:)), "n"),
+            a("Reopen Closed Tab", #selector(AppDelegate.reopenClosedTab(_:)), "t", shift),
             a("Open Command Bar", #selector(AppDelegate.openCommandBar(_:)), "l"),
             .separator(),
             a("Close Window", #selector(AppDelegate.closeWindowMenu(_:)), "w", shift),

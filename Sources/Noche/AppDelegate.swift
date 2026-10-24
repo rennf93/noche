@@ -1,6 +1,7 @@
 import AppKit
 import CefBridge
 import NocheCore
+import NocheStore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
@@ -12,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var exitCodeOverride: Int32?
 #endif
     private(set) var controllers: [BrowserWindowController] = []
+    var writer: StoreWriter?
+    private(set) var restored: [WindowSnapshot] = []
+    private(set) var storeURL: URL?
+    private(set) var storeFallback: String?
     var windows: [NCWindow] { controllers.map(\.window) }
     var searchTemplate = AddressInput.defaultSearchTemplate
     private var finished = false
@@ -38,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var profile = "Library/Application Support/Noche"
         var url = smoke?.url.absoluteString ?? "about:blank"
+        var storeSettings: [(String, String)] = []
         var frame = Self.defaultFrame(size: NSSize(width: 1280, height: 800))
 #if NOCHE_TESTHOOKS
         if let options = selfTestOptions {
@@ -45,9 +51,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             url = options.url
             frame = SelfTest.windowFrame
             selfTest = SelfTest(options, app: self)
+            if options.phase == 2 { url = "about:blank" }  // a relaunch with nothing to restore shows a blank tab, not the fixture
+            // --selftest-setting key=value: a setting stored before the restore, until Settings (M1.8) can set it.
+            let args = CommandLine.arguments
+            if let i = args.firstIndex(of: "--selftest-setting"), i + 1 < args.count, let eq = args[i + 1].firstIndex(of: "=") {
+                storeSettings.append((String(args[i + 1][..<eq]), String(args[i + 1][args[i + 1].index(after: eq)...])))
+            }
             searchTemplate = options.url + "search?q=%s"  // no self-test touches the network
         }
 #endif
+        openStore(profile: profile, settings: storeSettings)
         let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(profile + "/Cache")
         do {
             try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
@@ -58,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
 
         ChromeCommand.resolve()
-        newWindow(url: url, frame: frame)
+        restoreWindows(startupURL: url, startupFrame: frame)
 
         if let smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + smoke.timeout) { [weak self] in
@@ -72,16 +85,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// One window with one tab at |url|.
     @discardableResult
-    func newWindow(url: String = "about:blank", frame: NSRect? = nil) -> NCWindow {
-        let controller = BrowserWindowController(app: self, url: url, frame: frame ?? Self.defaultFrame(size: NSSize(width: 1280, height: 800)))
+    func newWindow(url: String = "about:blank", frame: NSRect? = nil, id: UUID = UUID(), restore: BrowserWindowController.Restore? = nil) -> NCWindow {
+        let controller = BrowserWindowController(app: self, id: id, url: url, frame: frame ?? Self.defaultFrame(size: NSSize(width: 1280, height: 800)), restore: restore)
         controllers.append(controller)
         return controller.window
     }
 
-    /// File > New Window: same size as the window it is opened from.
+    // MARK: store
+
+    /// The store lives in the profile directory. A smoke run shares the owner's profile and must not touch its windows: in memory.
+    /// Any open error other than a corrupt file (which the store quarantines itself) runs this session on an in-memory store.
+    private func openStore(profile: String, settings: [(String, String)]) {
+        var store: Store?
+        if smoke == nil {
+            let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(profile + "/Store/noche.sqlite")
+            storeURL = url
+            do { store = try Store.open(at: url) } catch {
+                storeFallback = "\(error)"
+                FileHandle.standardError.write(Data("NOCHE store unavailable: \(error)\n".utf8))
+            }
+        }
+        guard let store = store ?? (try? Store.inMemory()) else { return }
+        for (k, v) in settings where k == "quitBehavior" && ["preserve", "close"].contains(v) { try? store.setSetting(k, v) }
+        let w = StoreWriter(store: store)
+        w.snapshot = { [weak self] id in
+            guard let self, let i = self.controllers.firstIndex(where: { $0.id == id }) else { return nil }
+            return self.controllers[i].snapshot(zOrder: i)
+        }
+        w.windowIDs = { [weak self] in self?.controllers.map(\.id) ?? [] }
+        writer = w
+        restored = (try? store.loadWindows()) ?? []
+    }
+
+    /// Restore runs before the first window: each saved window comes back with fresh engine browsers at its saved addresses (no history);
+    /// an empty store gives the startup window.
+    private func restoreWindows(startupURL: String, startupFrame: NSRect) {
+        guard !restored.isEmpty else { newWindow(url: startupURL, frame: startupFrame); return }
+        for s in restored {
+            let tabs = s.tabs.map { (id: $0.id, url: $0.url.isEmpty ? "about:blank" : $0.url) }
+            let ok = s.frame.width >= 200 && s.frame.height >= 150
+            let restore = tabs.isEmpty ? nil : BrowserWindowController.Restore(
+                tabs: tabs, selected: s.selectedTabID, sidebarHidden: s.sidebarMode == "hidden", fullScreen: s.isFullScreen,
+                lastActive: s.tabMeta.mapValues(\.lastActiveAt))
+            newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? s.frame : startupFrame, id: s.id, restore: restore)
+        }
+    }
+
+    /// File > New Window: same size as the window it is opened from, 22 pt down and right of it (back to the corner at the screen's edge).
     func newWindowAction() {
         BrowserWindowController.note("newWindow")
-        newWindow(frame: Self.defaultFrame(size: active?.nsWindow?.frame.size ?? NSSize(width: 1280, height: 800)))
+        guard let base = active?.nsWindow?.frame else { newWindow(); return }
+        let area = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var f = base.offsetBy(dx: 22, dy: -22)
+        if f.maxX > area.maxX || f.minY < area.minY { f = Self.defaultFrame(size: base.size) }
+        newWindow(frame: f)
+    }
+
+    /// File > Reopen Closed Tab: the newest closed tab goes back to its window at its index (clamped), else the front window, appended.
+    @objc func reopenClosedTab(_ s: Any?) {
+        guard !closing, let closed = writer?.popClosed() else { return }
+        if let c = controllers.first(where: { $0.id == closed.windowID }) ?? active {
+            c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max)
+        } else {
+            let url = closed.tab.url
+            newWindow(url: url, id: closed.windowID, restore: .init(tabs: [(closed.tab.id, url)], selected: closed.tab.id, sidebarHidden: false, fullScreen: false, lastActive: [:]))
+        }
     }
 
     /// AppKit frame of a window of |size| 100 pt from the top-left corner of the main screen's visible area (cut to fit).
@@ -127,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(toggleSidebar(_:)): item.state = active?.sidebarHidden == true ? .on : .off
         case #selector(goBack(_:)): return active?.window.activeTab?.canGoBack ?? false
         case #selector(goForward(_:)): return active?.window.activeTab?.canGoForward ?? false
+        case #selector(reopenClosedTab(_:)): return !closing && (writer?.hasClosed ?? false)
         default: break
         }
         return true
@@ -181,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func controllerClosed(_ controller: BrowserWindowController) {
         controllers.removeAll { $0 === controller }
+        if !closing { writer?.windowClosed(controller.id) }
         closeProgressed()
 #if NOCHE_TESTHOOKS
         selfTest?.windowDidClose()
@@ -215,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private static let stallLimit: TimeInterval = 5
     private static let capBase: TimeInterval = 10, capPerTab: TimeInterval = 0.5
 
-    private var closing = false
+    private(set) var closing = false
     private var exiting = false
     private var watchdogFired = false
     private var watchdogGeneration = 0
@@ -226,6 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !closing else { return }
         closing = true
         finished = true
+        writer?.quit()
         shutdownTabs = windows.reduce(0) { $0 + $1.tabs.count }
         shutdownCap = ProcessInfo.processInfo.systemUptime + Self.capBase + Self.capPerTab * Double(shutdownTabs)
         armWatchdog()

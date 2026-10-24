@@ -6,6 +6,8 @@ public final class Store: Sendable {
     let db: any DatabaseWriter
     let now: @Sendable () -> Date
     static let closedCap = 25
+    /// Called inside `save`'s transaction after the upserts, before the commit. Nil outside the app's crash test.
+    nonisolated(unsafe) public static var inTransactionHook: (() -> Void)?
 
     private init(_ db: any DatabaseWriter, now: @escaping @Sendable () -> Date) throws {
         self.db = db
@@ -95,30 +97,42 @@ public final class Store: Sendable {
     /// window that are not in the snapshot. Closed-list rows are never touched.
     public func save(_ w: WindowSnapshot) throws {
         let t = now().timeIntervalSince1970
-        try db.write { db in
+        try db.write { try Self.write(w, $0, at: t) }
+    }
+
+    /// The same transaction on GRDB's writer queue, for debounced saves (a 100-tab window takes about 8 ms, too long for the main
+    /// thread). GRDB serializes writers, so a later synchronous `save` still lands after it. |onError| runs on the writer queue.
+    public func saveAsync(_ w: WindowSnapshot, onError: @escaping @Sendable (any Error) -> Void) {
+        let t = now().timeIntervalSince1970
+        db.asyncWrite({ try Self.write(w, $0, at: t) }, completion: { _, result in
+            if case .failure(let error) = result { onError(error) }
+        })
+    }
+
+    private static func write(_ w: WindowSnapshot, _ db: Database, at t: Double) throws {
+        try db.execute(sql: """
+            INSERT INTO window (id, profileId, x, y, w, h, isFullScreen, isZoomed, sidebarWidth, sidebarMode, selectedTabId, zOrder, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h,
+              isFullScreen = excluded.isFullScreen, isZoomed = excluded.isZoomed, sidebarWidth = excluded.sidebarWidth,
+              sidebarMode = excluded.sidebarMode, selectedTabId = excluded.selectedTabId, zOrder = excluded.zOrder,
+              updatedAt = excluded.updatedAt, deletedAt = NULL
+            """, arguments: [w.id.uuidString, Schema.defaultProfileID, Double(w.frame.origin.x), Double(w.frame.origin.y),
+                             Double(w.frame.width), Double(w.frame.height), w.isFullScreen, w.isZoomed, w.sidebarWidth,
+                             w.sidebarMode, w.selectedTabID?.raw.uuidString, w.zOrder, t, t])
+        for (i, tab) in w.tabs.enumerated() {
+            let meta = w.tabMeta[tab.id]
             try db.execute(sql: """
-                INSERT INTO window (id, profileId, x, y, w, h, isFullScreen, isZoomed, sidebarWidth, sidebarMode, selectedTabId, zOrder, createdAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h,
-                  isFullScreen = excluded.isFullScreen, isZoomed = excluded.isZoomed, sidebarWidth = excluded.sidebarWidth,
-                  sidebarMode = excluded.sidebarMode, selectedTabId = excluded.selectedTabId, zOrder = excluded.zOrder,
-                  updatedAt = excluded.updatedAt, deletedAt = NULL
-                """, arguments: [w.id.uuidString, Schema.defaultProfileID, Double(w.frame.origin.x), Double(w.frame.origin.y),
-                                 Double(w.frame.width), Double(w.frame.height), w.isFullScreen, w.isZoomed, w.sidebarWidth,
-                                 w.sidebarMode, w.selectedTabID?.raw.uuidString, w.zOrder, t, t])
-            for (i, tab) in w.tabs.enumerated() {
-                let meta = w.tabMeta[tab.id]
-                try db.execute(sql: """
-                    INSERT INTO tab (id, windowId, url, title, faviconURL, position, lastActiveAt, createdAt, updatedAt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET windowId = excluded.windowId, url = excluded.url, title = excluded.title,
-                      faviconURL = excluded.faviconURL, position = excluded.position, lastActiveAt = excluded.lastActiveAt,
-                      closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = excluded.updatedAt, deletedAt = NULL
-                    """, arguments: [tab.id.raw.uuidString, w.id.uuidString, tab.url, tab.title, meta?.faviconURL, i,
-                                     meta?.lastActiveAt.timeIntervalSince1970 ?? t, t, t])
-            }
-            try Self.tombstoneLiveTabs(db, window: w.id, except: w.tabs.map { $0.id.raw.uuidString }, at: t)
+                INSERT INTO tab (id, windowId, url, title, faviconURL, position, lastActiveAt, createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET windowId = excluded.windowId, url = excluded.url, title = excluded.title,
+                  faviconURL = excluded.faviconURL, position = excluded.position, lastActiveAt = excluded.lastActiveAt,
+                  closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = excluded.updatedAt, deletedAt = NULL
+                """, arguments: [tab.id.raw.uuidString, w.id.uuidString, tab.url, tab.title, meta?.faviconURL, i,
+                                 meta?.lastActiveAt.timeIntervalSince1970 ?? t, t, t])
         }
+        try Self.tombstoneLiveTabs(db, window: w.id, except: w.tabs.map { $0.id.raw.uuidString }, at: t)
+        Self.inTransactionHook?()
     }
 
     public func loadWindows() throws -> [WindowSnapshot] {

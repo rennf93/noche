@@ -59,7 +59,7 @@ if withApp {
             cxxSettings: [.unsafeFlags(cefFlags + bridgeTestFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore")]
         ),
-        .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"], swiftSettings: testHookSettings),
+        .executableTarget(name: "Noche", dependencies: ["NocheCore", "NocheStore", "CefBridge"], swiftSettings: testHookSettings),
         .executableTarget(
             name: "NocheHelper",
             cxxSettings: [.unsafeFlags(cefFlags)],
