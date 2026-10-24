@@ -24,7 +24,8 @@ NSMutableDictionary* g_docs;   // requestId -> @{url, headers}: store document r
 NSString* g_ext_id = nil;
 NSString* g_before = nil;      // window snapshot before the click
 int g_main_before = 0, g_total_before = 0, g_tabs_before = -1, g_bw_before = 0;
-NSMutableSet<NSNumber*>* g_known;  // window addresses present when the install sheet closed
+NSMutableSet<NSNumber*>* g_known;  // window addresses present before the click (the dialog is any new one after it)
+uintptr_t g_install_sheet = 0;     // address of the install confirmation sheet (compared, never dereferenced)
 bool g_dialog_seen = false;
 
 void Info(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
@@ -149,6 +150,13 @@ NSWindow* FindSheet() {
     if (w.isSheet || w.sheetParent) return w;
   return nil;
 }
+// The install confirmation sheet only. With P3 the post-install dialog is a second sheet on the same window; it must
+// never be "accepted" by the install steps.
+NSWindow* FindInstallSheet() {
+  for (NSWindow* w in NSApp.windows)
+    if ((uintptr_t)(__bridge void*)w == g_install_sheet && (w.isSheet || w.sheetParent)) return w;
+  return nil;
+}
 
 void Key(NSWindow* w, NSEventType type) {
   NSEvent* e = [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:w.windowNumber
@@ -165,7 +173,7 @@ void MouseAt(NSWindow* w, NSPoint p, NSEventType type) {
 // Accept the install sheet: accessibility press on "Add extension", else Return, else a click at the bottom right.
 // Each method gets 3 s; returns through |done| once the sheet is gone (or after the last method).
 void AcceptSheet(H h, int method, std::function<void()> done) {
-  NSWindow* sheet = FindSheet();
+  NSWindow* sheet = FindInstallSheet();
   if (!sheet || method > 2) { done(); return; }
   if (method == 0) {
     NSMutableArray* dump = [NSMutableArray array];
@@ -192,7 +200,7 @@ void AcceptSheet(H h, int method, std::function<void()> done) {
     MouseAt(sheet, p, NSEventTypeLeftMouseUp);
     Info(@"sheet accept method=click at %.0f,%.0f of %.0fx%.0f", p.x, p.y, s.width, s.height);
   }
-  After(3, ^{ if (FindSheet()) AcceptSheet(h, method + 1, done); else done(); });
+  After(3, ^{ if (FindInstallSheet()) AcceptSheet(h, method + 1, done); else done(); });
 }
 
 NSString* ExtensionsDir() {
@@ -273,7 +281,7 @@ void Verdict(H h, bool installed, NSString* summary) {
 
 void WatchDialog(H h, int left, dispatch_block_t done) {
   for (NSWindow* w in NSApp.windows) {
-    if ([g_known containsObject:@((uintptr_t)(__bridge void*)w)]) continue;
+    if ([g_known containsObject:@((uintptr_t)(__bridge void*)w)] || (uintptr_t)(__bridge void*)w == g_install_sheet) continue;
     if ([NSStringFromClass([w class]) isEqualToString:@"NativeWidgetMacNSWindow"] && (w.isVisible || w.isSheet)) {
       if (!g_dialog_seen) Info(@"post-install dialog window seen: NativeWidgetMacNSWindow vis=%d sheet=%d %.0fx%.0f", (int)w.isVisible, (int)w.isSheet, w.frame.size.width, w.frame.size.height);
       g_dialog_seen = true;
@@ -294,16 +302,15 @@ void AfterInstallClick(H h, NSDictionary* st) {
       });
       return;
     }
+    g_install_sheet = (uintptr_t)(__bridge void*)FindSheet();
     Snap withSheet = Snapshot(h);
     Info(@"sheet up: %@", withSheet.text);
     AcceptSheet(h, 0, [=] {
-      if (FindSheet()) { Verdict(h, false, [base stringByAppendingString:@" install=sheet-not-accepted"]); return; }
-      g_known = [NSMutableSet set];
-      for (NSWindow* w in NSApp.windows) [g_known addObject:@((uintptr_t)(__bridge void*)w)];
+      if (FindInstallSheet()) { Verdict(h, false, [base stringByAppendingString:@" install=sheet-not-accepted"]); return; }
       WaitFor(h, 40000, [] { g_ext_id = InstalledId(); return g_ext_id != nil; }, [=](bool installed) {
         Info(@"install result: extension on disk=%d id=%@", (int)installed, g_ext_id ?: @"-");
         // The post-install UI (stray window, dialog) shows up within a moment: watch 6 s for a window that did not exist
-        // when the install sheet closed, of the dialog's class (NativeWidgetMacNSWindow), visible or a sheet.
+        // before the click (the install sheet itself excluded), of the dialog's class (NativeWidgetMacNSWindow), visible or a sheet.
         WatchDialog(h, 24, ^{
           h->eval(kStateJS, false, [=](NSString* s) {
             NSDictionary* fin = Json(s);
@@ -331,6 +338,8 @@ void Settled(H h, NSDictionary* st) {
   Snap before = Snapshot(h);
   g_before = before.text; g_main_before = before.main; g_total_before = before.total; g_bw_before = before.browser; g_tabs_before = h->tabCount();
   Info(@"windows before click: %@ tabs=%d", before.text, g_tabs_before);
+  g_known = [NSMutableSet set];
+  for (NSWindow* w in NSApp.windows) [g_known addObject:@((uintptr_t)(__bridge void*)w)];
   Info(@"click %@ at %@,%@ (disabled=%@)", add[@"t"], add[@"x"], add[@"y"], add[@"dis"]);
   Click(h, [add[@"x"] doubleValue], [add[@"y"] doubleValue]);
   After(4, ^{ if (!FindSheet()) JsClick(h, @"^add to "); });  // CDP mouse input did nothing: the page's own click

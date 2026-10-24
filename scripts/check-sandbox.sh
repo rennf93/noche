@@ -31,7 +31,7 @@ FOUND=""
 for _ in $(seq 1 400); do
   kill -0 "$APP_PID" 2>/dev/null || break
   PS_OUT="$(ps -axo ppid=,command=)"
-  FOUND="$(printf '%s\n' "$PS_OUT" | awk -v p="$APP_PID" '$1 == p && /--type=renderer/ && /--seatbelt-client/ { print; exit }')"
+  FOUND="$(awk -v p="$APP_PID" '$1 == p && /--type=renderer/ && /--seatbelt-client/ { print; exit }' <<<"$PS_OUT")"
   [ -n "$FOUND" ] && break
   sleep 0.05
 done
