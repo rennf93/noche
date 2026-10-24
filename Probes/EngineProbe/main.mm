@@ -102,6 +102,9 @@ static void GuardWindow(id w, const char* sel) {
   // One line per order-in: which selector, which window class, alpha before and after (proof that nothing shows at alpha 1).
   fprintf(stderr, "[PROBE] GUARD %s class=%s alpha before=%.2f after=%.2f children=%lu parent=%d\n", sel, class_getName([w class]), before, [(NSWindow*)w alphaValue], (unsigned long)[(NSWindow*)w childWindows].count, [(NSWindow*)w parentWindow] != nil);
   fflush(stderr);
+  // Also on stdout so the run script keeps it: the popup's first order-in must show alpha after=0.
+  printf("PROBE %s info guard %s class=%s alpha before=%.2f after=%.2f parent=%d\n", g_check.UTF8String, sel, class_getName([w class]), before, [(NSWindow*)w alphaValue], [(NSWindow*)w parentWindow] != nil);
+  fflush(stdout);
 }
 static void swz_setAlpha(id self, SEL c, CGFloat) { g_guard_calls++; orig_setAlpha(self, c, 0); }
 static void swz_orderWindow(id self, SEL c, NSWindowOrderingMode m, NSInteger r) { GuardWindow(self, "orderWindow:relativeTo:"); orig_orderWindow(self, c, m, r); }
@@ -432,6 +435,32 @@ static std::vector<CefRefPtr<CefBrowser>> Tabs() {
   return t;
 }
 
+// Latency verdict (ruling 13). The hybrid counterparts (1 Chrome-style view plus 19 Alloy-style views, same floating
+// hidden window, same URLs, warm-ups, samples and order) are the control; they always pass and write their median to a
+// file in the probe's profile dir, the tab checks read it. Simplest carry-over: the probe runs one check per launch, and
+// the four checks need only this one number each. A tab check passes at median <= 1.2 x its control's median.
+static NSString* HybridFile(NSString* tabCheck) {
+  return [NSHomeDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"Library/Application Support/Noche Probe/%@-hybrid.median", tabCheck]];
+}
+static void FinishLatency(double median, double p90, double lo, double hi, NSString* order) {
+  NSString* base = [NSString stringWithFormat:@"median=%.1fms p90=%.1fms range=%.1f..%.1fms (30 timed after 3 warm-up, %@)", median, p90, lo, hi, order];
+  if ([g_check hasSuffix:@"-hybrid"]) {  // control
+    NSString* tab = [g_check substringToIndex:g_check.length - 7];
+    [[NSString stringWithFormat:@"%.3f", median] writeToFile:HybridFile(tab) atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    Finish(true, [base stringByAppendingString:@" control only: written for the tab check"]);
+    return;
+  }
+  NSString* path = HybridFile(g_check);
+  NSDate* mtime = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil][NSFileModificationDate];
+  NSString* txt = mtime ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] : nil;
+  if (!txt || -[mtime timeIntervalSinceNow] > 900) {
+    Finish(false, [base stringByAppendingFormat:@" no hybrid control from the last 15 minutes (run %@-hybrid first); old reference 11.6 ms: %s", g_check, median <= 11.6 ? "under" : "over"]);
+    return;
+  }
+  const double hybrid = txt.doubleValue;
+  Finish(median <= 1.2 * hybrid, [base stringByAppendingFormat:@" hybrid control median=%.1fms limit=1.2x=%.1fms; info: old absolute reference 11.6ms (S1 harness) is %s", hybrid, 1.2 * hybrid, median <= 11.6 ? "met" : "not met"]);
+}
+
 static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<double> lat) {
   if (g_done || !g_view) return;  // the run ended (timeout) while a switch was in flight
   const size_t kWarm = 3, kTimed = 30;
@@ -439,7 +468,7 @@ static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<doub
     std::vector<double> t(lat.begin() + kWarm, lat.end());
     std::sort(t.begin(), t.end());
     double median = (t[kTimed / 2 - 1] + t[kTimed / 2]) / 2, p90 = t[(size_t)(0.9 * kTimed) - 1];
-    Finish(median <= 11.6, [NSString stringWithFormat:@"median=%.1fms p90=%.1fms range=%.1f..%.1fms (%zu timed after %zu warm-up, fixed cycle order) limit=11.6ms (U2)", median, p90, t.front(), t.back(), kTimed, kWarm]);
+    FinishLatency(median, p90, t.front(), t.back(), [g_check isEqualToString:@"switch-latency-ab"] ? @"strict A,B order" : @"fixed cycle order");
     return;
   }
   // tab 0 is active at the start. switch-latency cycles through tabs 1..19 in a fixed order; switch-latency-ab
@@ -541,15 +570,18 @@ static void PageAbStart() {
 static bool PageMode() { const char* m = getenv("NOCHE_PROBE_MEASURE"); return m && *m && strcmp(m, "cdp"); }
 
 // Hybrid control: strict A/B between two Alloy-style views by SetVisible, measured over CDP like SwitchStep.
+static int g_hybrid_visible = -1;  // switch-latency-hybrid: alloy index showing now, -1 = the Chrome-style view
 static void HybridCdpStep(std::vector<double> lat) {
+  if (g_done) return;
   if (lat.size() == 33) {
     g_ab.clear(); g_do_switch = nullptr;
     std::vector<double> t(lat.begin() + 3, lat.end());
     std::sort(t.begin(), t.end());
-    Finish(t[14] <= 11.6, [NSString stringWithFormat:@"hybrid cdp median=%.1fms p90=%.1fms range=%.1f..%.1fms (30 timed after 3 warm-up) series:%@", (t[14] + t[15]) / 2, t[26], t.front(), t.back(), [NSString stringWithFormat:@"%.0f", lat.back()]]);
+    FinishLatency((t[14] + t[15]) / 2, t[26], t.front(), t.back(), [g_check isEqualToString:@"switch-latency-ab-hybrid"] ? @"strict A,B order, SetVisible" : @"fixed cycle order, SetVisible");
     return;
   }
-  const int k = lat.size() % 2;
+  const bool ab = [g_check isEqualToString:@"switch-latency-ab-hybrid"];
+  const int k = ab ? lat.size() % 2 : lat.size() % 19;
   auto b = g_ab[k];
   double t0 = NowMs();
   g_do_switch(k);
@@ -563,7 +595,7 @@ static void HybridCdpStep(std::vector<double> lat) {
 }
 
 static void RunTabsCheck() {
-  const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"] || [g_check isEqualToString:@"switch-latency-ab-hybrid"];  // the other 19 views already exist, Alloy style
+  const bool hybrid = [g_check isEqualToString:@"rss-20-hybrid"] || [g_check hasPrefix:@"switch-latency"] && [g_check hasSuffix:@"-hybrid"];  // the other 19 views already exist, Alloy style
   const bool few = [@[ @"ext-create", @"ext-activate", @"blank-link", @"per-tab-client", @"close-last" ] containsObject:g_check];
   const bool many = !few;
   int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
@@ -700,6 +732,18 @@ static void RunTabsCheck() {
           Finish(changed && isTab7 && cbTab7, [NSString stringWithFormat:@"OnActiveTabChanged=%d GetActiveTab is tab 7=%d callback active is tab 7=%d", g_active_changed, (int)isTab7, (int)cbTab7]);
         });
       });
+    } else if ([g_check isEqualToString:@"switch-latency-hybrid"]) {
+      if (!loaded || g_alloy.size() != 19) { Finish(false, @"hybrid views did not all load"); return; }
+      // Same shape as switch-latency: the Chrome-style view plays tab 0 (showing), the 19 Alloy views the other 19 tabs.
+      for (auto& v : g_alloy) v->SetVisible(false);
+      g_hybrid_visible = -1;
+      for (auto& v : g_alloy) g_ab.push_back(v->GetBrowser());
+      g_do_switch = [](int k) {
+        if (g_hybrid_visible < 0) g_view->SetVisible(false); else g_alloy[g_hybrid_visible]->SetVisible(false);
+        g_alloy[k]->SetVisible(true);
+        g_hybrid_visible = k;
+      };
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ HybridCdpStep({}); });
     } else if ([g_check isEqualToString:@"switch-latency-ab-hybrid"]) {
       if (!loaded || g_alloy.size() != 19) { Finish(false, @"hybrid views did not all load"); return; }
       g_view->SetVisible(false);
@@ -841,7 +885,7 @@ class WinDelegate : public CefWindowDelegate {
     });
   }
   g_view = CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate());
-  if ([g_check isEqualToString:@"rss-20-hybrid"] || [g_check isEqualToString:@"switch-latency-ab-hybrid"])  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
+  if ([g_check isEqualToString:@"rss-20-hybrid"] || ([g_check hasPrefix:@"switch-latency"] && [g_check hasSuffix:@"-hybrid"]))  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
     for (int i = 1; i < 20; i++)
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
@@ -862,7 +906,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
