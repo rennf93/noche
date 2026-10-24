@@ -12,6 +12,7 @@ smoke-closed-port rc=2
 check-sandbox rc=0
 test-store-rule rc=0
 (smoke closed-port expects 2, every other line expects 0)
+Re-run after the probe fix bbc9775, at beb4ec4: engine-test rc=0, test-fetch-cef rc=0, test-store-rule rc=0, swift-test rc=0 (Executed 5 tests, with 0 failures), build-app rc=0, smoke-fixture rc=0, smoke-closed-port rc=2, check-sandbox rc=0 (sandbox check ok).
 
 ## Probe launches on the clean profile (probe at bbc9775: store checks use their own root 'Noche Probe Store'), NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1, 4 launches (cap 4) plus the controller's clean rss-20 run. Not run: tabs-bare*, raf-*, *-hybrid (U10 diagnostics), store-* (B4 experiments). Frontmost name 'owner app' is whatever the owner had in front; never the probe.
 
