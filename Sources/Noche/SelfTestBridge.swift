@@ -151,5 +151,23 @@ extension SelfTest {
         let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
         finish(violations.isEmpty && zombies.isEmpty && rowCount == 1 && created == 1 && ended == created, "DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows \(rowCount) DevTools created=\(created) ended=\(ended) \(violations) \(zombies)")
     }
+
+    /// 100 loaded tabs in 2 windows plus one DevTools, closed one at a time 100 ms apart (so the quit outlasts a fixed 5 s watchdog
+    /// while every step is quick), then Quit: the verdict is the clean exit itself (beforeExit).
+    func quit100() async {
+        setenv("NOCHE_TEST_SLOW_CLOSE_MS", "100", 1)
+        guard await ready(), let first = win else { return }
+        for _ in 1..<60 { _ = first.addTab(withURL: fixture(""), activate: false) }
+        guard await until(30, { first.tabs.count == 60 && added == 60 }) else { return finish(false, "first window tabs=\(first.tabs.count) added=\(added), wanted 60") }
+        let second = app.newWindow(url: fixture(""))
+        guard await until(20, { second.tabs.count == 1 }) else { return finish(false, "second window has \(second.tabs.count) tabs") }
+        for _ in 1..<40 { _ = second.addTab(withURL: fixture(""), activate: false) }
+        guard await until(30, { second.tabs.count == 40 && added == 100 }) else { return finish(false, "second window tabs=\(second.tabs.count) added=\(added), wanted 40 and 100") }
+        _ = await until(20, { loads >= 100 })  // info only
+        guard await openDevTools(first) else { return finish(false, "Opt+Cmd+I opened no DevTools (created \(NCWindow.devToolsCreated()) loaded \(NCWindow.devToolsLoaded()))") }
+        tabsAtQuit = first.tabs.count + second.tabs.count
+        line("info", "tabs=\(tabsAtQuit) loaded=\(loads) devtools=\(NCWindow.devToolsCreated()), sending the Quit menu action")
+        quitViaMenu()
+    }
 }
 #endif

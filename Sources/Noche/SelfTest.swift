@@ -14,6 +14,9 @@ final class SelfTest {
     /// It starts 300 pt in because macOS Stage Manager keeps windows out of its strip at the screen's left edge (see windowFrame()).
     static let windowFrame = NSRect(x: 300, y: 4, width: 2200, height: 1436)
 
+    /// The app's own time limit for a check, in seconds (scripts/app-test.sh allows 20 s more before it kills the app).
+    static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
+
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
         var url = "about:blank"
@@ -64,6 +67,12 @@ final class SelfTest {
             line(ok ? "pass" : "fail", "2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
+        if check == "quit-100", !verdictPrinted {
+            let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
+            let ok = tabsAtQuit == 100 && closedTabs == 100 && windowsClosed == 2 && created == 1 && ended == created && !watchdogFired && violations.isEmpty && zombies.isEmpty
+            line(ok ? "pass" : "fail", "100 tabs in 2 windows and one DevTools, closed 100 ms apart, quit menu action, clean exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) devtools created=\(created) ended=\(ended) watchdog=\(watchdogFired) \(violations) \(zombies))")
+            if !ok { app.exitCodeOverride = 1 }
+        }
         if check == "devtools-quit" || check == "devtools-any-path", !verdictPrinted {
             let devTools = app.windows.reduce(0) { $0 + Int($1.devToolsCount) }
             // Before NCEngine.shutdown: every DevTools browser must already have had its OnBeforeClose.
@@ -82,14 +91,16 @@ final class SelfTest {
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in
-            MainActor.assumeIsolated { self?.finish(false, "timeout (40 s); look at screen lock and CPU load before suspecting the code") }
+        let limit = SelfTest.limit(of: check)
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) { [weak self] in
+            MainActor.assumeIsolated { self?.finish(false, "timeout (\(Int(limit)) s); look at screen lock and CPU load before suspecting the code") }
         }
         Task { @MainActor in
             switch check {
             case "hidden": await hidden()
             case "close-last": await closeLast()
             case "quit-many": await quitMany()
+            case "quit-100": await quit100()
             case "web-insets": await webInsets()
             case "layout": await layout()
             case "tabs-keys": await tabsKeys()

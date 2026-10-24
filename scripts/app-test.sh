@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (window-frame no-window close-beforeunload hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (quit-100 window-frame no-window close-beforeunload hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
 # Controls the app cannot give itself: new Noche*.ips crash reports (diffed per launch after a 3 s settle), the frontmost
 # app (lsappinfo every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s). The app's own limit is
-# 40 s; this script kills the one app PID (TERM, then KILL) 20 s after that.
+# 40 s (90 s for quit-100); this script kills the one app PID (TERM, then KILL) 20 s after that.
 # A hidden window gets no frames while the screen is locked: a timeout with a locked screen or a loaded CPU is not
 # necessarily a code fault (ioreg -n Root -d1 | grep CGSSessionScreenIsLocked).
 set -euo pipefail
@@ -82,7 +82,8 @@ for CHECK in "$@"; do
   : > "$OUTF"; : > "$ERRF"
   rm -rf "$PROFILE"
   REPORTS_BEFORE="$(crash_reports)"
-  LIMIT=$((40 + ${NOCHE_TEST_SLACK:-20}))
+  BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit
+  LIMIT=$((BASE + ${NOCHE_TEST_SLACK:-20}))
   # The throttling switches keep timers and renderers running in a window nobody sees.
   (cd / && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" \
       --load-extension="$ROOT/Probes/fixtures/probe-extension" \

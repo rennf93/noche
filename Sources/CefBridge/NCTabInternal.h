@@ -19,6 +19,11 @@ inline bool NCTestFlag(const char* name) {
   return v && v[0] == '1';
 }
 #define NC_TEST_FLAG(name) NCTestFlag(name)
+/// An integer switch (milliseconds, counts); 0 when unset.
+inline int NCTestInt(const char* name) {
+  const char* v = getenv(name);
+  return v ? atoi(v) : 0;
+}
 #else
 #define NC_CEF_CALLBACK ((void)0)
 #define NC_TEST_FLAG(name) false

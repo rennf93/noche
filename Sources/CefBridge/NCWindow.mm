@@ -312,6 +312,20 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (void)closeWindowNow {
   if (!_window || _windowClosing) return;
   _windowClosing = YES;
+#ifdef NOCHE_TESTHOOKS
+  // Test only: close the tabs one at a time, |ms| apart, so a quit takes long while every step is quick (the app's quit
+  // watchdog must measure progress, not the total).
+  if (const int ms = NCTestInt("NOCHE_TEST_SLOW_CLOSE_MS")) {
+    NSArray<NCTab*>* all = _table.allValues;
+    for (NSUInteger k = 0; k < all.count; k++) {
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(k * ms * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{ [all[k] close]; });
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((all.count + 1) * ms * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+      if (self->_window) self->_window->Close();
+    });
+    return;
+  }
+#endif
   _window->Close();
 }
 

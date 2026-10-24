@@ -151,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func tabClosed(_ tab: NCTab) {
+        closeProgressed()
 #if NOCHE_TESTHOOKS
         selfTest?.didCloseTab(tab)
 #endif
@@ -179,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func controllerClosed(_ controller: BrowserWindowController) {
         controllers.removeAll { $0 === controller }
+        closeProgressed()
 #if NOCHE_TESTHOOKS
         selfTest?.windowDidClose()
 #endif
@@ -207,29 +209,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 #endif
 
-    /// Seconds to wait for every window to close after the shutdown request before exiting anyway.
-    private static let shutdownWatchdog: TimeInterval = 5
+    /// Seconds without progress (a tab or a window closing) before the quit gives up and exits anyway, and the overall cap:
+    /// a base plus a share per tab that was open when the quit started.
+    private static let stallLimit: TimeInterval = 5
+    private static let capBase: TimeInterval = 10, capPerTab: TimeInterval = 0.5
 
     private var closing = false
     private var exiting = false
     private var watchdogFired = false
+    private var watchdogGeneration = 0
+    private var shutdownCap: TimeInterval = 0   // uptime at which the overall cap ends
+    private var shutdownTabs = 0
+
     private func beginShutdown() {
         guard !closing else { return }
         closing = true
         finished = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.shutdownWatchdog) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, !self.exiting else { return }
-                FileHandle.standardError.write(Data("NOCHE shutdown watchdog: browser did not close\n".utf8))
-                self.watchdogFired = true
-                self.exitNow()
-            }
-        }
+        shutdownTabs = windows.reduce(0) { $0 + $1.tabs.count }
+        shutdownCap = ProcessInfo.processInfo.systemUptime + Self.capBase + Self.capPerTab * Double(shutdownTabs)
+        armWatchdog()
 #if NOCHE_TESTHOOKS
         // Test-only: never ask CEF to close, so the watchdog path above is the only way out.
         if ProcessInfo.processInfo.environment["NOCHE_TEST_SKIP_CLOSE"] == "1" { return }
 #endif
         if windows.isEmpty { exitNow() } else { windows.forEach { $0.close() } }
+    }
+
+    /// (Re)starts the stall timer; the overall cap bounds it. A closing tab or window calls this again, so only a quit that
+    /// stops making progress, or one that outlasts the cap, ends with the engine shut down under live browsers.
+    private func armWatchdog() {
+        watchdogGeneration += 1
+        let generation = watchdogGeneration
+        let wait = min(Self.stallLimit, max(0, shutdownCap - ProcessInfo.processInfo.systemUptime))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.exiting, generation == self.watchdogGeneration else { return }
+                let capped = ProcessInfo.processInfo.systemUptime >= self.shutdownCap
+                let tabs = self.windows.reduce(0) { $0 + $1.tabs.count }
+                FileHandle.standardError.write(Data("NOCHE shutdown watchdog: browser did not close (\(capped ? "overall cap reached" : "no progress for \(Int(Self.stallLimit)) s"), \(self.windows.count) windows and \(tabs) of \(self.shutdownTabs) tabs left)\n".utf8))
+                self.watchdogFired = true
+                self.exitNow()
+            }
+        }
+    }
+
+    private func closeProgressed() {
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_FIXED_WATCHDOG"] == "1" { return }  // negative control: the old fixed timer
+#endif
+        if closing && !exiting { armWatchdog() }
     }
 
     private func exitNow() {
