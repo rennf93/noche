@@ -86,6 +86,14 @@ enum Schema {
                 try ensureBookmarkRoots(db, profileId: id, at: Date().timeIntervalSince1970)
             }
         }
+        m.registerMigration("v4") { db in
+            try db.execute(sql: """
+            ALTER TABLE profile ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE profile ADD COLUMN shareWithProfileId TEXT REFERENCES profile(id);
+            """)
+            let ids = try String.fetchAll(db, sql: "SELECT id FROM profile WHERE deletedAt IS NULL ORDER BY createdAt, rowid")
+            for (i, id) in ids.enumerated() { try db.execute(sql: "UPDATE profile SET position = ? WHERE id = ?", arguments: [i, id]) }
+        }
         return m
     }
 
