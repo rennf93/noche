@@ -55,7 +55,7 @@ extension Store {
         }
     }
 
-    private static func escapeLike(_ s: String) -> String {
+    static func escapeLike(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
     }
 
