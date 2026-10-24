@@ -15,8 +15,13 @@ int main(int argc, char** argv) {
   if (argc != 3) return 2;
   std::ifstream in(argv[1]);
   std::string line, before, after;
+  // A failed Target.getTargets must fail the rule on its own, whatever the windows say.
+  InstallFacts unchecked;
+  unchecked.dialogSeen = true;
+  unchecked.staleTabTargets = -1;
+  if (InstallNoWindowOk(unchecked, nullptr)) { std::cout << "RULE BUG unanswered Target.getTargets passed\n"; return 1; }
   InstallFacts f;
-  f.staleTabTargets = -1;
+  f.staleTabTargets = 0;  // the recorded runs predate the target query; the replay checks the window rule
   bool dialog = false;
   while (std::getline(in, line)) {
     if (line.find("info windows before:") != std::string::npos) before = line;

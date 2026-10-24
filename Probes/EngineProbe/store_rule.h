@@ -21,6 +21,8 @@ inline bool InstallNoWindowOk(const InstallFacts& f, std::string* why) {
     w += "browser-window before=" + std::to_string(f.browserWindowsBefore) + " after=" + std::to_string(f.browserWindowsAfter) + " (want 0 and 0); ";
   if (f.browserWindowOrders != 0) w += "guard saw " + std::to_string(f.browserWindowOrders) + " order-in/makeKey on a browser window (want 0); ";
   if (f.staleTabTargets > 0) w += "new-tab/apps targets=" + std::to_string(f.staleTabTargets) + " (want 0); ";
+  // An unanswered Target.getTargets means the no-New-Tab rule was not checked, which must not read as a pass.
+  if (f.staleTabTargets < 0) w += "Target.getTargets failed, new-tab rule unchecked; ";
   if (!f.dialogSeen) w += "post-install dialog window never appeared (UI path skipped); ";
   if (!f.sameTabs) w += "tab count changed; ";
   if (why) *why = w;
