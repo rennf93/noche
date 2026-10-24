@@ -22,3 +22,5 @@ struct StoreHost {
 // True if |check| is a store check (it then owns the run and ends it through host.finish).
 bool RunStoreCheck(NSString* check, const StoreHost& host);
 bool IsStoreCheck(NSString* check);
+// Store checks get their own CEF root, so the extensions they install never reach the other checks' profile.
+NSString* StoreCachePath();

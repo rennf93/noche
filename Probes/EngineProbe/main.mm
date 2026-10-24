@@ -468,19 +468,34 @@ static double TreeRssMB(int* procs, std::vector<Proc>* tree) {
   return kb * 1024.0 / 1e6;
 }
 
-// Top 10 processes by RSS with their type from the command line (renderer, gpu-process, utility, ...).
+// Process type from the command line (renderer, gpu-process, utility:<sub-type>, ...); non-Chromium children show their command.
+static std::string ProcType(const Proc& p) {
+  std::string cmd = p.cmd.substr(0, p.cmd.find_last_not_of("\n") + 1);
+  if (cmd.find("Noche Probe") == std::string::npos) return cmd.substr(0, 60);
+  std::string type = "browser";
+  size_t t = cmd.find("--type=");
+  if (t != std::string::npos) type = cmd.substr(t + 7, cmd.find(' ', t) - t - 7);
+  size_t u = cmd.find("--utility-sub-type=");
+  if (u != std::string::npos) type += ":" + cmd.substr(u + 19, cmd.find(' ', u) - u - 19);
+  if (cmd.find("--extension-process") != std::string::npos) type += "+extension";
+  return type;
+}
+
+// Top 10 processes by RSS with their type.
 static void PrintTop10(const char* label, std::vector<Proc> tree) {
   std::sort(tree.begin(), tree.end(), [](const Proc& a, const Proc& b) { return a.kb > b.kb; });
-  for (size_t i = 0; i < tree.size() && i < 10; i++) {
-    std::string type = "browser";
-    size_t t = tree[i].cmd.find("--type=");
-    if (t != std::string::npos) type = tree[i].cmd.substr(t + 7, tree[i].cmd.find(' ', t) - t - 7);
-    size_t u = tree[i].cmd.find("--utility-sub-type=");
-    if (u != std::string::npos) type += ":" + tree[i].cmd.substr(u + 19, tree[i].cmd.find(' ', u) - u - 19);
-    if (tree[i].cmd.find("--extension-process") != std::string::npos) type += "+extension";
-    printf("PROBE %s info %s rank=%zu pid=%d rss=%.1fMB type=%s\n", g_check.UTF8String, label, i + 1, tree[i].pid, tree[i].kb * 1024.0 / 1e6, type.c_str());
-  }
+  for (size_t i = 0; i < tree.size() && i < 10; i++)
+    printf("PROBE %s info %s rank=%zu pid=%d rss=%.1fMB type=%s\n", g_check.UTF8String, label, i + 1, tree[i].pid, tree[i].kb * 1024.0 / 1e6, ProcType(tree[i]).c_str());
   fflush(stdout);
+}
+
+// Processes in |a| whose pid is not in |b|, as "pid type" items.
+static NSString* Missing(const std::vector<Proc>& a, const std::vector<Proc>& b) {
+  NSMutableArray* out = [NSMutableArray array];
+  for (const Proc& p : a)
+    if (std::none_of(b.begin(), b.end(), [&](const Proc& q) { return q.pid == p.pid; }))
+      [out addObject:[NSString stringWithFormat:@"%d %s", p.pid, ProcType(p).c_str()]];
+  return out.count ? [out componentsJoinedByString:@", "] : @"none";
 }
 
 #ifdef NOCHE_TABS_API
@@ -852,13 +867,16 @@ static void RunTabsCheck() {
     } else {  // rss-20 and rss-20-hybrid
       if (!loaded) { Finish(false, [NSString stringWithFormat:@"only %d of %d tabs loaded", (int)g_loaded_ids.size(), total]); return; }
       int p1 = 0;
-      double r1 = TreeRssMB(&p1, nullptr);
+      std::vector<Proc> tree1;
+      double r1 = TreeRssMB(&p1, &tree1);
       Log(@"RSS sample 1: %.1f MB, %d processes, %d loaded of %d", r1, p1, (int)g_loaded_ids.size(), total);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         int p2 = 0;
         std::vector<Proc> tree;
         double r2 = TreeRssMB(&p2, &tree);
         PrintTop10("sample2", tree);
+        printf("PROBE %s info processes gone after sample 1: %s; new at sample 2: %s\n", g_check.UTF8String, Missing(tree1, tree).UTF8String, Missing(tree, tree1).UTF8String);
+        fflush(stdout);
         if (p2 < p1 - 1) { Finish(false, [NSString stringWithFormat:@"a child process went away: %d processes at sample 1, %d at sample 2", p1, p2]); return; }
         Finish(std::max(r1, r2) <= 6400,  // M0 hybrid control under these flags measured 5364 to 5426 MB (rss-20-hybrid); plus 20 percent
                 [NSString stringWithFormat:@"rss=%.1f MB then %.1f MB (%d then %d processes, %d loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)", r1, r2, p1, p2, (int)g_loaded_ids.size()]);
@@ -953,12 +971,13 @@ class WinDelegate : public CefWindowDelegate {
   for (NSString* a in NSProcessInfo.processInfo.arguments)
     if ([a hasPrefix:@"--url="]) url = [a substringFromIndex:6];
   g_url = url;
-  NSString* cache = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"];
+  NSString* cache = IsStoreCheck(g_check) ? StoreCachePath() : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"];
   [NSFileManager.defaultManager createDirectoryAtPath:cache withIntermediateDirectories:YES attributes:nil error:nil];
   // The probe's own profile keeps the service worker script from the first run (a manifest version bump does not
   // replace it, seen as "service worker version: none"), so drop its registration before every start.
   [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default/Service Worker"] error:nil];
   // Store checks start from an empty profile so "Add to Chrome" is offered every run (the install persists in Default).
+  // An install left in the shared profile once added uBlock Origin Lite's processes to rss-20 (m05-probe-run.txt).
   if (IsStoreCheck(g_check)) [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default"] error:nil];
   NSError* err = nil;
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }

@@ -14,6 +14,9 @@
 bool IsStoreCheck(NSString* check) {
   return [@[ @"store-stock", @"store-ua", @"store-brand", @"store-ua-brand", @"install-no-window" ] containsObject:check];
 }
+NSString* StoreCachePath() {
+  return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe Store"];
+}
 
 namespace {
 
@@ -204,7 +207,7 @@ void AcceptSheet(H h, int method, std::function<void()> done) {
 }
 
 NSString* ExtensionsDir() {
-  return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe/Default/Extensions"];
+  return [StoreCachePath() stringByAppendingPathComponent:@"Default/Extensions"];
 }
 NSString* InstalledId() {
   for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:ExtensionsDir() error:nil])
