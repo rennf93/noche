@@ -22,15 +22,19 @@ public enum SuggestionRanker {
             }
             .filter { seen.insert($0.0.url).inserted }
 
-        let tabRows = tabs.filter { $0.id != activeTabID && $0.url != "about:blank"
+        // A history page for an open (non-active) tab's URL carries that tab's id and replaces the tab row.
+        let others = tabs.filter { $0.id != activeTabID && $0.url != "about:blank" }
+        var tabByURL: [String: TabID] = [:]
+        for t in others where tabByURL[t.url] == nil { tabByURL[t.url] = t.id }
+        let matchedURLs = Set(matches.map(\.0.url))
+        let tabRows = others.filter { !matchedURLs.contains($0.url)
             && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
             .map { Suggestion(kind: .tab, title: "\($0.title) - \(AddressInput.displayHost($0.url))", url: $0.url, tabID: $0.id, frecency: 0) }
 
-        let shownTabURLs = Set(tabRows.prefix(2).compactMap(\.url))
         var head: [Suggestion] = []
         var topURL: String?
-        if tokens.count == 1, let top = matches.first(where: { !shownTabURLs.contains($0.0.url) && urlDisplay($0.0.url).lowercased().hasPrefix(q) }) {
-            head.append(pageRow(top.0, top.1))
+        if tokens.count == 1, let top = matches.first(where: { urlDisplay($0.0.url).lowercased().hasPrefix(q) }) {
+            head.append(pageRow(top.0, top.1, tabByURL[top.0.url]))
             topURL = top.0.url
         } else if let url = AddressInput.resolve(typed, searchTemplate: probeTemplate), url.scheme != "noche-probe" {
             head.append(Suggestion(kind: .goTo, title: urlDisplay(url.absoluteString), url: url.absoluteString, tabID: nil, frecency: 0))
@@ -55,7 +59,10 @@ public enum SuggestionRanker {
             .filter { !listed.contains("https://\($0)") }
             .map { Suggestion(kind: .site, title: "\($0) - \($0)", url: "https://\($0)", tabID: nil, frecency: hostScore[$0] ?? 0) }
 
-        let pageRows = matches.filter { $0.0.url != topURL && !shownTabURLs.contains($0.0.url) }.map { pageRow($0.0, $0.1) }
+        // Pages that stand in for an open tab come first so the caps keep them.
+        let rest = matches.filter { $0.0.url != topURL }
+        let pageRows = (rest.filter { tabByURL[$0.0.url] != nil } + rest.filter { tabByURL[$0.0.url] == nil })
+            .map { pageRow($0.0, $0.1, tabByURL[$0.0.url]) }
 
         // One slot stays for a history page, so sites shrink first, then tabs.
         let slots = maxRows - head.count
@@ -69,8 +76,8 @@ public enum SuggestionRanker {
     /// Never a real URL, so a resolve that does not search is told apart by its scheme.
     private static let probeTemplate = "noche-probe://q/?q=%s"
 
-    private static func pageRow(_ p: PageCandidate, _ f: Double) -> Suggestion {
-        Suggestion(kind: .page, title: "\(p.title.isEmpty ? p.host : p.title) - \(urlDisplay(p.url))", url: p.url, tabID: nil, frecency: f)
+    private static func pageRow(_ p: PageCandidate, _ f: Double, _ tab: TabID?) -> Suggestion {
+        Suggestion(kind: .page, title: "\(p.title.isEmpty ? p.host : p.title) - \(urlDisplay(p.url))", url: p.url, tabID: tab, frecency: f)
     }
 
     /// Age weights are builder numbers: 1.0 up to 4 days, 0.7 (14), 0.5 (31), 0.3 (90), 0.1 older; typed visits count double.

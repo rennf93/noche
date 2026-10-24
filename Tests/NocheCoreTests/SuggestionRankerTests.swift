@@ -95,7 +95,25 @@ final class SuggestionRankerTests: XCTestCase {
     func testOpenTabHidesSameUrlHistoryPage() {
         let a = tab("https://alpha.org/x", "Alpha")
         let rows = rank("alp", pages: [page("https://alpha.org/x", host: "alpha.org", title: "Alpha"), page("https://alpha.org/y", host: "alpha.org", title: "Alpha y")], tabs: [a])
-        XCTAssertEqual(rows.filter { $0.url == "https://alpha.org/x" }.map(\.kind), [.tab])
+        XCTAssertEqual(rows.filter { $0.url == "https://alpha.org/x" }.count, 1)
+    }
+
+    func testPageForOpenTabIsTopHitWithInlineAndSwitches() {
+        let a = tab("https://alpha.org/x", "Alpha"), b = tab("https://alpine.org", "Alp two")
+        let rows = rank("alp", pages: [page("https://alpha.org/x", host: "alpha.org", title: "Alpha")], tabs: [a, b])
+        XCTAssertEqual(rows[0].kind, .page)
+        XCTAssertEqual(rows[0].tabID, a.id)
+        XCTAssertEqual(rows.filter { $0.url == "https://alpha.org/x" }.count, 1)
+        XCTAssertEqual(rows.filter { $0.kind == .tab }.map(\.tabID), [b.id], "the tab slot goes to the next tab")
+        XCTAssertEqual(InlineAutocomplete.completion(typed: "alp", topHit: rows[0], justDeleted: false)?.text, "alpha.org/x")
+        XCTAssertEqual(CommandRouter.route(rows[0], typed: "alp", searchTemplate: AddressInput.defaultSearchTemplate), .switchTo(a.id))
+    }
+
+    func testActiveTabUrlStaysOrdinaryPage() {
+        let a = tab("https://alpha.org/x", "Alpha")
+        let rows = rank("alp", pages: [page("https://alpha.org/x", host: "alpha.org", title: "Alpha")], tabs: [a], active: a.id)
+        XCTAssertNil(rows[0].tabID)
+        XCTAssertEqual(CommandRouter.route(rows[0], typed: "alp", searchTemplate: AddressInput.defaultSearchTemplate), .navigate(URL(string: "https://alpha.org/x")!))
     }
 
     func testTabsExcludeActiveAndBlank() {
