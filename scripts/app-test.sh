@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch quit-close-dirty-relaunch window-close-cancel reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
@@ -28,7 +28,7 @@ if [ "${1:-}" = "--negative" ]; then
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
   SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
   # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
-  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;tab-chords NOCHE_TEST_NO_LIST_ORDER=1 expect-fail;move-tab-relaunch NOCHE_TEST_NO_MOVE=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;quit-close-dirty-relaunch NOCHE_TEST_NO_QUIT_CLEAR=1 expect-fail;window-close-cancel NOCHE_TEST_STICKY_CLOSING=1 expect-fail;tab-chords NOCHE_TEST_NO_LIST_ORDER=1 expect-fail;move-tab-relaunch NOCHE_TEST_NO_MOVE=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
   IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
@@ -117,7 +117,7 @@ for CHECK in "$@"; do
       mkdir -p "$PROFILE/Store"; sqlite3 "$PROFILE/Store/noche.sqlite" "CREATE TABLE sentinel(a); INSERT INTO sentinel VALUES ('kept')"
       SENTINEL="$(shasum "$PROFILE/Store/noche.sqlite")"; LISTING="$(ls -a "$PROFILE/Store")"; chmod 555 "$PROFILE/Store"
     fi
-    EXTRA=(); [ "$CHECK" != quit-close-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
+    EXTRA=(); [ "$CHECK" != quit-close-relaunch ] && [ "$CHECK" != quit-close-dirty-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
     SELFKILL=0; [ "$CHECK" != crash-mid-write ] || [ "$PHASE" != 1 ] || SELFKILL=1
     REPORTS_BEFORE="$(crash_reports)"
     BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit

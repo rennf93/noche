@@ -149,13 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// File > Reopen Closed Tab: the newest closed tab goes back to its window at its index (clamped), else the front window, appended.
     @objc func reopenClosedTab(_ s: Any?) {
-        guard !closing, let closed = writer?.popClosed() else { return }
+        guard !closing, let closed = writer?.peekClosed() else { return }
+        // The tab stays on the closed list until it is back in a window: a crash in between loses nothing.
         if let c = controllers.first(where: { $0.id == closed.windowID }) ?? active {
-            // The pop came first (the store has no peek): a tab the engine could not add goes back on the list.
-            if !c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max) { writer?.putBack(closed) }
+            if c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max) { writer?.reopened(closed.tab.id) }
         } else {
             let url = closed.tab.url
             newWindow(url: url, id: closed.windowID, restore: .init(tabs: [(closed.tab.id, url)], selected: closed.tab.id, sidebarHidden: false, fullScreen: false, lastActive: [:]))
+            writer?.reopened(closed.tab.id)
         }
     }
 

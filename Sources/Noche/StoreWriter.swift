@@ -49,6 +49,12 @@ final class StoreWriter {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.polling = false
+#if NOCHE_TESTHOOKS
+                let noFix = ProcessInfo.processInfo.environment["NOCHE_TEST_NO_QUIT_CLEAR"] == "1"  // negative control: the old poll
+#else
+                let noFix = false
+#endif
+                guard !self.frozen || noFix else { return }
                 guard !(self.dirty.isEmpty && self.geometry.isEmpty) else { return }
                 if self.debouncer.due() {
                     self.save(self.dirty, async: true)
@@ -93,6 +99,12 @@ final class StoreWriter {
         guard !frozen else { return }
         let close = ((try? store.setting("quitBehavior")) ?? nil) == "close"
         if close {
+            // A pending debounced save would write the window again (deletedAt NULL) and bring its tabs back.
+#if NOCHE_TESTHOOKS
+            if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_QUIT_CLEAR"] != "1" { dirty.removeAll(); geometry.removeAll() }
+#else
+            dirty.removeAll(); geometry.removeAll()
+#endif
             for id in windowIDs() { attempt("remove window") { try store.removeWindow(id) } }
         } else {
             flush()
@@ -117,13 +129,16 @@ final class StoreWriter {
         attempt("remove window") { try store.removeWindow(id) }
     }
 
-    func popClosed() -> ClosedTab? {
+    /// The newest closed tab, still on the list (see `Store.peekLastClosed`); `reopened` takes it off once it is back in a window.
+    func peekClosed() -> ClosedTab? {
         var tab: ClosedTab?
-        attempt("pop closed tab") { tab = try store.popLastClosed() }
+        attempt("peek closed tab") { tab = try store.peekLastClosed() }
         return tab
     }
 
-    /// A reopen that could not add its tab: the tab goes back on the closed list.
+    func reopened(_ id: TabID) { attempt("clear closed tab") { try store.clearClosed(id) } }
+
+    /// Puts a popped closed tab back on the list (kept for callers that pop).
     func putBack(_ closed: ClosedTab) {
         attempt("restore closed tab") { try store.recordClosed(closed.tab, windowID: closed.windowID, index: closed.index) }
     }

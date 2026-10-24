@@ -373,4 +373,84 @@ final class StoreTests: XCTestCase {
         XCTAssertFalse(w.isZoomed)
         try store.saveFrame(UUID(), frame: .zero, isFullScreen: false, isZoomed: false)  // an unsaved window is left alone
     }
+
+    // M1.2 final fixes
+
+    func testPeekLeavesTheTabClosedUntilItIsSaved() throws {
+        let store = try makeStore()
+        let tabs = (0..<2).map { tab("https://e\($0).com") }
+        let snap = snapshot(tabs)
+        try store.save(snap)
+        try store.recordClosed(tabs[1], windowID: snap.id, index: 1)
+        let before = try store.db.read { try Row.fetchAll($0, sql: "SELECT * FROM tab WHERE id = ?", arguments: [tabs[1].id.raw.uuidString]) }
+        XCTAssertEqual(try store.peekLastClosed()?.tab.id, tabs[1].id)
+        XCTAssertEqual(try store.db.read { try Row.fetchAll($0, sql: "SELECT * FROM tab WHERE id = ?", arguments: [tabs[1].id.raw.uuidString]) }, before, "peek changed the row")
+        // A crash here (no save, no clear): the tab is still on the closed list and in no window.
+        XCTAssertTrue(try store.hasClosedTabs())
+        XCTAssertEqual(try store.loadWindows().first?.tabs.count, 1)
+        XCTAssertEqual(try store.peekLastClosed()?.tab.id, tabs[1].id)
+        try store.clearClosed(tabs[1].id)
+        XCTAssertFalse(try store.hasClosedTabs())
+    }
+
+    func testSavingTheWindowWithThePeekedTabClearsItFromTheClosedList() throws {
+        let store = try makeStore()
+        let tabs = (0..<2).map { tab("https://e\($0).com") }
+        let snap = snapshot(tabs)
+        try store.save(snap)
+        try store.recordClosed(tabs[1], windowID: snap.id, index: 1)
+        _ = try store.peekLastClosed()
+        try store.save(snap)   // the reopened tab is in the window again
+        XCTAssertFalse(try store.hasClosedTabs())
+        XCTAssertEqual(try store.loadWindows().first?.tabs.count, 2)
+    }
+
+    func testLoadWindowsFiltersByProfile() throws {
+        let store = try makeStore()
+        let snap = snapshot([tab("https://a.com")])
+        try store.save(snap)
+        let other = "00000000-0000-0000-0000-0000000000AA", otherWindow = UUID().uuidString
+        try store.db.write { db in
+            try db.execute(sql: "INSERT INTO profile (id, name, chromiumDirName, isDefault, createdAt, updatedAt) VALUES (?, 'Work', 'Profile 1', 0, 1, 1)", arguments: [other])
+            try db.execute(sql: "INSERT INTO window (id, profileId, zOrder, createdAt, updatedAt) VALUES (?, ?, 0, 1, 1)", arguments: [otherWindow, other])
+            try db.execute(sql: "INSERT INTO tab (id, windowId, url, position, lastActiveAt, createdAt, updatedAt) VALUES (?, ?, 'https://work.com', 0, 1, 1, 1)", arguments: [UUID().uuidString, otherWindow])
+        }
+        XCTAssertEqual(try store.loadWindows().map(\.id), [snap.id])
+        XCTAssertEqual(try store.loadWindows(profileId: nil).count, 1)
+        let work = try store.loadWindows(profileId: other)
+        XCTAssertEqual(work.map { $0.id.uuidString }, [otherWindow])
+        XCTAssertEqual(work.first?.tabs.map(\.url), ["https://work.com"])
+    }
+
+    /// A store written by the v1 schema (before M1.2) restores through the full migrator.
+    func testStoreMigratedOnlyToV1RestoresAfterTheFullMigration() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("v1-restore-\(UUID().uuidString).sqlite")
+        defer { for e in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + e) } }
+        let pool = try DatabasePool(path: file.path)
+        try Schema.migrator.migrate(pool, upTo: "v1")
+        let win = UUID(), ids = (0..<3).map { _ in UUID() }, closed = UUID()
+        try pool.write { db in
+            try db.execute(sql: "INSERT INTO profile (id, name, chromiumDirName, isDefault, createdAt, updatedAt) VALUES (?, 'Default', 'Default', 1, 1, 1)", arguments: [Schema.defaultProfileID])
+            try db.execute(sql: "INSERT INTO window (id, profileId, x, y, w, h, selectedTabId, zOrder, createdAt, updatedAt) VALUES (?, ?, 10, 20, 800, 600, ?, 0, 1, 1)",
+                           arguments: [win.uuidString, Schema.defaultProfileID, ids[2].uuidString])
+            for (i, id) in ids.enumerated() {
+                try db.execute(sql: "INSERT INTO tab (id, windowId, url, title, position, lastActiveAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 5, 1, 1)",
+                               arguments: [id.uuidString, win.uuidString, "https://e\(i).com", "t\(i)", i])
+            }
+            try db.execute(sql: "INSERT INTO tab (id, windowId, url, title, position, lastActiveAt, closedAt, closedIndex, closedWindowId, createdAt, updatedAt) VALUES (?, ?, 'https://old.com', 'old', 3, 5, 9, 1, ?, 1, 1)",
+                           arguments: [closed.uuidString, win.uuidString, win.uuidString])
+        }
+        try pool.close()
+        let store = try Store.open(at: file)
+        try store.db.read { XCTAssertEqual(try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4"]) }
+        let w = try XCTUnwrap(store.loadWindows().first)
+        XCTAssertEqual(w.id, win)
+        XCTAssertEqual(w.tabs.map(\.url), ["https://e0.com", "https://e1.com", "https://e2.com"])
+        XCTAssertEqual(w.tabs.map(\.id.raw), ids)
+        XCTAssertEqual(w.selectedTabID?.raw, ids[2])
+        XCTAssertEqual(w.frame, CGRect(x: 10, y: 20, width: 800, height: 600))
+        XCTAssertEqual(try store.popLastClosed()?.tab.id.raw, closed)
+        try store.recordClosed(w.tabs[0], windowID: win, index: 0)
+        XCTAssertEqual(try store.popLastClosed()?.tab.id, w.tabs[0].id)
+    }
 }

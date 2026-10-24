@@ -514,6 +514,12 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 
     /// The page refused to close (beforeunload answered Stay): the tab stays, selected as it was.
     func window(_ window: NCWindow, didCancelCloseOf tab: NCTab) {
+        // A window close that a page refused is over: later Cmd+W closes are closed tabs again.
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_STICKY_CLOSING"] != "1" { windowClosing = false }  // negative control: the old sticky flag
+#else
+        windowClosing = false
+#endif
         closing[tab.identifier] = nil
         closeNext[tab.identifier] = nil
     }
@@ -569,6 +575,10 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         }
         return true
     }
+
+#if NOCHE_TESTHOOKS
+    func testBeginWindowClose() { windowClosing = true }  // what close() sets, without closing the window
+#endif
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()

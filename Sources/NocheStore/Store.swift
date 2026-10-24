@@ -148,9 +148,11 @@ public final class Store: Sendable {
         }
     }
 
-    public func loadWindows() throws -> [WindowSnapshot] {
-        try db.read { db in
-            try WindowRow.all().live().order(Column("zOrder"), Column("rowid")).fetchAll(db).compactMap { row in
+    /// The live windows of one profile (nil: the default profile, the only one the app writes until profiles are wired); their tabs come with them.
+    public func loadWindows(profileId: String? = nil) throws -> [WindowSnapshot] {
+        let profile = profileId ?? Schema.defaultProfileID
+        return try db.read { db in
+            try WindowRow.all().live().filter(Column("profileId") == profile).order(Column("zOrder"), Column("rowid")).fetchAll(db).compactMap { row in
                 guard let id = UUID(uuidString: row.id) else { return nil }
                 let tabRows = try TabRow.all().live()
                     .filter(Column("windowId") == row.id && Column("closedAt") == nil && Column("archivedAt") == nil)
@@ -211,22 +213,43 @@ public final class Store: Sendable {
         TabRow.all().live().filter(Column("closedAt") != nil).order(Column("closedAt").desc, Column("rowid").desc)
     }
 
-    /// Newest closed tab first. Returns the stored window id and index; clamping is the caller's job.
+    /// The newest closed tab, left on the closed list: a reopen that dies before the tab is saved in its window loses nothing.
+    /// Returns the stored window id and index; clamping is the caller's job. Malformed rows are tombstoned on the way.
+    public func peekLastClosed() throws -> ClosedTab? {
+        let t = now().timeIntervalSince1970
+        return try db.write { try Self.lastClosed($0, at: t) }
+    }
+
+    /// Takes the tab off the closed list (the reopened tab was added). A save of the window holding it does the same.
+    public func clearClosed(_ id: TabID) throws {
+        let t = now().timeIntervalSince1970
+        try db.write { db in
+            try db.execute(sql: "UPDATE tab SET closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = ? WHERE id = ? AND closedAt IS NOT NULL",
+                           arguments: [t, id.raw.uuidString])
+        }
+    }
+
+    /// Peek and clear in one transaction.
     public func popLastClosed() throws -> ClosedTab? {
         let t = now().timeIntervalSince1970
         return try db.write { db in
-            // A malformed row (bad id or window id) is tombstoned so it cannot block the older rows behind it.
-            while let r = try Self.closedRequest().fetchOne(db) {
-                guard let item = r.item, let closedAt = r.closedAt, let wid = r.closedWindowId.flatMap(UUID.init(uuidString:)) else {
-                    try db.execute(sql: "UPDATE tab SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [t, t, r.id])
-                    continue
-                }
-                try db.execute(sql: "UPDATE tab SET closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = ? WHERE id = ?",
-                               arguments: [t, r.id])
-                return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
-            }
-            return nil
+            guard let c = try Self.lastClosed(db, at: t) else { return nil }
+            try db.execute(sql: "UPDATE tab SET closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = ? WHERE id = ?",
+                           arguments: [t, c.tab.id.raw.uuidString])
+            return c
         }
+    }
+
+    private static func lastClosed(_ db: Database, at t: Double) throws -> ClosedTab? {
+        // A malformed row (bad id or window id) is tombstoned so it cannot block the older rows behind it.
+        while let r = try closedRequest().fetchOne(db) {
+            guard let item = r.item, let closedAt = r.closedAt, let wid = r.closedWindowId.flatMap(UUID.init(uuidString:)) else {
+                try db.execute(sql: "UPDATE tab SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [t, t, r.id])
+                continue
+            }
+            return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
+        }
+        return nil
     }
 
     public func hasClosedTabs() throws -> Bool {
