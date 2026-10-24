@@ -1,0 +1,73 @@
+# B2 probe run on the patched engine (2026-10-24)
+
+## Regression gate (exit codes)
+fetch-cef 0; build-cef-wrapper 0; engine/test.sh 0; scripts/test-fetch-cef.sh 0; swift test 0; scripts/build-app.sh 0; smoke fixture 0 (expect 0); smoke closed-port 2 (expect 2); check-sandbox 0 (expect 0)
+
+### engine/test.sh
+ok patch_after_interrupt
+ok build_needs_patch
+ok distrib_incomplete
+ok distrib_ok
+ok distrib_stale
+ok usage
+EXIT engine/test.sh => 0
+### scripts/test-fetch-cef.sh
+ok local_crlf_version
+ok local_path_change
+ok local_needs_source
+ok switch_back
+ok download_mismatch
+ok download_old_receipt
+EXIT scripts/test-fetch-cef.sh => 0
+--- rerun (swift test and the three scripts)
+EXIT swift test => 0
+􀟈  Test run started.
+􀄵  Testing Library Version: 2084
+􀄵  Target Platform: arm64e-apple-macos14.0
+􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.
+EXIT smoke fixture => 0
+NOCHE-HELPER pid=63762 sandbox-initialize=1
+[63305:12728401:1024/010404.642940:ERROR:base/process/kill_posix.cc:33] waitpid(63752): No child processes (10)
+NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
+scripts/smoke.sh: line 53: 63247 Terminated: 15          python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/Tests/fixtures" > /dev/null 2>&1
+EXIT smoke closed-port => 2
+NOCHE-HELPER pid=63925 sandbox-initialize=1
+NOCHE-HELPER pid=63931 sandbox-initialize=1
+[63913:12732077:1024/010405.159001:ERROR:base/process/kill_posix.cc:33] waitpid(63919): No child processes (10)
+NOCHE_SMOKE load_error code=-102
+EXIT check-sandbox => 0
+sandbox check ok: --seatbelt-client=70
+
+## Selfcrash proof (--probe=ext-loaded --probe-selfcrash)
+PROBE crash signal=06
+rc=134, DiagnosticReports unchanged, no processes left, frontmost app: Warp (25 samples)
+
+## Final probe run: NOCHE_TABS_API=1 scripts/probe-engine.sh ext-loaded tabs-one raf-hidden tabs-20 ext-create ext-activate switch-latency rss-20
+PROBE ext-loaded pass service worker answered {"sw":"1.2","count":1,"ids":[357977344],"activeId":357977344}
+PROBE tabs-one pass count=1 ids=357977408 activeId=357977408
+PROBE raf-hidden pass requestAnimationFrame resolved
+PROBE tabs-20 pass extension count=20 GetTabs=20 GetTabCount=20 OnTabAdded=19
+PROBE ext-create pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs=2
+PROBE ext-activate pass OnActiveTabChanged=1 GetActiveTab is tab 7=1 callback active is tab 7=1
+PROBE switch-latency pass median=10.7ms range=8.1..39.0ms limit=11.6ms (U2)
+PROBE rss-20 info sample2 rank=1 pid=2693 rss=382.0MB type=browser
+PROBE rss-20 info sample2 rank=2 pid=2721 rss=219.7MB type=renderer
+PROBE rss-20 info sample2 rank=3 pid=2790 rss=210.5MB type=renderer
+PROBE rss-20 info sample2 rank=4 pid=2789 rss=210.5MB type=renderer
+PROBE rss-20 info sample2 rank=5 pid=2786 rss=210.5MB type=renderer
+PROBE rss-20 info sample2 rank=6 pid=2791 rss=210.4MB type=renderer
+PROBE rss-20 info sample2 rank=7 pid=2776 rss=210.3MB type=renderer
+PROBE rss-20 info sample2 rank=8 pid=2811 rss=210.3MB type=renderer
+PROBE rss-20 info sample2 rank=9 pid=2796 rss=210.2MB type=renderer
+PROBE rss-20 info sample2 rank=10 pid=2795 rss=208.6MB type=renderer
+PROBE rss-20 pass rss=5408.5 MB then 5326.8 MB (28 then 27 processes, 20 loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)
+rc=0
+
+## Hygiene
+clones before: 0
+clones after: 0
+new crash reports: 0
+probe processes left: 0
+leftover-helper lines: 0
+ 229 "Warp" ASN:0x0-0x10010:
+(frontmost app sampled every 0.4 s through the run; the probe was never frontmost)
