@@ -27,6 +27,7 @@
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
 #include "actions.h"
+#include "store.h"
 
 static NSString* g_check = nil;
 static NSString* g_logPath = nil;
@@ -46,6 +47,7 @@ static int g_tab_closed = 0, g_closed_id = -1;     // OnTabClosed count and the 
 static int g_first_created = 0, g_first_last_id = -1;  // OnAfterCreated seen by the first tab's client (Client)
 static int g_client_created[2] = {0, 0}, g_client_id[2] = {-1, -1};  // per-tab-client: OnAfterCreated per TabClient
 static std::map<int, std::function<void(NSDictionary*)>> g_pending;
+static std::function<void(NSDictionary*)> g_event_hook;  // CDP events (messages without an id), set by the store checks
 
 // A crash must not reach macOS (.ips report, Problem Reporter window): print one line and leave with 128+signal.
 static void CrashHandler(int sig, siginfo_t* si, void* uc) {
@@ -117,6 +119,43 @@ template <typename F> static void Swizzle(SEL sel, F** orig, F* repl) {
   *orig = (F*)method_getImplementation(m);
   method_setImplementation(m, (IMP)repl);
 }
+// Activation guard (task B4): the Web Store install ends in ScopedTabbedBrowserDisplayer::~ScopedTabbedBrowserDisplayer
+// -> BrowserView::Show -> NativeWidgetNSWindowBridge::SetVisibilityState(kShowAndActivateWindow) ->
+// [NSApp activateIgnoringOtherApps:YES] (native_widget_ns_window_bridge.mm:1075-1083), which would take focus from the
+// owner. Every NSApplication/NSRunningApplication activation call is a counted no-op in this process. Install sheets get
+// alpha 0 before they are shown (AppKit sheets are separate windows, not covered by the ordering swizzles), and a timer
+// zeroes the alpha of any window that slipped through.
+static int g_activate_blocked = 0;
+static bool g_activation_guard = false;
+static void (*orig_beginSheet)(id, SEL, NSWindow*, id);
+static void swz_activateIgnoring(id, SEL, BOOL) { g_activate_blocked++; fprintf(stderr, "[PROBE] GUARD activateIgnoringOtherApps blocked\n"); }
+static void swz_activate(id, SEL) { g_activate_blocked++; fprintf(stderr, "[PROBE] GUARD activate blocked\n"); }
+static BOOL swz_activateWithOptions(id, SEL, NSApplicationActivationOptions) { g_activate_blocked++; fprintf(stderr, "[PROBE] GUARD activateWithOptions blocked\n"); return NO; }
+static void swz_beginSheet(id self, SEL c, NSWindow* sheet, id handler) {
+  orig_setAlpha(sheet, @selector(setAlphaValue:), 0);
+  [sheet setIgnoresMouseEvents:YES];
+  g_guard_calls++;
+  fprintf(stderr, "[PROBE] GUARD beginSheet class=%s alpha=%.2f\n", class_getName([sheet class]), sheet.alphaValue);
+  orig_beginSheet(self, c, sheet, handler);
+}
+static void InstallActivationGuard() {
+  Method m1 = class_getInstanceMethod(NSApplication.class, @selector(activateIgnoringOtherApps:));
+  Method m2 = class_getInstanceMethod(NSApplication.class, @selector(activate));  // macOS 14+
+  Method m3 = class_getInstanceMethod(NSRunningApplication.class, @selector(activateWithOptions:));
+  Method m4 = class_getInstanceMethod(NSWindow.class, @selector(beginSheet:completionHandler:));
+  if (!m1 || !m3 || !m4) return;  // g_activation_guard stays false: the store checks refuse to install
+  method_setImplementation(m1, (IMP)swz_activateIgnoring);
+  if (m2) method_setImplementation(m2, (IMP)swz_activate);
+  method_setImplementation(m3, (IMP)swz_activateWithOptions);
+  orig_beginSheet = (void (*)(id, SEL, NSWindow*, id))method_getImplementation(m4);
+  method_setImplementation(m4, (IMP)swz_beginSheet);
+  g_activation_guard = true;
+  // Backstop: any window of this process at alpha > 0 is zeroed within 5 ms (common modes, so sheet animations are covered).
+  NSTimer* t = [NSTimer timerWithTimeInterval:0.005 repeats:YES block:^(NSTimer*) {
+    for (NSWindow* w in NSApp.windows) if (w.alphaValue != 0) { orig_setAlpha(w, @selector(setAlphaValue:), 0); w.ignoresMouseEvents = YES; }
+  }];
+  [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
+}
 static void InstallAlphaGuard() {
   Swizzle(@selector(setAlphaValue:), &orig_setAlpha, swz_setAlpha);
   Swizzle(@selector(orderWindow:relativeTo:), &orig_orderWindow, swz_orderWindow);
@@ -124,6 +163,7 @@ static void InstallAlphaGuard() {
   Swizzle(@selector(orderBack:), &orig_orderBack, swz_orderBack);
   Swizzle(@selector(orderFrontRegardless), &orig_orderFrontRegardless, swz_orderFrontRegardless);
   Swizzle(@selector(makeKeyAndOrderFront:), &orig_makeKeyAndOrderFront, swz_makeKeyAndOrderFront);
+  InstallActivationGuard();
 }
 
 static void Log(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
@@ -159,6 +199,7 @@ class Obs : public CefDevToolsMessageObserver {
   bool OnDevToolsMessage(CefRefPtr<CefBrowser>, const void* m, size_t n) override {
     NSData* d = [NSData dataWithBytes:m length:n];
     NSDictionary* j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+    if ([j isKindOfClass:NSDictionary.class] && !j[@"id"] && g_event_hook) { g_event_hook(j); return false; }
     if (![j isKindOfClass:NSDictionary.class] || !j[@"id"]) return false;
     auto it = g_pending.find([j[@"id"] intValue]);
     if (it == g_pending.end()) return false;
@@ -346,6 +387,35 @@ static void ExtCmd(NSDictionary* cmd, std::function<void(NSDictionary*)> cb) {
   });
 }
 
+static void CdpSend(NSString* method, NSDictionary* params, std::function<void(NSDictionary*)> cb) {
+  if (!g_browser) return;
+  int rid = ++g_cdp_id;
+  NSData* d = [NSJSONSerialization dataWithJSONObject:@{@"id" : @(rid), @"method" : method, @"params" : params ?: @{}} options:0 error:nil];
+  if (cb) g_pending[rid] = cb;
+  // Posted: a send from inside a reply callback is dispatched synchronously and iterates the DevTools observer list
+  // again (Page.frameStartedNavigating), which CHECKs (observer_list.h:192, found in the B4 override runs).
+  dispatch_async(dispatch_get_main_queue(), ^{ if (g_browser) g_browser->GetHost()->SendDevToolsMessage(d.bytes, d.length); });
+}
+static StoreHost MakeStoreHost() {
+  StoreHost h;
+  h.finish = [](bool ok, NSString* d) { Finish(ok, d); };
+  h.send = [](NSString* m, NSDictionary* p, std::function<void(NSDictionary*)> cb) { CdpSend(m, p, cb); };
+  h.eval = [](NSString* e, bool await, std::function<void(NSString*)> cb) { dispatch_async(dispatch_get_main_queue(), ^{ EvalOn(g_browser, e, await, cb); }); };
+  h.setEventHook = [](std::function<void(NSDictionary*)> f) { g_event_hook = f; };
+  h.window = []() -> NSWindow* { return g_window ? ((__bridge NSView*)g_window->GetWindowHandle()).window : nil; };
+  h.done = []() { return g_done; };
+  h.tabCount = []() -> int {
+#ifdef NOCHE_TABS_API
+    return g_view ? (int)g_view->GetTabCount() : -1;
+#else
+    return -1;
+#endif
+  };
+  h.ensureVisible = [](std::function<void(bool)> cb) { EnsureWindowVisible(cb); };
+  h.activateBlocked = []() { return g_activate_blocked; };
+  h.guardsInstalled = []() { return g_activation_guard; };
+  return h;
+}
 static ActionsHost MakeActionsHost() {
   ActionsHost h;
   h.finish = [](bool ok, NSString* d) { Finish(ok, d); };
@@ -814,6 +884,7 @@ class Client : public CefClient, public CefLoadHandler, public CefRequestHandler
     if (g_started) return;
     Log(@"LOADEND status=%d url=%s", status, f->GetURL().ToString().c_str());
     g_started = true;
+    if (IsStoreCheck(g_check)) { RunStoreCheck(g_check, MakeStoreHost()); return; }
     Poll();
   }
  private:
@@ -869,6 +940,8 @@ class WinDelegate : public CefWindowDelegate {
   // The probe's own profile keeps the service worker script from the first run (a manifest version bump does not
   // replace it, seen as "service worker version: none"), so drop its registration before every start.
   [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default/Service Worker"] error:nil];
+  // Store checks start from an empty profile so "Add to Chrome" is offered every run (the install persists in Default).
+  if (IsStoreCheck(g_check)) [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default"] error:nil];
   NSError* err = nil;
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }
   if (getenv("NOCHE_PROBE_TRACE") && getenv("NOCHE_PROBE_TRACE_EARLY")) CefBeginTracing("viz,cc,content,views,ui,toplevel,latency", nullptr);
@@ -888,7 +961,7 @@ class WinDelegate : public CefWindowDelegate {
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
   // Own watchdog; the script has an outer one on top. rss-20 waits a minute between its two samples.
-  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"]) ? 120 : 40;
+  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : 40;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, watchdog * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ Finish(false, @"timeout"); });
 }
 @end
@@ -904,7 +977,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

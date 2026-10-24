@@ -1,0 +1,69 @@
+PROBE store-stock info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE store-stock info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info mode=stock guards installed, appActive=0
+PROBE store-stock info override: none (stock)
+PROBE store-stock info navigate https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE store-stock info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=08BCE59286EA04C6B1DB88CB30FF2F00)
+PROBE store-stock info store document request headers (requestId=08BCE59286EA04C6B1DB88CB30FF2F00): sec-ch-ua-arch: "arm" || sec-ch-ua-bitness: "64" || sec-ch-ua-full-version-list: "Not:A-Brand";v="8.0.0.0", "Chromium";v="156.0.8078.48" || sec-ch-ua-mobile: ?0 || sec-ch-ua-model: "" || sec-ch-ua-platform-version: "27.0.1" || sec-ch-ua-platform: "macOS" || sec-ch-ua-wow64: ?0 || sec-ch-ua: "Not:A-Brand";v="8", "Chromium";v="156" || sec-fetch-dest: document || user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE store-stock info requestWillBeSent Document https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0 (requestId=08BCE59286EA04C6B1DB88CB30FF2F00)
+PROBE store-stock info Page.navigate reply {
+PROBE store-stock info poll 0 url=https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0&pc=cws&cm=2&hl=en-US&src=1 ready=complete buttons=EN | Reject all | Accept all
+PROBE store-stock info consent page: cdp click Reject all at 395,1043
+PROBE store-stock info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE store-stock info Input.dispatchMouseEvent mousePressed reply ok
+PROBE store-stock info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE store-stock info consent page: cdp click Reject all at 395,1043
+PROBE store-stock info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE store-stock info Input.dispatchMouseEvent mousePressed reply ok
+PROBE store-stock info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE store-stock info js click /^reject all/ -> clicked BUTTON
+PROBE store-stock info requestWillBeSent Document https://consent.google.com/save (requestId=114D99DCDDD695870CE6247AA5A8AB02)
+PROBE store-stock info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=114D99DCDDD695870CE6247AA5A8AB02)
+PROBE store-stock info store state: url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh title=uBlock Origin Lite - Chrome Web Store
+PROBE store-stock info store state: navigator.userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE store-stock info store state: navigator.userAgentData.brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}]
+PROBE store-stock info store state: banner count=2 text=Switch to Chrome?
+PROBE store-stock info store state: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Add to Chrome | See more
+PROBE store-stock info windows before click: nsapp-windows=3 main-class(CefNSWindow)=1 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}] tabs=1
+PROBE store-stock info click Add to Chrome at 1087,282 (disabled=0)
+PROBE store-stock info js click /^add to / -> clicked BUTTON
+PROBE store-stock info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info sheet up: nsapp-windows=4 main-class(CefNSWindow)=1 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x196}]
+PROBE store-stock info sheet ax-dump 0:AXUnknown:'':''
+PROBE store-stock info sheet accept method=ax-press no Add button found (buttons=0)
+PROBE store-stock info sheet accept method=return-key sent
+PROBE store-stock info sheet accept method=click at 358,30 of 448x196
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-stock info guard makeKeyAndOrderFront: class=BrowserNativeWidgetWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=BrowserNativeWidgetWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-stock info guard makeKeyAndOrderFront: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-stock info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-stock info install result: extension on disk=1 id=ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE store-stock info state after install: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Remove from Chrome | See more
+PROBE store-stock info windows after: nsapp-windows=8 main-class(CefNSWindow)=1 cg-windows=6 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} BrowserNativeWidgetWindow{vis=1 alpha=0 sheet=0 key=0 1200x1396} NativeWidgetMacNSWindow{vis=0 alpha=0 sheet=0 key=0 948x88} NativeWidgetMacOverlayNSWindow{vis=0 alpha=0 sheet=0 key=0 1x1} NativeWidgetMacOverlayNSWindow{vis=0 alpha=0 sheet=0 key=0 1x1} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=0 key=0 320x156}]
+PROBE store-stock info windows before: nsapp-windows=3 main-class(CefNSWindow)=1 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}]
+PROBE store-stock info tabs before=1 after=1; activate calls blocked=2; appActive=0
+PROBE store-stock info alpha-guard hooked calls=26
+PROBE store-stock pass mode=stock banner=present brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}] install=completed
+PROBE store-stock info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-stock info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE store-stock fail exit-rc=134 watchdog=0
+--- run summary
+RC=1 ips_before=4 ips_after=4 front_samples=81 probe_frontmost=0
+--- front app samples (ASN, count); the probe's own ASN never matched
+  81 front=ASN:0x0-0x42b42b:

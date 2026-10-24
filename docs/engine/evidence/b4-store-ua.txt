@@ -1,0 +1,72 @@
+PROBE store-ua info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE store-ua info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info mode=ua guards installed, appActive=0
+PROBE store-ua info stock navigator.userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE store-ua info override: userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.48 Safari/537.36 metadata=none
+PROBE store-ua info setUserAgentOverride reply ok
+PROBE store-ua info navigate https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE store-ua info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=447381512AE227296FF77FB0D1276D61)
+PROBE store-ua info store document request headers (requestId=447381512AE227296FF77FB0D1276D61): sec-fetch-dest: document || user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.48 Safari/537.36
+PROBE store-ua info requestWillBeSent Document https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0 (requestId=447381512AE227296FF77FB0D1276D61)
+PROBE store-ua info Page.navigate reply {
+PROBE store-ua info poll 0 url=https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0&pc=cws&cm=2&hl=en-US&src=1 ready=complete buttons=EN | Reject all | Accept all
+PROBE store-ua info consent page: cdp click Reject all at 395,1043
+PROBE store-ua info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE store-ua info Input.dispatchMouseEvent mousePressed reply ok
+PROBE store-ua info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE store-ua info consent page: cdp click Reject all at 395,1043
+PROBE store-ua info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE store-ua info Input.dispatchMouseEvent mousePressed reply ok
+PROBE store-ua info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE store-ua info js click /^reject all/ -> clicked BUTTON
+PROBE store-ua info requestWillBeSent Document https://consent.google.com/save (requestId=D918E98E0E2FED9993DFA9A3EC904DA3)
+PROBE store-ua info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=D918E98E0E2FED9993DFA9A3EC904DA3)
+PROBE store-ua info store state: url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh title=uBlock Origin Lite - Chrome Web Store
+PROBE store-ua info store state: navigator.userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.48 Safari/537.36
+PROBE store-ua info store state: navigator.userAgentData.brands=[]
+PROBE store-ua info store state: banner count=2 text=Switch to Chrome?
+PROBE store-ua info store state: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Add to Chrome | See more
+PROBE store-ua info windows before click: nsapp-windows=3 main-class(CefNSWindow)=1 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}] tabs=1
+PROBE store-ua info click Add to Chrome at 1087,282 (disabled=0)
+PROBE store-ua info js click /^add to / -> clicked BUTTON
+PROBE store-ua info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info sheet up: nsapp-windows=4 main-class(CefNSWindow)=1 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x196}]
+PROBE store-ua info sheet ax-dump 0:AXUnknown:'':''
+PROBE store-ua info sheet accept method=ax-press no Add button found (buttons=0)
+PROBE store-ua info sheet accept method=return-key sent
+PROBE store-ua info sheet accept method=click at 358,30 of 448x196
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=1.00 after=0.00 parent=0
+PROBE store-ua info guard makeKeyAndOrderFront: class=BrowserNativeWidgetWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=BrowserNativeWidgetWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-ua info guard makeKeyAndOrderFront: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-ua info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE store-ua info install result: extension on disk=1 id=ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE store-ua info state after install: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Remove from Chrome | See more
+PROBE store-ua info windows after: nsapp-windows=8 main-class(CefNSWindow)=1 cg-windows=6 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} BrowserNativeWidgetWindow{vis=1 alpha=0 sheet=0 key=0 1200x1396} NativeWidgetMacNSWindow{vis=0 alpha=0 sheet=0 key=0 948x88} NativeWidgetMacOverlayNSWindow{vis=0 alpha=0 sheet=0 key=0 1x1} NativeWidgetMacOverlayNSWindow{vis=0 alpha=0 sheet=0 key=0 1x1} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=0 key=0 320x156}]
+PROBE store-ua info windows before: nsapp-windows=3 main-class(CefNSWindow)=1 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}]
+PROBE store-ua info tabs before=1 after=1; activate calls blocked=2; appActive=0
+PROBE store-ua info alpha-guard hooked calls=26
+PROBE store-ua pass mode=ua banner=present brands=[] install=completed
+PROBE store-ua info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE store-ua info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE store-ua fail exit-rc=134 watchdog=0
+--- run summary
+RC=1 ips_before=4 ips_after=4 front_samples=19 probe_frontmost=0
+RC=1 ips_before=4 ips_after=4 front_samples=78 probe_frontmost=0
+--- front app samples (ASN, count); the probe's own ASN never matched
+  78 front=ASN:0x0-0x42b42b:
