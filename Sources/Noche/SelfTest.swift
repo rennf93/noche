@@ -24,6 +24,9 @@ final class SelfTest {
         return Options(check: args[i + 1], url: url)
     }
 
+    /// Seconds after the launch before a check may quit the app (see finish).
+    static let engineSettle: TimeInterval = 15
+    private let launched = ProcessInfo.processInfo.systemUptime
     let check: String
     let url: String
     unowned let app: AppDelegate
@@ -205,7 +208,11 @@ final class SelfTest {
         guard !verdictPrinted else { return }
         verdictPrinted = true
         line(ok ? "pass" : "fail", detail)
-        app.selfTestFinished(ok: ok)
+        // Quitting within seconds of the launch can crash the engine's own shutdown (a tab-group sync task that was still pending
+        // runs against a browser that is closing, crash report: SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar).
+        // Not Noche code; the harness lets the engine finish its startup before it quits.
+        let wait = max(0, SelfTest.engineSettle - (ProcessInfo.processInfo.systemUptime - launched))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [app] in MainActor.assumeIsolated { app.selfTestFinished(ok: ok) } }
     }
 }
 

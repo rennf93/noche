@@ -11,7 +11,7 @@ scripts/app-test.sh --negative      # each check with its negative-control switc
 
 `scripts/app-test.sh` builds `Noche.app` with the test hooks (`NOCHE_TESTHOOKS=1`), serves `Tests/fixtures/app` on a free localhost port and runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec. A check passes only if the app printed `pass`, exited 0 and never hit the shutdown watchdog. The profile is `~/Library/Application Support/Noche Test`, wiped before each check, never the dev profile.
 
-Regression gate: `swift test` (the XCTest summary line, "Executed N tests, with 0 failures", is what counts; the Swift Testing line above it reports 0 tests), `scripts/build-app.sh`, `scripts/smoke.sh build/Noche.app fixture` (0), `scripts/smoke.sh build/Noche.app closed-port` (2), `scripts/check-sandbox.sh build/Noche.app` (0), then every check. A plain `scripts/build-app.sh` carries no test code (`strings ... | grep -c NOCHE_TEST` is 0).
+Regression gate (the screen-lock state and load go in the evidence header): `swift test` (the XCTest summary line, "Executed N tests, with 0 failures", is what counts; the Swift Testing line above it reports 0 tests), `scripts/build-app.sh`, `scripts/smoke.sh build/Noche.app fixture` (0), `scripts/smoke.sh build/Noche.app closed-port` (2), `scripts/check-sandbox.sh build/Noche.app` (0), then every check. A plain `scripts/build-app.sh` carries no test code (`strings ... | grep -c NOCHE_TEST` is 0).
 
 ## Hidden-run rules
 
@@ -69,9 +69,11 @@ Calls the design left open:
 
 Deviations and rulings that change behavior:
 
-- The sidebar hide motion takes about 130 ms in the reference, with a 15 ms tolerance: the limit is 145 ms. Show has a 125 ms limit. The recorded run has Cmd+S hide at HIDE_MS ms and the button hide at BUTTON_MS ms against 145 ms, and show at SHOW_MS ms against 125 ms (a hidden window gets no display-link frames, so the motion is timed from the main thread).
+- The sidebar hide motion takes about 130 ms in the reference, with a 15 ms tolerance: the limit is 145 ms. Show has a 125 ms limit. The recorded run has Cmd+S hide at 129 ms and the button hide at 130 ms against 145 ms, and show at 118 ms against 125 ms (a hidden window gets no display-link frames, so the motion is timed from the main thread).
 - `tabs-rapid` uses 20 Cmd+W.
 - Window frames are AppKit global coordinates (origin bottom-left of the primary screen), converted to CEF's top-left DIPs once, in `NCWindow` (`cefInitialBounds`). An earlier cause "unknown" of a window opening 2320 wide at x 240 was two things: the bridge passed bottom-left y to a top-left API (fixed), and a left-edge band that macOS keeps windows out of. On this Mac that band is the Stage Manager strip (240 pt on the 2560x1440 screen, 112 pt on the second one): a window asked to start inside it is moved to its edge and cut to fit, whoever asks. AppKit's `constrainFrameRect` does not move it, and the WindowManager process owns windows inside that band. This is outside Noche's control, so `window-frame` and the self-test windows start at least 300 pt from a screen's left edge.
+
+- Quitting within a few seconds of the launch can crash the engine's own shutdown (`SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar`, a pending tab-group sync task, seen twice in the final run on `window-frame` and `web-insets`). It is engine code, not Noche's; the self-test harness lets 15 s pass after the launch before a check quits the app. A person quitting right after launch can still hit it.
 
 ## Owner checks (manual, visible)
 

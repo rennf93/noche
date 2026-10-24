@@ -1,6 +1,6 @@
-# Noche M1.1 self-test evidence, clean build/ and .build, HEAD 5a690af, engine cef_binary_156.0.14-noche.3659+g18b1359
-# lock state: CGSSessionScreenIsLocked absent (unlocked)
-# uptime: 16:45  up 1 day,  1:33, 1 user, load averages: 12.82 15.52 16.37
+# Noche M1.1 self-test evidence, clean build/ and .build, code HEAD c27b704 (docs and this file after it; harness settle fix on top, see re-run), engine cef_binary_156.0.14-noche.3659+g18b1359
+# lock state: CGSSessionScreenIsLocked=Yes during this run (screen locked: hidden windows get no frames, load end and callbacks still arrive)
+# uptime: 19:14  up 1 day,  4:03, 1 user, load averages: 12.16 14.67 13.51
 # gate rc per step
 # wrapper rc=0
 # swifttest rc=0
@@ -8,131 +8,172 @@
 # smoke-fixture rc=0
 # smoke-closed rc=2
 # sandbox rc=0
-# checks rc=0
+# checks rc=1
 # negative rc=0
-# plainbuild rc=0
+# quit20 rc=0
+# checks rc=1 is window-frame and web-insets only: both quit within seconds of launch and the engine's own shutdown crashed (tab-group sync task); re-run below after the harness settle fix: rc=0
 # NOCHE_TEST strings in the final plain build: 0 (expected 0)
 
-## app-test.sh, 22 checks (stdout NOCHE_TEST lines)
+## app-test.sh, 27 checks (stdout NOCHE_TEST lines)
 NOCHE_TEST hidden info activations-blocked=0 alpha-attempts-own=0 alpha-attempts-other=0
 NOCHE_TEST hidden pass windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=0 title="Noche App Fixture" violations=[]
 NOCHE_TEST hidden info activate-blocked=0
 NOCHE_TEST hidden info frontmost samples=15 noche-frontmost=0 unknown=0
 NOCHE_TEST hidden info crash reports: none new
+NOCHE_TEST window-frame info first window: asked (300.0, 4.0, 2200.0, 1436.0), constrainFrameRect gives (300.0, 4.0, 2200.0, 1436.0)
+NOCHE_TEST window-frame info primary screen: asked (400.0, 200.0, 1200.0, 800.0), constrainFrameRect gives (400.0, 200.0, 1200.0, 800.0)
+NOCHE_TEST window-frame info second screen: asked (-1040.0, -395.0, 900.0, 1200.0), constrainFrameRect gives (-1040.0, -395.0, 900.0, 1200.0)
+NOCHE_TEST window-frame info WindowManager windows 50 to 400 pt wide: [(-7.0, 756.0, 66.0, 82.0), (15.0, 639.0, 163.0, 161.0), (15.0, 821.0, 162.0, 169.0)]
+NOCHE_TEST window-frame info screens ["(0.0, 0.0, 2560.0, 1440.0) visible (0.0, 0.0, 2560.0, 1440.0)", "(-1440.0, -495.0, 1440.0, 2560.0) visible (-1440.0, -495.0, 1440.0, 2560.0)"]
+NOCHE_TEST window-frame pass 3 windows opened with the frame asked for (within 1 pt, no setFrame): first window (300.0, 4.0, 2200.0, 1436.0); primary screen (400.0, 200.0, 1200.0, 800.0); second screen (-1040.0, -395.0, 900.0, 1200.0) [] []
+NOCHE_TEST window-frame info activate-blocked=0
+NOCHE_TEST window-frame fail exit-rc=139 watchdog=0
+NOCHE_TEST window-frame info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST window-frame fail new-crash-report: Noche-2026-10-24-191601.ips,
 NOCHE_TEST close-last pass last tab closed its window, app alive 2 s later, new window has 1 tab []
 NOCHE_TEST close-last info activate-blocked=0
 NOCHE_TEST close-last info frontmost samples=6 noche-frontmost=0 unknown=0
 NOCHE_TEST close-last info crash reports: none new
+NOCHE_TEST no-window pass no window: New Tab (menu key equivalent), Open Command Bar (address field editing) and reopen each opened one window with one tab []
+NOCHE_TEST no-window info activate-blocked=0
+NOCHE_TEST no-window info frontmost samples=6 noche-frontmost=0 unknown=0
+NOCHE_TEST no-window info crash reports: none new
 NOCHE_TEST quit-many info tabs=15 loaded=15, sending the Quit menu action
 NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
 NOCHE_TEST quit-many info activate-blocked=0
-NOCHE_TEST quit-many info frontmost samples=5 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-many info frontmost samples=4 noche-frontmost=0 unknown=0
 NOCHE_TEST quit-many info crash reports: none new
-NOCHE_TEST web-insets pass view (198.0, 7.0, 2115.0, 1381.0) window (2320.0, 1436.0): covers bounds=true top corners square=true bottom corners rounded=true
+NOCHE_TEST quit-100 info tabs=100 loaded=100 devtools=1, sending the Quit menu action
+NOCHE_TEST quit-100 pass 100 tabs in 2 windows and one DevTools, closed 100 ms apart, quit menu action, clean exit without the shutdown watchdog (tabs=100 didCloseTab=100 windowDidClose=2 devtools created=1 ended=1 watchdog=false [] [])
+NOCHE_TEST quit-100 info activate-blocked=4
+NOCHE_TEST quit-100 info frontmost samples=28 noche-frontmost=0 unknown=0
+NOCHE_TEST quit-100 info crash reports: none new
+NOCHE_TEST web-insets pass view (198.0, 7.0, 1995.0, 1381.0) window (2200.0, 1436.0): covers bounds=true top corners square=true bottom corners rounded=true
 NOCHE_TEST web-insets info activate-blocked=0
+NOCHE_TEST web-insets fail exit-rc=139 watchdog=0
 NOCHE_TEST web-insets info frontmost samples=2 noche-frontmost=0 unknown=0
-NOCHE_TEST web-insets info crash reports: none new
-NOCHE_TEST layout info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST layout info window 2368.0x1436.0 frame (0.0, 4.0, 2368.0, 1436.0) screen (0.0, 0.0, 2560.0, 1440.0) visible (0.0, 0.0, 2560.0, 1440.0) screens ["(0.0, 0.0, 2560.0, 1440.0)", "(-1440.0, -495.0, 1440.0, 2560.0)"]
+NOCHE_TEST web-insets fail new-crash-report: Noche-2026-10-24-191642.ips,
+NOCHE_TEST layout info window 2200.0x1436.0 frame (300.0, 4.0, 2200.0, 1436.0) screen (0.0, 0.0, 2560.0, 1440.0) visible (0.0, 0.0, 2560.0, 1440.0) screens ["(0.0, 0.0, 2560.0, 1440.0)", "(-1440.0, -495.0, 1440.0, 2560.0)"]
 NOCHE_TEST layout info pixels divider=(44, 44, 44) swatch=(44, 44, 44) toolbar=(39, 39, 39) swatch=(39, 39, 39) selected row=(34, 36, 40) swatch=(34, 36, 40)
-NOCHE_TEST layout pass window 2368.0x1436.0, 3 rows, both sidebar states within 1 pt, 3 pixel samples within 3 per channel [] []
+NOCHE_TEST layout pass window 2200.0x1436.0, 3 rows, both sidebar states within 1 pt, 3 pixel samples within 3 per channel [] []
 NOCHE_TEST layout info activate-blocked=0
-NOCHE_TEST layout info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST layout info frontmost samples=3 noche-frontmost=0 unknown=0
 NOCHE_TEST layout info crash reports: none new
-NOCHE_TEST tabs-keys info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST tabs-keys pass Cmd+T x3 -> 4 rows, newest active; next/previous wrap [0, 1, 0, 3]; Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max 1; actions ["closeTab": 1, "newTab": 4, "nextTab": 2, "previousTab": 2] []
+NOCHE_TEST tabs-keys pass Cmd+T x3 -> 4 rows, newest active; next/previous wrap [0, 1, 0, 3]; Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max 1; actions ["nextTab": 2, "newTab": 4, "closeTab": 1, "previousTab": 2] []
 NOCHE_TEST tabs-keys info activate-blocked=0
 NOCHE_TEST tabs-keys info frontmost samples=5 noche-frontmost=0 unknown=0
 NOCHE_TEST tabs-keys info crash reports: none new
-NOCHE_TEST tabs-rapid info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST tabs-rapid pass 20x Cmd+T then 20x Cmd+W: 1 row, 1 engine tab, extension count 1, actions ["newTab": 20, "closeTab": 20], own windows max 1 []
 NOCHE_TEST tabs-rapid info activate-blocked=0
-NOCHE_TEST tabs-rapid info frontmost samples=17 noche-frontmost=0 unknown=0
+NOCHE_TEST tabs-rapid info frontmost samples=7 noche-frontmost=0 unknown=0
 NOCHE_TEST tabs-rapid info crash reports: none new
-NOCHE_TEST ext-count info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
+NOCHE_TEST close-beforeunload pass Cmd+W with the dialog answered Stay kept the tab and its selection; the second Cmd+W (Leave) closed it, the other tab is selected (dialogs 2, closeTab 2) [] []
+NOCHE_TEST close-beforeunload info activate-blocked=0
+NOCHE_TEST close-beforeunload info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST close-beforeunload info crash reports: none new
 NOCHE_TEST ext-count pass 5 tabs: extension count 5 equals rows; tabs.create added exactly one row (6); tabs.update(active) moved the selection to row 1 []
 NOCHE_TEST ext-count info activate-blocked=0
-NOCHE_TEST ext-count info frontmost samples=13 noche-frontmost=0 unknown=0
+NOCHE_TEST ext-count info frontmost samples=4 noche-frontmost=0 unknown=0
 NOCHE_TEST ext-count info crash reports: none new
-NOCHE_TEST navigate info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST navigate pass Cmd+L selects the URL; typed path and search loaded (http://127.0.0.1:64648/search?q=two%20words); back (Cmd+[) and forward (button) work; Cmd+R reloaded []
+NOCHE_TEST navigate pass Cmd+L selects the URL; typed path and search loaded (http://127.0.0.1:58345/search?q=two%20words); back (Cmd+[) and forward (button) work; Cmd+R reloaded []
 NOCHE_TEST navigate info activate-blocked=0
 NOCHE_TEST navigate info frontmost samples=3 noche-frontmost=0 unknown=0
 NOCHE_TEST navigate info crash reports: none new
-NOCHE_TEST blank-link info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST blank-link pass target=_blank click: one new row at index 1 (opener 0), active; rows=4 engine tabs=4 windows=1 []
 NOCHE_TEST blank-link info activate-blocked=1
-NOCHE_TEST blank-link info frontmost samples=4 noche-frontmost=0 unknown=0
+NOCHE_TEST blank-link info frontmost samples=3 noche-frontmost=0 unknown=0
 NOCHE_TEST blank-link info crash reports: none new
-NOCHE_TEST long-title info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST long-title pass titles of 300 W, Arabic and emoji stay inside rows of pitch 37, no ellipsis, fade mask, placeholder favicon [] []
 NOCHE_TEST long-title info activate-blocked=0
 NOCHE_TEST long-title info frontmost samples=2 noche-frontmost=0 unknown=0
 NOCHE_TEST long-title info crash reports: none new
-NOCHE_TEST load-error info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST load-error info after the error: tab url http://127.0.0.1:64648/ tab title localhost row title localhost address localhost back enabled true
-NOCHE_TEST load-error pass closed port on localhost: row title and address show localhost, Back returns to http://127.0.0.1:64648/ (address 127.0.0.1) []
+NOCHE_TEST load-error info after the error: tab url http://127.0.0.1:58345/ tab title localhost row title localhost address localhost back enabled false
+NOCHE_TEST load-error pass closed port on localhost: row title and address show localhost, Back returns to http://127.0.0.1:58345/ (address 127.0.0.1) []
 NOCHE_TEST load-error info activate-blocked=0
-NOCHE_TEST load-error info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST load-error info frontmost samples=3 noche-frontmost=0 unknown=0
 NOCHE_TEST load-error info crash reports: none new
+NOCHE_TEST load-error-link pass link to a closed port: row title and address show localhost, Cmd+L seeds http://localhost:1/, Back returns to the page and clears the failure []
+NOCHE_TEST load-error-link info activate-blocked=0
+NOCHE_TEST load-error-link info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST load-error-link info crash reports: none new
 NOCHE_TEST menu pass 36 menu lines equal the M1.1 list, the 6 edit actions are nil-targeted
 NOCHE_TEST menu info activate-blocked=0
-NOCHE_TEST menu info frontmost samples=1 noche-frontmost=0 unknown=0
+NOCHE_TEST menu info frontmost samples=2 noche-frontmost=0 unknown=0
 NOCHE_TEST menu info crash reports: none new
-NOCHE_TEST sidebar-toggle info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST sidebar-toggle info hide 143 ms (limit 145), show 112 ms (limit 125), overshoot 1.28 pt, button hide 125 ms
-NOCHE_TEST sidebar-toggle pass Cmd+S hides in 143 ms with the lights hidden, shows in 112 ms with 1.28 pt overshoot ending at 197; the toggle button hides again in 125 ms; actions ["toggleSidebar": 3] []
+NOCHE_TEST sidebar-toggle info hide 129 ms (limit 145), show 118 ms (limit 125), overshoot 1.94 pt, button hide 130 ms
+NOCHE_TEST sidebar-toggle pass Cmd+S hides in 129 ms with the lights hidden, shows in 118 ms with 1.94 pt overshoot ending at 197; the toggle button hides again in 130 ms; actions ["toggleSidebar": 3] []
 NOCHE_TEST sidebar-toggle info activate-blocked=0
-NOCHE_TEST sidebar-toggle info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST sidebar-toggle info frontmost samples=3 noche-frontmost=0 unknown=0
 NOCHE_TEST sidebar-toggle info crash reports: none new
-NOCHE_TEST sidebar-scroll info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST sidebar-scroll pass 40 tabs at 1436 and 800 pt: Shift+Cmd+[ wraps to tab 40 and its row is fully visible (h1436: row 40 at y 1393.0-1430.0 of 1436; h800: row 40 at y 757.0-794.0 of 800), pitch 37, a scrolled-to row takes the click [] []
 NOCHE_TEST sidebar-scroll info activate-blocked=0
-NOCHE_TEST sidebar-scroll info frontmost samples=5 noche-frontmost=0 unknown=0
+NOCHE_TEST sidebar-scroll info frontmost samples=6 noche-frontmost=0 unknown=0
 NOCHE_TEST sidebar-scroll info crash reports: none new
-NOCHE_TEST shortcuts-once info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST shortcuts-once pass 19 shortcuts acted exactly once with no repeated Chrome command: Cmd+K reached the page, Cmd+R, Shift+Cmd+R, Cmd+Shift+= (Zoom In), Cmd+- (Zoom Out), Cmd+0 (Actual Size), Shift+Cmd+C, Cmd+[, Cmd+], Cmd+L, address field Cmd+A, Cmd+C, Cmd+S, Cmd+T, Shift+Cmd+], Shift+Cmd+[, Cmd+W, Cmd+N, Shift+Cmd+W (second window), Opt+Cmd+I [] []
 NOCHE_TEST shortcuts-once info activate-blocked=4
-NOCHE_TEST shortcuts-once info frontmost samples=13 noche-frontmost=0 unknown=0
+NOCHE_TEST shortcuts-once info frontmost samples=12 noche-frontmost=0 unknown=0
 NOCHE_TEST shortcuts-once info crash reports: none new
-NOCHE_TEST eval-async info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST eval-async pass completions run on a later main-queue turn: inside a CEF callback [], closed-tab call ran before returning false, reply 2, close error tab closed, late error tab closed []
 NOCHE_TEST eval-async info activate-blocked=0
 NOCHE_TEST eval-async info frontmost samples=2 noche-frontmost=0 unknown=0
 NOCHE_TEST eval-async info crash reports: none new
-NOCHE_TEST devtools-any-path info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST devtools-any-path info DevTools open through a Chrome command (Noche devTools action ran 0 times), sending the Quit menu action
 NOCHE_TEST devtools-any-path pass DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=1 loaded=1 ended=1 opened=true windowDidClose=1 devtools left=0 watchdog=false [] [])
 NOCHE_TEST devtools-any-path info activate-blocked=4
 NOCHE_TEST devtools-any-path info frontmost samples=4 noche-frontmost=0 unknown=0
 NOCHE_TEST devtools-any-path info crash reports: none new
-NOCHE_TEST no-zombie-tab info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST no-zombie-tab pass 20 tabs opened and closed in the same turn: added 20 closed 20, tabs 1 rows 1, zombies [] []
 NOCHE_TEST no-zombie-tab info activate-blocked=0
 NOCHE_TEST no-zombie-tab info frontmost samples=5 noche-frontmost=0 unknown=0
 NOCHE_TEST no-zombie-tab info crash reports: none new
-NOCHE_TEST devtools-quit info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST devtools-quit info DevTools open, sending the Quit menu action
 NOCHE_TEST devtools-quit pass DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=1 loaded=1 ended=1 opened=true windowDidClose=1 devtools left=0 watchdog=false [] [])
 NOCHE_TEST devtools-quit info activate-blocked=4
 NOCHE_TEST devtools-quit info frontmost samples=4 noche-frontmost=0 unknown=0
 NOCHE_TEST devtools-quit info crash reports: none new
-NOCHE_TEST devtools-close-tab info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
 NOCHE_TEST devtools-close-tab pass DevTools open, Cmd+W closed the tab and its DevTools, app alive 2 s later, rows 1 DevTools created=1 ended=1 [] []
 NOCHE_TEST devtools-close-tab info activate-blocked=4
 NOCHE_TEST devtools-close-tab info frontmost samples=8 noche-frontmost=0 unknown=0
 NOCHE_TEST devtools-close-tab info crash reports: none new
-NOCHE_TEST load-error-link info window frame after setFrame (0.0, 4.0, 2368.0, 1436.0)
-NOCHE_TEST load-error-link pass link to a closed port: row title and address show localhost, Cmd+L seeds http://localhost:1/, Back returns to the page and clears the failure []
-NOCHE_TEST load-error-link info activate-blocked=0
-NOCHE_TEST load-error-link info frontmost samples=2 noche-frontmost=0 unknown=0
-NOCHE_TEST load-error-link info crash reports: none new
+NOCHE_TEST a11y-labels pass rows (button, title label, selected state), New Tab row and 4 toolbar buttons and 3 window buttons labelled; the row favicon returns to the placeholder [] []
+NOCHE_TEST a11y-labels info activate-blocked=0
+NOCHE_TEST a11y-labels info frontmost samples=2 noche-frontmost=0 unknown=0
+NOCHE_TEST a11y-labels info crash reports: none new
+
+## re-run of web-insets window-frame web-insets window-frame hidden after the harness settle fix (rc=0)
+NOCHE_TEST web-insets pass view (198.0, 7.0, 1995.0, 1381.0) window (2200.0, 1436.0): covers bounds=true top corners square=true bottom corners rounded=true
+NOCHE_TEST window-frame pass 3 windows opened with the frame asked for (within 1 pt, no setFrame): first window (300.0, 4.0, 2200.0, 1436.0); primary screen (400.0, 200.0, 1200.0, 800.0); second screen (-1040.0, -395.0, 900.0, 1200.0) [] []
+NOCHE_TEST web-insets pass view (198.0, 7.0, 1995.0, 1381.0) window (2200.0, 1436.0): covers bounds=true top corners square=true bottom corners rounded=true
+NOCHE_TEST window-frame pass 3 windows opened with the frame asked for (within 1 pt, no setFrame): first window (300.0, 4.0, 2200.0, 1436.0); primary screen (400.0, 200.0, 1200.0, 800.0); second screen (-1040.0, -395.0, 900.0, 1200.0) [] []
+NOCHE_TEST hidden pass windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=0 title="Noche App Fixture" violations=[]
 
 ## app-test.sh --negative
-NEGATIVE no-zombie-tab with NOCHE_TEST_NO_CLOSED_FILTER=1: failed as expected
-NEGATIVE hidden with NOCHE_TEST_NEGATIVE=activate: failed as expected
-NEGATIVE shortcuts-once with NOCHE_TEST_NOEXACT=1: failed as expected
+NEGATIVE no-zombie-tab with NOCHE_TEST_NO_CLOSED_FILTER=1: failed as expected: NOCHE_TEST no-zombie-tab fail tabs=1 rows=21 added=40 closed=20 ["didAddTab 2 after its didCloseTab", "didActivateTab 2 after its didCloseTab", "didAddTab 3 after its didCloseTab", "didActivateTab 3 after its didCloseTab", "didAddTab 4 after its didCloseTab"]
+NEGATIVE hidden with NOCHE_TEST_NEGATIVE=activate: failed as expected: NOCHE_TEST hidden fail windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=1 alpha-attempts-own=0 title="Noche App Fixture" violations=[]
+NEGATIVE shortcuts-once with NOCHE_TEST_NOEXACT=1: failed as expected: NOCHE_TEST shortcuts-once fail Cmd+W closed no tab
 NEGATIVE devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1: pass (recorded, not asserted)
+
+## quit-many 20 times in a row (one scripted loop): 20 of 20 pass, 0 fail lines, no shutdown watchdog line, no new crash report, rc=0
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
+NOCHE_TEST quit-many pass 2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=15 didCloseTab=15 windowDidClose=2 watchdog=false [] [])
 
 ## tab-switch latency on an unlocked screen (engine g18b1359)
 # switch-latency rerun on an unlocked screen, engine cef_binary_156.0.14-noche.3659+g18b1359 (worktree t1fix, 228405f)
@@ -145,16 +186,15 @@ PROBE switch-latency-ab info frontmost samples=18 probe-frontmost=0 unknown=0
 PROBE switch-latency-ab info crash reports: none new
 
 ## smoke fixture
-[3278:31814236:1024/164629.772023:ERROR:base/process/kill_posix.cc:33] waitpid(3720): No child processes (10)
 NOCHE_SMOKE load_end status=200 title=Noche Smoke Fixture
-scripts/smoke.sh: line 53:  3220 Terminated: 15          python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/Tests/fixtures" > /dev/null 2>&1
 ## smoke closed-port
-[3764:31815720:1024/164630.540705:ERROR:third_party/blink/renderer/core/html/media/html_media_element.cc:5427] SetError: {code=4, message="MEDIA_ELEMENT_ERROR: Media load rejected by URL safety check"}
-[3750:31815571:1024/164630.598580:ERROR:base/process/kill_posix.cc:33] waitpid(3758): No child processes (10)
 NOCHE_SMOKE load_error code=-102
 ## check-sandbox
 sandbox check ok: --seatbelt-client=70
 ## swift test
-􀄵  Testing Library Version: 2084
-􀄵  Target Platform: arm64e-apple-macos14.0
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 28 tests, with 0 failures (0 unexpected) in 0.006 (0.008) seconds
+	 Executed 28 tests, with 0 failures (0 unexpected) in 0.006 (0.010) seconds
 􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.
