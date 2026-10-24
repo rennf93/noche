@@ -11,7 +11,7 @@ scripts/app-test.sh --negative      # each check with its negative-control switc
 
 `scripts/app-test.sh` builds `Noche.app` with the test hooks (`NOCHE_TESTHOOKS=1`), serves `Tests/fixtures/app` on a free localhost port and runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec. A check passes only if the app printed `pass`, exited 0 and never hit the shutdown watchdog. The profile is `~/Library/Application Support/Noche Test`, wiped before each check, never the dev profile.
 
-Regression gate: `swift test`, `scripts/build-app.sh`, `scripts/smoke.sh build/Noche.app fixture` (0), `scripts/smoke.sh build/Noche.app closed-port` (2), `scripts/check-sandbox.sh build/Noche.app` (0), then every check. A plain `scripts/build-app.sh` carries no test code (`strings ... | grep -c NOCHE_TEST` is 0).
+Regression gate: `swift test` (the XCTest summary line, "Executed N tests, with 0 failures", is what counts; the Swift Testing line above it reports 0 tests), `scripts/build-app.sh`, `scripts/smoke.sh build/Noche.app fixture` (0), `scripts/smoke.sh build/Noche.app closed-port` (2), `scripts/check-sandbox.sh build/Noche.app` (0), then every check. A plain `scripts/build-app.sh` carries no test code (`strings ... | grep -c NOCHE_TEST` is 0).
 
 ## Hidden-run rules
 
@@ -21,34 +21,39 @@ Regression gate: `swift test`, `scripts/build-app.sh`, `scripts/smoke.sh build/N
 - Controls the app cannot give itself: new `Noche*.ips` crash reports (after a 3 s settle), the frontmost app (every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s).
 - A hidden window gets no frames while the screen is locked, and a loaded CPU can trip the watchdog: a timeout then is not necessarily a code fault. Check `ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` and `uptime`.
 
-## Checks (22)
+## Checks (27)
 
-| Check | What it proves |
+| Check | What it asserts |
 |---|---|
-| hidden | the window never becomes key, never activates the app, is never frontmost |
-| close-last | closing the last tab closes the window, the app stays alive, a new window has one tab |
-| quit-many | quitting with 10 loaded tabs ends cleanly, no watchdog |
-| web-insets | the page view covers its bounds, square top and rounded bottom corners |
-| layout | window, sidebar card, toolbar and rows match the design geometry |
-| tabs-keys | tab shortcuts (new, close, next, previous, by number) act on the right tab |
-| tabs-rapid | rapid open and close (20 Cmd+W) leaves a consistent tab list |
-| ext-count | the extension tab count equals the rows; tabs.create and tabs.update act on the rows |
-| navigate | the address field navigates and the row title and address follow |
-| blank-link | a link with a blank target opens a new tab |
-| long-title | a long title truncates in the row and the toolbar |
-| load-error | a failed load shows the error page and the host in address and row |
-| load-error-link | a link from the error page works |
+| hidden | one window with one tab, alpha 0, not key, floating level, ignores the mouse, the app never active, no activation attempt and no alpha attempt on our own windows, the page title read through CDP. "Never frontmost" is not asserted by the app: it comes from the script's sampling of the frontmost app |
+| window-frame | the first window, a window on the primary screen and one on the second screen (when present) open with the frame asked for, in AppKit global coordinates, within 1 pt and with no `setFrame` repair. See Deviations for Stage Manager |
+| close-last | closing the last tab closes the window, the app is still alive 2 s later, a new window has one tab |
+| no-window | with no window open, File > New Tab (through the menu key equivalent) and Open Command Bar each open one window with one tab (the second with the address field being edited), and the reopen delegate called directly opens one too |
+| quit-many | 15 loaded tabs in 2 windows (10 and 5): the Quit menu action ends with 15 `didCloseTab`, 2 `windowDidClose`, no shutdown watchdog |
+| quit-100 | 100 loaded tabs in 2 windows (60 and 40) plus one DevTools, closed 100 ms apart so the quit outlasts a fixed 5 s watchdog: clean exit, 100 `didCloseTab`, 2 `windowDidClose`, the DevTools ended, no watchdog line, no crash report. The app's own limit for it is 90 s |
+| web-insets | the page view covers its inset rect, square top corners and rounded bottom corners (mask), and setting the same insets again rebuilds neither the layout nor the mask |
+| layout | window, sidebar, traffic lights, rows, card, toolbar buttons, address field, divider, page view and corner mask are within 1 pt of the design geometry in both sidebar states, plus 3 pixel samples (divider, toolbar, selected row) within 3 per channel of the same color through the same pipeline |
+| tabs-keys | Cmd+T three times (4 rows, newest active), next and previous tab wrap, Cmd+W closes the selected row and selects the row below, a row click selects, the New Tab row adds a tab, a middle click closes a row; each shortcut acts exactly once. There is no by-number shortcut |
+| tabs-rapid | 20 Cmd+T then 20 Cmd+W leaves 1 row, 1 engine tab (the first one) and an extension tab count of 1 |
+| close-beforeunload | on a page that cancels its beforeunload, Cmd+W with the dialog answered Stay (test hook on the JS dialog callback) keeps the tab and keeps it selected, and a second Cmd+W answered Leave closes it and selects the other tab |
+| ext-count | the extension's tab count equals the rows; `tabs.create` adds exactly one row and `tabs.update(active)` moves the selection |
+| navigate | Cmd+L selects the URL, a typed host and path and a search load, back (Cmd+[) and forward (the button) work, Cmd+R reloads; row title and address follow |
+| blank-link | a real mouse click (through the extension's debugger) on a `target=_blank` link opens one new row right after its opener, active, in the same window |
+| long-title | titles of 300 W, Arabic and emoji stay inside their rows (pitch 37), show no ellipsis, have the fade mask with its stop 20 pt from the end, and the rows show the placeholder favicon. The toolbar is not examined |
+| load-error | a typed address of a closed port shows the failed host in the row title and the address field, Back returns to the page. The error page itself is not asserted |
+| load-error-link | a link on a normal fixture page to a closed port shows the failed host in the row title and address, Cmd+L seeds the field with the failed URL, Back returns to the page and clears the failure |
 | menu | the 36 menu lines equal the M1.1 list and the 6 edit actions are nil-targeted |
-| sidebar-toggle | Cmd+S hides and shows the sidebar within the motion limits |
-| sidebar-scroll | the tab list scrolls and a changed selection scrolls its row into view |
-| shortcuts-once | each shortcut fires exactly once, with exact modifier matching |
-| eval-async | async eval completions arrive |
-| devtools-any-path | DevTools opened any way is found and tracked |
-| no-zombie-tab | closed tabs vanish from the tab list at once |
-| devtools-quit | quitting with DevTools open ends cleanly (hidden; see Owner checks) |
-| devtools-close-tab | closing a tab with DevTools open ends cleanly |
+| sidebar-toggle | Cmd+S hides and shows the sidebar, and the toolbar button hides it again, within the motion limits (see Deviations), with the traffic lights hidden and the show overshoot between 0.3 and 2.5 pt |
+| sidebar-scroll | with 40 tabs at window heights 1436 and 800, Shift+Cmd+[ from tab 1 wraps to tab 40 and its row is fully visible, the row pitch stays 37, a row scrolled into view takes the click |
+| shortcuts-once | each of 19 shortcuts (reload, force reload, zoom in, out and actual size, Copy URL, back, forward, Cmd+L, address editing, Cmd+S, Cmd+T, next, previous, Cmd+W, Cmd+N, close window, Opt+Cmd+I) acts exactly once with no repeated Chrome command; an unclaimed Cmd+K reaches the page. The exact modifier matching is shown by those counts and by the NOEXACT negative control |
+| eval-async | evaluation completions never run inside a CEF callback (a normal reply, and a tab closed while evaluating); closed or closing tabs fail with "tab closed", later and never before the call returns |
+| devtools-any-path | DevTools opened through a Chrome command Noche does not intercept (`IDC_DEV_TOOLS_CONSOLE`) is found; after the Quit menu action every DevTools browser ended before shutdown |
+| no-zombie-tab | 20 tabs opened and closed in the same turn leave 1 tab and 1 row, and no closed tab is announced or listed again |
+| devtools-quit | with DevTools open (Opt+Cmd+I), the Quit menu action ends cleanly and every DevTools browser ended before shutdown (hidden; see Owner checks) |
+| devtools-close-tab | closing a tab with DevTools open (Cmd+W) closes the tab and its DevTools, the app is alive 2 s later |
+| a11y-labels | tab rows are buttons labelled with the tab title and carry the selected state, the New Tab row, the 4 toolbar buttons (Toggle Sidebar, Back, Forward, Reload) and the 3 window buttons are labelled buttons; also, a row's favicon goes back to the placeholder when the next page has none |
 
-Negative controls (`--negative`): `no-zombie-tab` with `NOCHE_TEST_NO_CLOSED_FILTER=1`, `hidden` with `NOCHE_TEST_NEGATIVE=activate` and `shortcuts-once` with `NOCHE_TEST_NOEXACT=1` must fail; `devtools-quit` with `NOCHE_TEST_DEVTOOLS_LAST=1` is recorded only (the engine crash it targets has not reproduced in a hidden run). The switches exist only in test-hook builds.
+Negative controls (`--negative`): `no-zombie-tab` with `NOCHE_TEST_NO_CLOSED_FILTER=1`, `hidden` with `NOCHE_TEST_NEGATIVE=activate` and `shortcuts-once` with `NOCHE_TEST_NOEXACT=1` must fail; `devtools-quit` with `NOCHE_TEST_DEVTOOLS_LAST=1` is recorded only (the engine crash it targets has not reproduced in a hidden run). A pair counts as failed-as-expected only when the check printed its own `NOCHE_TEST <check> fail` line and the app exited 1 on it: a build failure, crash, timeout or missing binary fails `--negative`. The switches exist only in test-hook builds (`NOCHE_TESTHOOKS=1`; the bridge's declarations and counters follow the same switch), and `scripts/app-test.sh` ends by rebuilding `build/Noche.app` without them.
 
 Tab-switch latency on an unlocked screen is in the evidence file (median 11.9 ms, p90 12.9 ms, limits 16.7 and 33.3 ms).
 
@@ -64,9 +69,9 @@ Calls the design left open:
 
 Deviations and rulings that change behavior:
 
-- The sidebar hide motion takes 125 ms against the reference's about 130 ms, within the design's 15 ms tolerance.
+- The sidebar hide motion takes about 130 ms in the reference, with a 15 ms tolerance: the limit is 145 ms. Show has a 125 ms limit. The recorded run has Cmd+S hide at HIDE_MS ms and the button hide at BUTTON_MS ms against 145 ms, and show at SHOW_MS ms against 125 ms (a hidden window gets no display-link frames, so the motion is timed from the main thread).
 - `tabs-rapid` uses 20 Cmd+W.
-- The window opens 2320 wide at x 240 whatever bounds are requested (cause unknown); the checks set 2368x1436 explicitly.
+- Window frames are AppKit global coordinates (origin bottom-left of the primary screen), converted to CEF's top-left DIPs once, in `NCWindow` (`cefInitialBounds`). An earlier cause "unknown" of a window opening 2320 wide at x 240 was two things: the bridge passed bottom-left y to a top-left API (fixed), and a left-edge band that macOS keeps windows out of. On this Mac that band is the Stage Manager strip (240 pt on the 2560x1440 screen, 112 pt on the second one): a window asked to start inside it is moved to its edge and cut to fit, whoever asks. AppKit's `constrainFrameRect` does not move it, and the WindowManager process owns windows inside that band. This is outside Noche's control, so `window-frame` and the self-test windows start at least 300 pt from a screen's left edge.
 
 ## Owner checks (manual, visible)
 
@@ -76,3 +81,5 @@ Hidden runs can never have a key window or a visible screen, so these need a per
 2. Quit with DevTools open, once from Opt+Cmd+I and once from the page's Inspect (the original crash never reproduced hidden).
 3. Tab switching feels instant on screen with 20 tabs.
 4. The sidebar slide looks right.
+5. The bottom corners of the page are visibly rounded.
+6. The vibrancy behind the sidebar looks right.
