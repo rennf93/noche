@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         var profile = "Library/Application Support/Noche"
         var url = smoke?.url.absoluteString ?? "about:blank"
-        var frame = NSRect(x: 100, y: 100, width: 1280, height: 800)
+        var frame = Self.defaultFrame(size: NSSize(width: 1280, height: 800))
 #if NOCHE_TESTHOOKS
         if let options = selfTestOptions {
             profile = "Library/Application Support/Noche Test"  // never the dev profile
@@ -71,8 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// One window with one tab at |url|.
     @discardableResult
-    func newWindow(url: String = "about:blank", frame: NSRect = NSRect(x: 100, y: 100, width: 1280, height: 800)) -> NCWindow {
-        let controller = BrowserWindowController(app: self, url: url, frame: frame)
+    func newWindow(url: String = "about:blank", frame: NSRect? = nil) -> NCWindow {
+        let controller = BrowserWindowController(app: self, url: url, frame: frame ?? Self.defaultFrame(size: NSSize(width: 1280, height: 800)))
         controllers.append(controller)
         return controller.window
     }
@@ -80,8 +80,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// File > New Window: same size as the window it is opened from.
     func newWindowAction() {
         BrowserWindowController.note("newWindow")
-        let frame = active.flatMap { $0.nsWindow?.frame.size }.map { NSRect(origin: NSPoint(x: 100, y: 100), size: $0) }
-        newWindow(frame: frame ?? NSRect(x: 100, y: 100, width: 1280, height: 800))
+        newWindow(frame: Self.defaultFrame(size: active?.nsWindow?.frame.size ?? NSSize(width: 1280, height: 800)))
+    }
+
+    /// AppKit frame of a window of |size| 100 pt from the top-left corner of the main screen's visible area (cut to fit).
+    static func defaultFrame(size: NSSize) -> NSRect {
+        let area = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let w = min(size.width, area.width - 100), h = min(size.height, area.height - 100)
+        return NSRect(x: area.minX + 100, y: area.maxY - 100 - h, width: w, height: h)
     }
 
     /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).

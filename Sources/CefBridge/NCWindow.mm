@@ -201,8 +201,13 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   return _nsWindow.contentView.superview;
 }
 
+// The one conversion between the two coordinate conventions at this boundary: NCWindow takes AppKit global coordinates
+// (origin at the bottom-left of the primary screen, y up, the space NSWindow.frame is in); CEF Views takes DIPs with the origin
+// at the top-left of the primary screen, y down. x, width and height are equal in both, y flips about the primary screen height.
 - (CefRect)cefInitialBounds {
-  return CefRect((int)_frame.origin.x, (int)_frame.origin.y, (int)_frame.size.width, (int)_frame.size.height);
+  NSScreen* primary = NSScreen.screens.firstObject;  // the screen with the menu bar; its frame origin is (0, 0)
+  const CGFloat top = primary ? primary.frame.size.height - NSMaxY(_frame) : _frame.origin.y;
+  return CefRect((int)lround(_frame.origin.x), (int)lround(top), (int)lround(_frame.size.width), (int)lround(_frame.size.height));
 }
 
 // Runs |block| on the main thread after the CEF callback that caused it, in order.

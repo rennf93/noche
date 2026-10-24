@@ -10,8 +10,9 @@ import CefBridge
 final class SelfTest {
     struct Options { let check: String; let url: String }
 
-    /// The reference window size at the top-left of the first screen. The engine may open the window narrower; the checks set the frame.
-    static let windowFrame = NSRect(x: 0, y: 0, width: 2368, height: 1436)
+    /// The first window's frame (AppKit global coordinates, origin bottom-left): 1436 high from the top of the 2560x1440 screen.
+    /// It starts 300 pt in because macOS Stage Manager keeps windows out of its strip at the screen's left edge (see windowFrame()).
+    static let windowFrame = NSRect(x: 300, y: 4, width: 2200, height: 1436)
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -108,6 +109,7 @@ final class SelfTest {
             case "devtools-any-path": await devToolsAnyPath()
             case "devtools-close-tab": await devToolsCloseTab()
             case "load-error-link": await loadErrorLink()
+            case "window-frame": await windowFrame()
             default: finish(false, "unknown check")
             }
         }
@@ -136,12 +138,6 @@ final class SelfTest {
         guard await until(15, { loads >= 1 && rowCount == 1 && ctl?.view(withIdentifier: "toolbar") != nil }) else {
             finish(false, "first tab never finished loading, or no chrome (loads=\(loads) rows=\(rowCount))")
             return false
-        }
-        // The engine opens the window 2320 wide at x 240 whatever bounds were asked for: set the reference size explicitly.
-        if let ns = ctl?.nsWindow, ns.frame.size != SelfTest.windowFrame.size {
-            ns.setFrame(NSRect(x: 0, y: 4, width: SelfTest.windowFrame.width, height: SelfTest.windowFrame.height), display: false)
-            _ = await until(3, { ns.frame.size == SelfTest.windowFrame.size })
-            line("info", "window frame after setFrame \(ns.frame)")
         }
         return true
     }

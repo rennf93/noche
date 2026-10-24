@@ -213,7 +213,7 @@ extension SelfTest {
         var bad: [String] = []
         var seen: [String] = []
         for height in [1436.0, 800.0] {
-            ns.setFrame(NSRect(x: 0, y: 4, width: 2368, height: height), display: false)
+            ns.setFrame(NSRect(x: ns.frame.minX, y: ns.frame.maxY - height, width: ns.frame.width, height: height), display: false)
             guard await until(5, { Double(ctl.window.chromeHost?.bounds.height ?? 0) == height }) else { return finish(false, "window never got height \(height)") }
             if rowCount < 40 {
                 for _ in 0..<(40 - rowCount) { _ = win.addTab(withURL: "about:blank", activate: false) }
@@ -243,6 +243,43 @@ extension SelfTest {
             seen.append("h\(Int(height)): row 40 at y \(r39.map { "\($0.minY)-\($0.maxY)" } ?? "nil") of \(Int(visible?.maxY ?? 0))")
         }
         finish(bad.isEmpty && violations.isEmpty, "40 tabs at 1436 and 800 pt: Shift+Cmd+[ wraps to tab 40 and its row is fully visible (\(seen.joined(separator: "; "))), pitch 37, a scrolled-to row takes the click \(bad) \(violations)")
+    }
+
+    /// The frame a window is asked for is the frame it gets (AppKit global coordinates, origin bottom-left), with no setFrame repair:
+    /// the first window, a window on the primary screen and one on the second screen when there is one.
+    /// The frames start 300 pt or more from a screen's left edge: with macOS Stage Manager on, the system moves any window that
+    /// starts inside its strip (240 pt on a 2560x1440 screen, 112 pt on the 1440x2560 one) to the strip's edge, whatever the app
+    /// asked for. That is outside Noche's control; the info line shows what AppKit's own constrainFrameRect makes of the request.
+    func windowFrame() async {
+        guard await until(15, { loads >= 1 && ctl?.nsWindow != nil }) else { return finish(false, "first window never appeared") }
+        var cases: [(String, NSWindow?, NSRect)] = [("first window", ctl?.nsWindow, SelfTest.windowFrame)]
+        func open(_ name: String, _ frame: NSRect) async {
+            let w = app.newWindow(url: url, frame: frame)
+            _ = await until(15, { w.nsWindow != nil })
+            cases.append((name, w.nsWindow, frame))
+        }
+        let primary = NSScreen.screens[0].frame
+        await open("primary screen", NSRect(x: primary.minX + 400, y: primary.minY + 200, width: 1200, height: 800))
+        if NSScreen.screens.count > 1 {
+            let s = NSScreen.screens[1].frame
+            await open("second screen", NSRect(x: s.minX + 400, y: s.minY + 100, width: min(900, s.width - 500), height: min(1200, s.height - 200)))
+        }
+        var bad: [String] = [], seen: [String] = []
+        for (name, ns, want) in cases {
+            guard let ns else { bad.append("\(name): no window"); continue }
+            func close(_ f: NSRect) -> Bool { abs(f.minX - want.minX) <= 1 && abs(f.minY - want.minY) <= 1 && abs(f.width - want.width) <= 1 && abs(f.height - want.height) <= 1 }
+            _ = await until(5, { close(ns.frame) })  // the engine places the window a moment after it exists
+            seen.append("\(name) \(ns.frame)")
+            line("info", "\(name): asked \(want), constrainFrameRect gives \(ns.constrainFrameRect(want, to: ns.screen))")
+            if !close(ns.frame) { bad.append("\(name): asked \(want), got \(ns.frame)") }
+        }
+        // Stage Manager's strip is drawn by the WindowManager process: its windows, when it has any, show where the strip is.
+        let strip = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [])
+            .filter { ($0[kCGWindowOwnerName as String] as? String) == "WindowManager" && ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) }.map { $0.width > 50 && $0.width < 400 } == true }
+            .compactMap { ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } }
+        line("info", "WindowManager windows 50 to 400 pt wide: \(strip.prefix(6))")
+        line("info", "screens \(NSScreen.screens.map { "\($0.frame) visible \($0.visibleFrame)" })")
+        finish(bad.isEmpty && violations.isEmpty, "\(cases.count) windows opened with the frame asked for (within 1 pt, no setFrame): \(seen.joined(separator: "; ")) \(bad) \(violations)")
     }
 }
 #endif

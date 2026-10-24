@@ -27,6 +27,8 @@ NS_SWIFT_UI_ACTOR
 NC_EXPORT NS_SWIFT_UI_ACTOR
 @interface NCWindow : NSObject
 - (instancetype)init NS_UNAVAILABLE;
+/// |frame| is the window's frame in AppKit global coordinates (origin bottom-left of the primary screen, y up, the space of
+/// NSWindow.frame); the bridge converts to CEF's top-left DIPs. macOS may still move a window that starts inside the Stage Manager strip.
 - (instancetype)initWithURL:(NSString *)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate NS_DESIGNATED_INITIALIZER;
 @property(nonatomic, readonly, nullable) NSWindow *nsWindow;     // nil until the CefWindow exists
 @property(nonatomic, readonly, nullable) NSView *chromeHost;     // theme frame; AppKit chrome goes here above the content view
