@@ -74,6 +74,39 @@ static NSSet<NSString*>* CrashReports() {
 }
 static NSSet<NSString*>* g_reports_at_start;
 
+// Alpha guard (installed at the top of main(), before CEF starts): every window of the probe process stays alpha 0 and
+// click-through, whoever orders it in. Chromium can order a popup child window in at alpha 1 on first show
+// (native_widget_ns_window_bridge.mm:1037-1047, 2107-2109), before any update notification, so setAlphaValue: is clamped
+// and each order-in primitive zeroes the window first. Off only for NOCHE_PROBE_VISIBLE=1 (owner-approved visible runs).
+#import <objc/runtime.h>
+static int g_guard_calls = 0;
+static void (*orig_setAlpha)(id, SEL, CGFloat);
+static void (*orig_orderWindow)(id, SEL, NSWindowOrderingMode, NSInteger);
+static void (*orig_orderFront)(id, SEL, id);
+static void (*orig_orderBack)(id, SEL, id);
+static void (*orig_orderFrontRegardless)(id, SEL);
+static void (*orig_makeKeyAndOrderFront)(id, SEL, id);
+static void GuardWindow(id w) { g_guard_calls++; orig_setAlpha(w, @selector(setAlphaValue:), 0); [(NSWindow*)w setIgnoresMouseEvents:YES]; }
+static void swz_setAlpha(id self, SEL c, CGFloat) { g_guard_calls++; orig_setAlpha(self, c, 0); }
+static void swz_orderWindow(id self, SEL c, NSWindowOrderingMode m, NSInteger r) { GuardWindow(self); orig_orderWindow(self, c, m, r); }
+static void swz_orderFront(id self, SEL c, id a) { GuardWindow(self); orig_orderFront(self, c, a); }
+static void swz_orderBack(id self, SEL c, id a) { GuardWindow(self); orig_orderBack(self, c, a); }
+static void swz_orderFrontRegardless(id self, SEL c) { GuardWindow(self); orig_orderFrontRegardless(self, c); }
+static void swz_makeKeyAndOrderFront(id self, SEL c, id a) { GuardWindow(self); orig_makeKeyAndOrderFront(self, c, a); }
+template <typename F> static void Swizzle(SEL sel, F** orig, F* repl) {
+  Method m = class_getInstanceMethod(NSWindow.class, sel);
+  *orig = (F*)method_getImplementation(m);
+  method_setImplementation(m, (IMP)repl);
+}
+static void InstallAlphaGuard() {
+  Swizzle(@selector(setAlphaValue:), &orig_setAlpha, swz_setAlpha);
+  Swizzle(@selector(orderWindow:relativeTo:), &orig_orderWindow, swz_orderWindow);
+  Swizzle(@selector(orderFront:), &orig_orderFront, swz_orderFront);
+  Swizzle(@selector(orderBack:), &orig_orderBack, swz_orderBack);
+  Swizzle(@selector(orderFrontRegardless), &orig_orderFrontRegardless, swz_orderFrontRegardless);
+  Swizzle(@selector(makeKeyAndOrderFront:), &orig_makeKeyAndOrderFront, swz_makeKeyAndOrderFront);
+}
+
 static void Log(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void Log(NSString* fmt, ...) {
   va_list ap;
@@ -93,6 +126,7 @@ static void Finish(bool ok, NSString* detail) {
   if (g_reports_at_start) [fresh minusSet:g_reports_at_start]; else [fresh removeAllObjects];
   if (fresh.count) { ok = false; detail = [detail stringByAppendingFormat:@" child-terminated: %lu new crash report(s) %@", (unsigned long)fresh.count, fresh.allObjects]; }
   g_ok = ok;
+  if (g_guard_calls) printf("PROBE %s info alpha-guard hooked calls=%d\n", g_check.UTF8String, g_guard_calls);
   printf("PROBE %s %s %s\n", g_check.UTF8String, ok ? "pass" : "fail", detail.UTF8String);
   fflush(stdout);
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -155,10 +189,16 @@ static void EnsureWindowVisible(std::function<void(bool)> cb) {
   *step = [cb, step](int left) {
     if (g_done || !g_window) { *step = nullptr; return; }
     NSWindow* w = ((__bridge NSView*)g_window->GetWindowHandle()).window;
+    w.level = NSFloatingWindowLevel;  // above other apps' normal windows, so Chromium's occlusion checker sees it uncovered
+    w.ignoresMouseEvents = YES;
     [w orderWindow:NSWindowAbove relativeTo:0];  // never makeKey, never activate
     if (g_window->IsVisible() || left <= 0) {
       Log(@"WINDOW helper nsvisible=%d occlusionVisible=%d alpha=%.0f key=%d cefIsVisible=%d cefIsActive=%d appActive=%d", (int)w.isVisible, (int)((w.occlusionState & NSWindowOcclusionStateVisible) != 0), w.alphaValue, (int)w.isKeyWindow, (int)g_window->IsVisible(), (int)g_window->IsActive(), (int)NSApp.isActive);
       bool ok = g_window->IsVisible() && !g_window->IsActive() && !NSApp.isActive && !w.isKeyWindow;
+      Log(@"WINDOW helper level=%ld occlusionState=0x%lx", (long)w.level, (unsigned long)w.occlusionState);
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (g_window) { NSWindow* v = ((__bridge NSView*)g_window->GetWindowHandle()).window; Log(@"WINDOW 3s later level=%ld occlusionState=0x%lx occlusionVisible=%d cefIsVisible=%d key=%d appActive=%d", (long)v.level, (unsigned long)v.occlusionState, (int)((v.occlusionState & NSWindowOcclusionStateVisible) != 0), (int)g_window->IsVisible(), (int)v.isKeyWindow, (int)NSApp.isActive); }
+      });
       auto f = cb; *step = nullptr; f(ok);
       return;
     }
@@ -800,6 +840,12 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
+    // Before CEF starts. Visible mode (owner-approved, exactly "1") is the only way out.
+    if (![@"1" isEqualToString:@(getenv("NOCHE_PROBE_VISIBLE") ?: "")]) {
+      InstallAlphaGuard();
+      printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
+      fflush(stdout);
+    }
     if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
