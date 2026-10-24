@@ -17,6 +17,7 @@ public final class Store: Sendable {
                            arguments: [Schema.defaultProfileID, t, t])
             try db.execute(sql: "INSERT OR IGNORE INTO space (id, profileId, name, createdAt, updatedAt) VALUES (?, ?, 'Default', ?, ?)",
                            arguments: [Schema.defaultSpaceID, Schema.defaultProfileID, t, t])
+            try Schema.ensureBookmarkRoots(db, profileId: Schema.defaultProfileID, at: t)
         }
     }
 
