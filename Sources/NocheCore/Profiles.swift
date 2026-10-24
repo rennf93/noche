@@ -61,9 +61,9 @@ public enum ProfileRules {
         return order[(i + (forward ? 1 : order.count - 1)) % order.count]
     }
 
-    /// Windows to close when |deleting| is removed: its own and those of profiles sharing with it (|shareWith|: profile to target).
-    public static func windowsClosed(deleting: String, windows: [(id: String, profileId: String)], shareWith: [String: String]) -> [String] {
-        windows.filter { $0.profileId == deleting || shareWith[$0.profileId] == deleting }.map(\.id)
+    /// Windows to close when |deleting| is removed: only its own. Sharers keep the same Chromium directory (one of them takes it over).
+    public static func windowsClosed(deleting: String, windows: [(id: String, profileId: String)]) -> [String] {
+        windows.filter { $0.profileId == deleting }.map(\.id)
     }
 
     /// Tombstoned `Profile <n>` directories no live profile uses or shares; never `Default` or anything else.

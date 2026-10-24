@@ -153,8 +153,11 @@ final class ProfileStoreTests: XCTestCase {
         let b = try s.createProfile(name: "B", colorIndex: 2)
         try s.setShareWith(profileId: b.id, target: a.id)
         try s.deleteProfile(id: a.id)
-        // b no longer shares (cleared), a's dir is free to sweep.
-        XCTAssertEqual(try s.sweepableProfileDirs(), ["Profile 1"])
+        // b took over a's dir, so nothing is sweepable; b's old dir is retained.
+        XCTAssertEqual(try s.sweepableProfileDirs(), [])
+        let c = try s.createProfile(name: "C", colorIndex: 3)
+        try s.deleteProfile(id: c.id)
+        XCTAssertEqual(try s.sweepableProfileDirs(), ["Profile 3"])
     }
 
     func testDeletingDefaultOwnerClearsChromiumDataAndKeepsDefaultDir() throws {
@@ -170,5 +173,35 @@ final class ProfileStoreTests: XCTestCase {
         try s.deleteProfile(id: b.id)
         XCTAssertThrowsError(try s.deleteProfile(id: a.id)) { XCTAssertEqual($0 as? ProfileError, .lastProfile) }
         XCTAssertEqual(try s.sweepableProfileDirs(), ["Profile 2"])
+    }
+
+    func testSharerTakesOverDeletedProfileDir() throws {
+        let s = try Store.inMemory()
+        let a = try s.createProfile(name: "A", colorIndex: 1)  // Profile 1
+        let f = try s.createProfile(name: "F", colorIndex: 2)  // Profile 2, first sharer
+        let g = try s.createProfile(name: "G", colorIndex: 3)  // Profile 3
+        try s.setShareWith(profileId: f.id, target: a.id)
+        try s.setShareWith(profileId: g.id, target: a.id)
+        XCTAssertEqual(try s.deleteProfile(id: a.id), ProfileDeletion(clearChromiumData: false))
+        let live = try s.profiles()
+        let nf = try XCTUnwrap(live.first { $0.id == f.id }), ng = try XCTUnwrap(live.first { $0.id == g.id })
+        XCTAssertEqual(nf.chromiumDirName, "Profile 1")
+        XCTAssertNil(nf.shareWithProfileId)
+        XCTAssertEqual(ng.shareWithProfileId, f.id)
+        XCTAssertEqual(try s.retainedProfileDirs(), ["Profile 2"])
+        XCTAssertEqual(try s.sweepableProfileDirs(), [])
+        XCTAssertEqual(try s.createProfile(name: "H", colorIndex: 4).chromiumDirName, "Profile 4")
+    }
+
+    func testSharerTakingDefaultSkipsClearAndBecomesDefault() throws {
+        let s = try Store.inMemory()
+        let f = try s.createProfile(name: "F", colorIndex: 1)
+        try s.setShareWith(profileId: f.id, target: def)
+        XCTAssertEqual(try s.deleteProfile(id: def), ProfileDeletion(clearChromiumData: false))
+        let nf = try XCTUnwrap(s.profiles().first)
+        XCTAssertEqual(nf.chromiumDirName, "Default")
+        XCTAssertTrue(nf.isDefault)
+        XCTAssertEqual(try s.retainedProfileDirs(), ["Profile 1"])
+        XCTAssertEqual(try s.sweepableProfileDirs(), [])
     }
 }

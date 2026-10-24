@@ -37,10 +37,10 @@ final class ProfilesTests: XCTestCase {
         XCTAssertNil(ProfileRules.switched(from: "a", in: [], forward: true))
     }
 
-    func testDeleteClosesOwnAndSharingWindows() {
+    func testDeleteClosesOnlyOwnWindows() {
         let windows = [("w1", "p1"), ("w2", "p2"), ("w3", "p3"), ("w4", "p1")]
-        XCTAssertEqual(ProfileRules.windowsClosed(deleting: "p1", windows: windows, shareWith: ["p2": "p1"]), ["w1", "w2", "w4"])
-        XCTAssertEqual(ProfileRules.windowsClosed(deleting: "p3", windows: windows, shareWith: [:]), ["w3"])
+        XCTAssertEqual(ProfileRules.windowsClosed(deleting: "p1", windows: windows), ["w1", "w4"])
+        XCTAssertEqual(ProfileRules.windowsClosed(deleting: "p3", windows: windows), ["w3"])
     }
 
     func testSweepCandidates() {

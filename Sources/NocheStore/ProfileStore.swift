@@ -70,7 +70,8 @@ extension Store {
         let t = now().timeIntervalSince1970
         return try db.write { db in
             let name = try Self.name(name, excluding: nil, db)
-            let dir = ProfileRules.nextDirName(existing: try String.fetchAll(db, sql: "SELECT chromiumDirName FROM profile"))
+            // retained dirs count too: no row names them any more, but their numbers must not be reused.
+            let dir = ProfileRules.nextDirName(existing: try String.fetchAll(db, sql: "SELECT chromiumDirName FROM profile") + Self.retained(db))
             let position = (try Int.fetchOne(db, sql: "SELECT max(position) FROM profile WHERE deletedAt IS NULL") ?? -1) + 1
             let id = UUID().uuidString
             try db.execute(sql: """
@@ -129,8 +130,11 @@ extension Store {
         }
     }
 
-    /// Tombstones the profile with its spaces, groups, windows and tabs, and clears the sharing of profiles that shared with it.
-    /// The directory name stays on the tombstone for the launch sweep. Closing the windows is the caller's job.
+    /// Tombstones the profile with its spaces, groups, windows and tabs. The tombstone keeps its directory name (the counter needs it).
+    /// Profiles sharing with it keep their browsing data: the first sharer (by position) takes over the directory, the other
+    /// sharers now share with it, and no data clear is requested. The sharer's previous directory may hold its pre-sharing data,
+    /// so it is recorded in |retainedProfileDirs()| instead of being swept or forgotten. With no sharer, |clearChromiumData| is true
+    /// when the profile owned `Default`. Closing the profile's own windows is the caller's job.
     @discardableResult
     public func deleteProfile(id: String) throws -> ProfileDeletion {
         let t = now().timeIntervalSince1970
@@ -144,12 +148,38 @@ extension Store {
                            arguments: [t, t, id, id])
             try db.execute(sql: "UPDATE window SET \(mark) profileId = ?", arguments: [t, t, id])
             try db.execute(sql: "UPDATE space SET \(mark) profileId = ?", arguments: [t, t, id])
-            try db.execute(sql: "UPDATE profile SET shareWithProfileId = NULL, updatedAt = ? WHERE shareWithProfileId = ?", arguments: [t, id])
+            let sharers = all.filter { $0.shareWithProfileId == id }
+            if let f = sharers.first {
+                try db.execute(sql: "UPDATE profile SET chromiumDirName = ?, isDefault = ?, shareWithProfileId = NULL, updatedAt = ? WHERE id = ?",
+                               arguments: [row.chromiumDirName, row.chromiumDirName == "Default", t, f.id])
+                try db.execute(sql: "UPDATE profile SET shareWithProfileId = ?, updatedAt = ? WHERE shareWithProfileId = ?", arguments: [f.id, t, id])
+                try Self.retain(db, f.chromiumDirName, at: t)
+            }
             try db.execute(sql: "UPDATE profile SET \(mark) id = ?", arguments: [t, t, id])
             try Self.renumber(db, all.map(\.id).filter { $0 != id })
-            return ProfileDeletion(clearChromiumData: row.chromiumDirName == "Default")
+            return ProfileDeletion(clearChromiumData: sharers.isEmpty && row.chromiumDirName == "Default")
         }
     }
+
+    static let retainedDirsKey = "retainedProfileDirs"
+
+    private static func retained(_ db: Database) throws -> [String] {
+        let raw = try String.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ? AND deletedAt IS NULL", arguments: [retainedDirsKey])
+        return raw.flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
+    }
+
+    private static func retain(_ db: Database, _ dir: String, at t: Double) throws {
+        var dirs = try retained(db)
+        if !dirs.contains(dir) { dirs.append(dir) }
+        let json = String(decoding: try JSONEncoder().encode(dirs), as: UTF8.self)
+        try db.execute(sql: """
+            INSERT INTO setting (key, value, updatedAt) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, deletedAt = NULL
+            """, arguments: [retainedDirsKey, json, t])
+    }
+
+    /// Directories a profile stopped using when it took over a deleted profile's directory; never swept, offered for cleanup later.
+    public func retainedProfileDirs() throws -> [String] { try db.read { try Self.retained($0) } }
 
     /// Stored "New windows open with" profile, or the first live profile when none is stored or it is gone.
     public func newWindowProfileId() throws -> String? {
@@ -171,7 +201,7 @@ extension Store {
             let dirs = Dictionary(uniqueKeysWithValues: live.map { ($0.id, $0.chromiumDirName) })
             let liveDirs = live.flatMap { [$0.chromiumDirName] + [$0.shareWithProfileId.flatMap { dirs[$0] }].compactMap { $0 } }
             let dead = try String.fetchAll(db, sql: "SELECT chromiumDirName FROM profile WHERE deletedAt IS NOT NULL ORDER BY position, createdAt")
-            return ProfileRules.sweepCandidates(tombstonedDirs: dead, liveDirs: liveDirs)
+            return ProfileRules.sweepCandidates(tombstonedDirs: dead, liveDirs: liveDirs + (try Self.retained(db)))
         }
     }
 }
