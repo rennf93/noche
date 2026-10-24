@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             exit(4)
         }
 
+        ChromeCommand.resolve()
         newWindow(url: url, frame: frame)
 
         if let smoke {

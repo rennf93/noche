@@ -425,10 +425,25 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 }
 
-/// Chrome command ids Noche answers itself (vendor/cef/include/cef_command_ids.h).
+/// Chrome command ids Noche answers itself, looked up by name in the running engine (vendor/cef/include/cef_command_ids.h has
+/// the names), so an engine update that renumbers them cannot silently break the shortcuts. Call `resolve()` once the engine started.
+@MainActor
 enum ChromeCommand {
-    static let back = 33000, forward = 33001, reload = 33002, reloadBypassingCache = 33007, reloadClearingCache = 33009
-    static let newWindow = 34000, closeWindow = 34012, newTab = 34014, closeTab = 34015
-    static let selectNextTab = 34016, selectPreviousTab = 34017
-    static let zoomPlus = 38001, zoomNormal = 38002, zoomMinus = 38003, focusLocation = 39001, devTools = 40004
+    static var back = -1, forward = -1, reload = -1, reloadBypassingCache = -1, reloadClearingCache = -1
+    static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
+    static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
+
+    static func resolve() {
+        func id(_ name: String) -> Int {
+            let n = NCEngine.chromeCommandIdNamed(name)
+            if n < 0 { FileHandle.standardError.write(Data("NOCHE unknown Chrome command \(name)\n".utf8)) }
+            return n
+        }
+        back = id("IDC_BACK"); forward = id("IDC_FORWARD"); reload = id("IDC_RELOAD")
+        reloadBypassingCache = id("IDC_RELOAD_BYPASSING_CACHE"); reloadClearingCache = id("IDC_RELOAD_CLEARING_CACHE")
+        newWindow = id("IDC_NEW_WINDOW"); closeWindow = id("IDC_CLOSE_WINDOW"); newTab = id("IDC_NEW_TAB"); closeTab = id("IDC_CLOSE_TAB")
+        selectNextTab = id("IDC_SELECT_NEXT_TAB"); selectPreviousTab = id("IDC_SELECT_PREVIOUS_TAB")
+        zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
+        focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")
+    }
 }

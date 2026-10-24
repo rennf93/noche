@@ -54,6 +54,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   CefRefPtr<CefRegistration> _registration;
   NSMutableDictionary<NSNumber*, NCEvalCompletion>* _pending;
   int _nextId;
+  BOOL _waitingForDevTools;  // the 10 s of polling ran out with the DevTools still open
 }
 
 @synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon;
@@ -117,21 +118,33 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   // Negative control: the tab closes under its DevTools.
   if (host->HasDevTools() && !NC_TEST_FLAG("NOCHE_TEST_DEVTOOLS_LAST")) {
     host->CloseDevTools();
-    [self closeAfterDevTools:40];
+    [self closeAfterDevTools:200];
   } else {
     host->CloseBrowser(false);
   }
 }
 
+// Polls every 50 ms for up to 10 s (|left| counts the polls). The tab never closes under its DevTools: past 10 s polling stops
+// with a NOCHE line and the close waits for the window's report that a DevTools browser ended (-devToolsEnded); the app's quit
+// watchdog bounds a quit that waits longer.
 - (void)closeAfterDevTools:(int)left {
   if (!_browser) return;
   if (_browser->GetHost()->HasDevTools()) {
-    // Past the cap: say so (the checks fail on this line) and keep waiting; the app's 5 s watchdog ends a quit.
-    if (left == 0) fprintf(stderr, "NOCHE devtools still open after 2 s, tab not closed early\n");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeAfterDevTools:MAX(left - 1, -1)]; });
+    if (left == 160) fprintf(stderr, "NOCHE devtools still open after 2 s, tab not closed early\n");  // the checks fail on this line
+    if (left == 0) {
+      fprintf(stderr, "NOCHE devtools still open after 10 s, tab close waits for the DevTools to end\n");
+      _waitingForDevTools = YES;
+      return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeAfterDevTools:left - 1]; });
     return;
   }
+  _waitingForDevTools = NO;
   _browser->GetHost()->CloseBrowser(false);
+}
+
+- (void)devToolsEnded {
+  if (_waitingForDevTools) [self closeAfterDevTools:200];
 }
 
 - (void)evaluateJavaScript:(NSString*)script completion:(NCEvalCompletion)completion {

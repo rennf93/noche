@@ -192,7 +192,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CefRefPtr<CefWindow> _window;
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
   NSMutableSet<NSNumber*>* _closed;  // identifiers whose OnBeforeClose ran: a late callback must not bring them back
-  BOOL _destroyed, _windowClosing;
+  BOOL _destroyed, _windowClosing, _waitingForDevTools;
   int _devtoolsPending;  // OnBeforeDevToolsPopup seen, its browser not created yet (tells DevTools from window.open popups)
   NSMutableSet<NSNumber*>* _devtools;  // popup browsers of this window (DevTools), until their OnBeforeClose
   NSWindow* _nsWindow;
@@ -305,17 +305,23 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   }
   for (NCTab* t in _table.allValues)
     if (t.browser && t.browser->GetHost()->HasDevTools()) t.browser->GetHost()->CloseDevTools();
-  [self closeWindowWhenDevToolsGone:40];
+  [self closeWindowWhenDevToolsGone:200];
 }
 
+// Same bounds as NCTab's close: 50 ms polls for up to 10 s, then a NOCHE line and a wait for -devToolsGone:. Never closes early.
 - (void)closeWindowWhenDevToolsGone:(int)left {
   if (!_window) return;
   if (self.devToolsCount > 0 || _devtools.count > 0) {
-    // Past the cap: say so (the checks fail on this line) and keep waiting; the app's 5 s watchdog ends it.
-    if (left == 0) fprintf(stderr, "NOCHE devtools still open after 2 s, window not closed early\n");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeWindowWhenDevToolsGone:MAX(left - 1, -1)]; });
+    if (left == 160) fprintf(stderr, "NOCHE devtools still open after 2 s, window not closed early\n");  // the checks fail on this line
+    if (left == 0) {
+      fprintf(stderr, "NOCHE devtools still open after 10 s, window close waits for the DevTools to end\n");
+      _waitingForDevTools = YES;
+      return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{ [self closeWindowWhenDevToolsGone:left - 1]; });
     return;
   }
+  _waitingForDevTools = NO;
   [self closeWindowNow];
 }
 
@@ -541,6 +547,12 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   [_devtools removeObject:key];
   g_devtools_closed++;
   g_devtools_browsers.erase(browser->GetIdentifier());
+  // A close that gave up polling picks up here (HasDevTools may lag a moment behind, so they poll again).
+  // From a later turn: this runs inside the DevTools browser's teardown.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self->_waitingForDevTools) [self closeWindowWhenDevToolsGone:200];
+    for (NCTab* t in self->_table.allValues) [t devToolsEnded];
+  });
 }
 
 - (void)tabAdded:(CefRefPtr<CefBrowser>)browser active:(BOOL)active {

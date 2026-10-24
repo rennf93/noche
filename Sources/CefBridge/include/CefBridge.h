@@ -18,6 +18,8 @@ NC_EXPORT
 @interface NCEngine : NSObject
 + (BOOL)startWithCachePath:(NSString *)path error:(NSError *_Nullable *_Nullable)error;
 + (void)shutdown;
+/// The numeric id of a Chrome command (IDC_...) in this engine build, -1 when the name is unknown. Valid once the engine started.
++ (NSInteger)chromeCommandIdNamed:(NSString *)name;
 @end
 
 NC_EXPORT

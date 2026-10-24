@@ -1,6 +1,7 @@
 #import "CefBridge.h"
 #include <crt_externs.h>
 #include "NCInternal.h"
+#include "include/cef_id_mappers.h"
 #include "include/wrapper/cef_library_loader.h"
 
 static CefScopedLibraryLoader* g_loader = nullptr;
@@ -47,6 +48,10 @@ static BOOL Fail(NSError** error, NSString* step) {
   }
   NCPumpStart();
   return YES;
+}
+
++ (NSInteger)chromeCommandIdNamed:(NSString*)name {
+  return cef_id_for_command_id_name(name.UTF8String);
 }
 
 + (void)shutdown {

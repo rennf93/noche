@@ -40,6 +40,8 @@ inline int NCTestInt(const char* name) {
 /// Null once the browser is closed.
 @property(nonatomic) CefRefPtr<CefBrowser> browser;
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser;
+/// A DevTools browser of this window ended: a close that stopped polling for it tries again.
+- (void)devToolsEnded;
 /// Drops the browser and the DevTools observer and fails every pending evaluation.
 - (void)browserClosed;
 /// Downloads the favicon at |url| (36 px) and calls |done| on the UI thread when it was set.
