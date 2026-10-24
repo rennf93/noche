@@ -1,22 +1,22 @@
-From 104fa6c0608e847a227c08d434dba438f9d6fa32 Mon Sep 17 00:00:00 2001
+From d1f0e71952e5fce564d2619163f493465adbbaef Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 03:02:51 +0200
 Subject: [PATCH] views: popups as tabs, per-tab clients and tab close
 
 ---
- include/views/cef_browser_view.h              | 17 +++++++--
- libcef/browser/browser_info_manager.cc        | 16 ++++++++
+ include/views/cef_browser_view.h              | 23 ++++++++++--
+ libcef/browser/browser_info_manager.cc        | 22 +++++++++++
  libcef/browser/browser_platform_delegate.cc   | 14 +++++++
  .../browser/chrome/chrome_browser_delegate.cc | 37 ++++++++++++++++---
  .../browser/chrome/chrome_browser_delegate.h  | 17 +++++++++
  libcef/browser/views/browser_view_impl.cc     | 13 +++++--
- 6 files changed, 101 insertions(+), 13 deletions(-)
+ 6 files changed, 113 insertions(+), 13 deletions(-)
 
 diff --git a/include/views/cef_browser_view.h b/include/views/cef_browser_view.h
-index a31e5b454..b591d8572 100644
+index a31e5b454..aa272832e 100644
 --- a/include/views/cef_browser_view.h
 +++ b/include/views/cef_browser_view.h
-@@ -128,10 +128,19 @@ class CefBrowserView : public CefView {
+@@ -128,10 +128,25 @@ class CefBrowserView : public CefView {
    /// OnBrowserCreated). All tabs share this BrowserView and its window; Chrome
    /// APIs such as chrome.tabs see all of them. If |activate| is true the new
    /// tab becomes the active tab (see GetActiveTab). OnTabAdded is called for
@@ -26,11 +26,17 @@ index a31e5b454..b591d8572 100644
 -  /// change.
 +  /// every tab added after the first. |client|, |settings| and |extra_info|
 +  /// apply to this tab only (OnAfterCreated is called on |client| for it). If
-+  /// |client| is NULL the new tab uses the client of the first tab. Tabs that
-+  /// Chrome creates itself (chrome.tabs.create(), Cmd+T) use the first tab's
-+  /// client and settings, as do popups opened as tabs from a link with
-+  /// target=_blank or window.open() when OnBeforePopup does not claim them
-+  /// (they use the opener's client).
++  /// |client| is NULL the new tab uses the client of the first tab; |settings|
++  /// and |extra_info| always apply as passed and cannot mean "inherit" (pass
++  /// the first tab's values to repeat them). Tabs that Chrome creates itself
++  /// through chrome.tabs.create() use the first tab's client and settings.
++  /// Popups from a link with target=_blank or window.open() with a tab
++  /// disposition become tabs of this view unless OnBeforePopup returns true
++  /// (which cancels the popup); an OnBeforePopup that returns false may still set client,
++  /// settings and extra_info, and those are honored (the opener's client
++  /// otherwise). IDC_NEW_TAB (Cmd+T) is NOT a tab of this view: Chrome opens a
++  /// separate window for it, so intercept it in
++  /// CefCommandHandler::OnChromeCommand and call AddTab instead.
 +  ///
 +  /// Closing a tab (CefBrowserHost::CloseBrowser) that is not the last one
 +  /// leaves the BrowserView, its window and the other tabs alone. Closing the
@@ -41,10 +47,18 @@ index a31e5b454..b591d8572 100644
    /*--cef(added=experimental,optional_param=client,optional_param=url,
            optional_param=extra_info)--*/
 diff --git a/libcef/browser/browser_info_manager.cc b/libcef/browser/browser_info_manager.cc
-index 8b077f071..cf1fd2f3a 100644
+index 8b077f071..3313d387c 100644
 --- a/libcef/browser/browser_info_manager.cc
 +++ b/libcef/browser/browser_info_manager.cc
-@@ -222,6 +222,22 @@ bool CefBrowserInfoManager::CanCreateWindow(
+@@ -18,6 +18,7 @@
+ #include "cef/libcef/common/cef_switches.h"
+ #include "cef/libcef/common/frame_util.h"
+ #include "cef/libcef/common/values_impl.h"
++#include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/ui/webui/top_chrome/webui_contents_preload_state.h"
+ #include "content/public/browser/child_process_host.h"
+ #include "content/public/browser/render_frame_host.h"
+@@ -222,6 +223,27 @@ bool CefBrowserInfoManager::CanCreateWindow(
        pending_popup->use_default_browser_creation = true;
      }
  
@@ -53,7 +67,12 @@ index 8b077f071..cf1fd2f3a 100644
 +    // instead of new windows. The navigator then adds the contents to the
 +    // opener's Browser (default Browser creation) and the platform delegate is
 +    // bound to the opener's BrowserView.
++    // DevTools Browsers are excluded from tabs (WindowCanOpenTabs), so skip them;
++    // DevToolsWindow::IsDevToolsWindow() (devtools_window.h:137) takes the
++    // opener's WebContents.
 +    if (CEF_API_IS_ADDED(CEF_EXPERIMENTAL) &&
++        !DevToolsWindow::IsDevToolsWindow(
++            content::WebContents::FromRenderFrameHost(opener)) &&
 +        (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
 +         disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)) {
 +      auto opener_view = browser->GetBrowserView();
