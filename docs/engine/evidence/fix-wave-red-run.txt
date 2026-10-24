@@ -1,0 +1,152 @@
+## fix wave probe runs on the current engine (HEAD 5971adc plus the fix-wave probe changes), NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1, hidden
+## launch 1: scripts/probe-engine.sh close-active-previous popup-close-last (RED checks, written against the current engine)
+PROBE close-active-previous info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous info alpha-guard hooked calls=5
+PROBE close-active-previous info activate calls blocked=0
+PROBE close-active-previous fail closed active tab 2: OnTabClosed=1 OnActiveTabChanged after close=1 GetActiveTab id=1; OnActiveTabChanged calls with a previous already past OnBeforeClose=1 (want 0)
+PROBE close-active-previous info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE close-active-previous fail exit-rc=1 watchdog=0
+PROBE close-active-previous info frontmost samples=15 probe-frontmost=0 unknown=0
+PROBE close-active-previous info crash reports: none new
+PROBE popup-close-last info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-close-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info alpha-guard hooked calls=12
+PROBE popup-close-last info activate calls blocked=0
+PROBE popup-close-last pass window closed with the last tab while the extension popup was showing, no crash
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-close-last info frontmost samples=21 probe-frontmost=0 unknown=0
+PROBE popup-close-last info crash reports: none new
+RC=1
+
+## launch 2: scripts/probe-engine.sh popup-anchor popup-tabid install-no-window (tightened checks)
+PROBE popup-anchor info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-anchor info alpha-guard hooked calls=8
+PROBE popup-anchor info activate calls blocked=0
+PROBE popup-anchor pass popup content top 1259.0 (view WebContentsViewCocoa; frame top 1264.0 incl. shadow) vs button bottom 1260.0 (delta 1.0 pt, limit 2), CDP click reached popup.js 1 time(s), tabId=357989786, activation problem: none, activate calls blocked=0 (want 0)
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-anchor info frontmost samples=27 probe-frontmost=0 unknown=0
+PROBE popup-anchor info crash reports: none new
+PROBE popup-tabid info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-tabid info alpha-guard hooked calls=8
+PROBE popup-tabid info activate calls blocked=0
+PROBE popup-tabid pass popup resolved tabId=357989839, active tab (chrome.tabs) id=357989839, first tab id=357989838 (must differ), activation problem: none, activate calls blocked=0 (want 0)
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=1
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE popup-tabid info frontmost samples=7 probe-frontmost=0 unknown=0
+PROBE popup-tabid info crash reports: none new
+PROBE install-no-window info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info mode=stock guards installed, appActive=0
+PROBE install-no-window info override: none (stock)
+PROBE install-no-window info navigate https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=1B8CFA7BBBDFC15BF8492CAAD14514FA)
+PROBE install-no-window info store document request headers (requestId=1B8CFA7BBBDFC15BF8492CAAD14514FA): sec-ch-ua-arch: "arm" || sec-ch-ua-bitness: "64" || sec-ch-ua-full-version-list: "Not:A-Brand";v="8.0.0.0", "Chromium";v="156.0.8078.48" || sec-ch-ua-mobile: ?0 || sec-ch-ua-model: "" || sec-ch-ua-platform-version: "27.0.1" || sec-ch-ua-platform: "macOS" || sec-ch-ua-wow64: ?0 || sec-ch-ua: "Not:A-Brand";v="8", "Chromium";v="156" || sec-fetch-dest: document || user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE install-no-window info requestWillBeSent Document https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0 (requestId=1B8CFA7BBBDFC15BF8492CAAD14514FA)
+PROBE install-no-window info Page.navigate reply {
+PROBE install-no-window info poll 0 url=https://consent.google.com/m?continue=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh&gl=IT&m=0&pc=cws&cm=2&hl=en-US&src=1 ready=complete buttons=EN | Reject all | Accept all
+PROBE install-no-window info consent page: cdp click Reject all at 395,1043
+PROBE install-no-window info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mousePressed reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE install-no-window info consent page: cdp click Reject all at 395,1043
+PROBE install-no-window info Input.dispatchMouseEvent mouseMoved reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mousePressed reply ok
+PROBE install-no-window info Input.dispatchMouseEvent mouseReleased reply ok
+PROBE install-no-window info js click /^reject all/ -> clicked BUTTON
+PROBE install-no-window info requestWillBeSent Document https://consent.google.com/save (requestId=2C130722C244F1432D973F591AC9B2AC)
+PROBE install-no-window info requestWillBeSent Document https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh (requestId=2C130722C244F1432D973F591AC9B2AC)
+PROBE install-no-window info store state: url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh title=uBlock Origin Lite - Chrome Web Store
+PROBE install-no-window info store state: navigator.userAgent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36
+PROBE install-no-window info store state: navigator.userAgentData.brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}]
+PROBE install-no-window info store state: banner count=2 text=Switch to Chrome?
+PROBE install-no-window info store state: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Add to Chrome | See more
+PROBE install-no-window info windows before click: nsapp-windows=3 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}] tabs=1
+PROBE install-no-window info click Add to Chrome at 1087,282 (disabled=0)
+PROBE install-no-window info js click /^add to / -> clicked BUTTON
+PROBE install-no-window info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info sheet up: nsapp-windows=4 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x196}]
+PROBE install-no-window info sheet ax-dump 0:AXUnknown:'':''
+PROBE install-no-window info sheet accept method=ax-press no Add button found (buttons=0)
+PROBE install-no-window info sheet accept method=return-key sent
+PROBE install-no-window info sheet accept method=click at 358,30 of 448x196
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info install result: extension on disk=1 id=ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info post-install dialog window seen: NativeWidgetMacNSWindow vis=1 sheet=1 448x132
+PROBE install-no-window info state after install: buttons=Discover | Extensions | Themes | No thanks | Install Chrome | Share | Remove from Chrome | See more
+PROBE install-no-window info windows after: nsapp-windows=4 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=2 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} NativeWidgetMacNSWindow{vis=1 alpha=0 sheet=1 key=0 448x132}]
+PROBE install-no-window info windows before: nsapp-windows=3 main-class(CefNSWindow)=1 browser-windows=0 cg-windows=1 appActive=0 [NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30} CefNSWindow{vis=1 alpha=0 sheet=0 key=0 1000x700} NSStatusBarWindow{vis=1 alpha=0 sheet=0 key=0 38x30}]
+PROBE install-no-window info tabs before=1 after=1; activate calls blocked=0; appActive=0
+PROBE install-no-window info target type=service_worker url=chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/js/background.js
+PROBE install-no-window info target type=page url=https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh
+PROBE install-no-window info install-no-window facts: browserWindows 0 -> 0, browser-window guard hits 0, stale targets 0, dialog seen 1, same tabs 1, activate calls blocked 0
+PROBE install-no-window info installed manifest name=__MSG_extName__ version=2026.1021.1354 page=dashboard.html
+PROBE install-no-window info requestWillBeSent Document chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/dashboard.html (requestId=D062318B63A7CB7110140A879A1E37BB)
+PROBE install-no-window info extension service worker: {"name":"uBlock Origin Lite","bg":1}
+PROBE install-no-window info alpha-guard hooked calls=22
+PROBE install-no-window info activate calls blocked=0
+PROBE install-no-window pass mode=stock banner=present brands=[{"brand":"Not:A-Brand","version":"8"},{"brand":"Chromium","version":"156"}] install=completed serviceWorkerAlive=1
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE install-no-window info frontmost samples=72 probe-frontmost=0 unknown=0
+PROBE install-no-window info crash reports: none new
+RC=0
+
+## ips before=4 after=4 (Noche Probe*.ips in ~/Library/Logs/DiagnosticReports), no Noche Probe process left
