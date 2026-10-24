@@ -3,7 +3,13 @@ import GRDB
 import NocheCore
 
 public enum ProfileError: Error, Equatable, Sendable {
-    case invalidName(ProfileNameError), invalidColor, notFound, lastProfile, ownsDefaultDirectory, shareSelf, shareChain
+    case invalidName(ProfileNameError), invalidColor, notFound, lastProfile, shareSelf, shareChain
+}
+
+/// What the app must do after a delete: |clearChromiumData| is true when the profile owned the `Default` directory, which stays
+/// on disk (the engine's incognito parent) and must be emptied through ClearBrowsingData instead of being swept.
+public struct ProfileDeletion: Equatable, Sendable {
+    public let clearChromiumData: Bool
 }
 
 public struct Profile: Equatable, Sendable {
@@ -55,6 +61,8 @@ extension Store {
         for (i, id) in ids.enumerated() { try db.execute(sql: "UPDATE profile SET position = ? WHERE id = ?", arguments: [i, id]) }
     }
 
+    /// The directory name comes from every name ever assigned (tombstones included), so after the first profile `Default` is never
+    /// handed to a new profile, even when its owner was deleted; new profiles always get `Profile <n>`.
     /// One transaction: validates, assigns the next directory name and position, adds the default space and both bookmark roots.
     @discardableResult
     public func createProfile(name: String, colorIndex: Int) throws -> Profile {
@@ -123,13 +131,13 @@ extension Store {
 
     /// Tombstones the profile with its spaces, groups, windows and tabs, and clears the sharing of profiles that shared with it.
     /// The directory name stays on the tombstone for the launch sweep. Closing the windows is the caller's job.
-    public func deleteProfile(id: String) throws {
+    @discardableResult
+    public func deleteProfile(id: String) throws -> ProfileDeletion {
         let t = now().timeIntervalSince1970
-        try db.write { db in
+        return try db.write { db in
             let row = try Self.live(db, id)
             let all = try Self.liveProfiles(db)
             if all.count == 1 { throw ProfileError.lastProfile }
-            if row.chromiumDirName == "Default" { throw ProfileError.ownsDefaultDirectory }
             let mark = "deletedAt = ?, updatedAt = ? WHERE deletedAt IS NULL AND "
             try db.execute(sql: "UPDATE tab SET \(mark) windowId IN (SELECT id FROM window WHERE profileId = ?)", arguments: [t, t, id])
             try db.execute(sql: "UPDATE tabGroup SET \(mark) (spaceId IN (SELECT id FROM space WHERE profileId = ?) OR windowId IN (SELECT id FROM window WHERE profileId = ?))",
@@ -139,6 +147,7 @@ extension Store {
             try db.execute(sql: "UPDATE profile SET shareWithProfileId = NULL, updatedAt = ? WHERE shareWithProfileId = ?", arguments: [t, id])
             try db.execute(sql: "UPDATE profile SET \(mark) id = ?", arguments: [t, t, id])
             try Self.renumber(db, all.map(\.id).filter { $0 != id })
+            return ProfileDeletion(clearChromiumData: row.chromiumDirName == "Default")
         }
     }
 

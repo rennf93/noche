@@ -131,9 +131,8 @@ final class ProfileStoreTests: XCTestCase {
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM tab WHERE id = 't' AND deletedAt IS NULL"), 0)
             XCTAssertEqual(try String.fetchOne(db, sql: "SELECT chromiumDirName FROM profile WHERE id = ? AND deletedAt IS NOT NULL", arguments: [a.id]), "Profile 1")
         }
-        XCTAssertThrowsError(try s.deleteProfile(id: def)) { XCTAssertEqual($0 as? ProfileError, .ownsDefaultDirectory) }
+        XCTAssertEqual(try s.deleteProfile(id: sharer.id), ProfileDeletion(clearChromiumData: false))
         XCTAssertThrowsError(try s.deleteProfile(id: "nope")) { XCTAssertEqual($0 as? ProfileError, .notFound) }
-        try s.deleteProfile(id: sharer.id)
         XCTAssertThrowsError(try s.deleteProfile(id: def)) { XCTAssertEqual($0 as? ProfileError, .lastProfile) }
     }
 
@@ -156,5 +155,20 @@ final class ProfileStoreTests: XCTestCase {
         try s.deleteProfile(id: a.id)
         // b no longer shares (cleared), a's dir is free to sweep.
         XCTAssertEqual(try s.sweepableProfileDirs(), ["Profile 1"])
+    }
+
+    func testDeletingDefaultOwnerClearsChromiumDataAndKeepsDefaultDir() throws {
+        let s = try Store.inMemory()
+        let a = try s.createProfile(name: "A", colorIndex: 1)
+        try s.setNewWindowProfileId(def)
+        XCTAssertEqual(try s.deleteProfile(id: def), ProfileDeletion(clearChromiumData: true))
+        XCTAssertEqual(try s.profiles().map(\.id), [a.id])
+        XCTAssertEqual(try s.newWindowProfileId(), a.id)
+        XCTAssertEqual(try s.sweepableProfileDirs(), [])
+        let b = try s.createProfile(name: "B", colorIndex: 2)
+        XCTAssertEqual(b.chromiumDirName, "Profile 2")
+        try s.deleteProfile(id: b.id)
+        XCTAssertThrowsError(try s.deleteProfile(id: a.id)) { XCTAssertEqual($0 as? ProfileError, .lastProfile) }
+        XCTAssertEqual(try s.sweepableProfileDirs(), ["Profile 2"])
     }
 }
