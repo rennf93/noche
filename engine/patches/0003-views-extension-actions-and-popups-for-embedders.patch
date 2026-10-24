@@ -1,0 +1,1146 @@
+From 1c5f37d2fa25871fc93db25cd866038bf018f595 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 03:34:40 +0200
+Subject: [PATCH] views: extension actions and popups for embedders
+
+---
+ BUILD.gn                                      |   2 +
+ include/cef_extension_action.h                | 181 +++++++
+ include/views/cef_browser_view.h              |  28 ++
+ .../chrome/extensions/extension_actions.cc    | 469 ++++++++++++++++++
+ .../chrome/extensions/extension_actions.h     | 115 +++++
+ libcef/browser/views/browser_view_impl.cc     |  51 ++
+ libcef/browser/views/browser_view_impl.h      |  11 +
+ patch/patch.cfg                               |   5 +
+ ...rome_browser_ui_extension_popup_rect.patch | 133 +++++
+ 9 files changed, 995 insertions(+)
+ create mode 100644 include/cef_extension_action.h
+ create mode 100644 libcef/browser/chrome/extensions/extension_actions.cc
+ create mode 100644 libcef/browser/chrome/extensions/extension_actions.h
+ create mode 100644 patch/patches/chrome_browser_ui_extension_popup_rect.patch
+
+diff --git a/BUILD.gn b/BUILD.gn
+index dd0a558c0..212540530 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -578,6 +578,8 @@ source_set("libcef_static") {
+     "libcef/browser/chrome/extensions/chrome_extension_util.h",
+     "libcef/browser/chrome/extensions/chrome_mime_handler_view_guest_delegate_cef.cc",
+     "libcef/browser/chrome/extensions/chrome_mime_handler_view_guest_delegate_cef.h",
++    "libcef/browser/chrome/extensions/extension_actions.cc",
++    "libcef/browser/chrome/extensions/extension_actions.h",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.cc",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.h",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_views.cc",
+diff --git a/include/cef_extension_action.h b/include/cef_extension_action.h
+new file mode 100644
+index 000000000..72ae597f6
+--- /dev/null
++++ b/include/cef_extension_action.h
+@@ -0,0 +1,181 @@
++// Copyright (c) 2026 Noche. Portions Copyright (c) 2012 Marshall A. Greenblatt. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//    * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//    * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//    * Neither the name of Google Inc. nor the name Chromium Embedded
++// Framework nor the names of its contributors may be used to endorse
++// or promote products derived from this software without specific prior
++// written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++//
++// ---------------------------------------------------------------------------
++//
++// The contents of this file must follow a specific format in order to
++// support the CEF translator tool. See the translator.README.txt file in the
++// tools directory for more information.
++//
++
++#ifndef CEF_INCLUDE_CEF_EXTENSION_ACTION_H_
++#define CEF_INCLUDE_CEF_EXTENSION_ACTION_H_
++#pragma once
++
++#include "include/cef_api_hash.h"
++#include "include/cef_base.h"
++#include "include/cef_browser.h"
++#include "include/cef_image.h"
++
++#if CEF_API_ADDED(CEF_EXPERIMENTAL)
++
++///
++/// One extension toolbar action (chrome.action) of a Chrome style
++/// CefBrowserView, for an embedder that draws its own toolbar. Obtained from
++/// CefBrowserView::GetExtensionActions or a CefExtensionActionObserver. All
++/// methods must be called on the browser process UI thread. Methods taking a
++/// |tab| use the BrowserView's active tab when |tab| is NULL.
++///
++/*--cef(source=library,added=experimental)--*/
++class CefExtensionAction : public virtual CefBaseRefCounted {
++ public:
++  ///
++  /// Returns the extension id.
++  ///
++  /*--cef()--*/
++  virtual CefString GetId() = 0;
++
++  ///
++  /// Returns the extension name.
++  ///
++  /*--cef()--*/
++  virtual CefString GetName() = 0;
++
++  ///
++  /// Returns the action title for |tab| (chrome.action.setTitle).
++  ///
++  /*--cef(optional_param=tab)--*/
++  virtual CefString GetTitle(CefRefPtr<CefBrowser> tab) = 0;
++
++  ///
++  /// Returns the action icon for |tab| at |size_dip| x |size_dip|, with the
++  /// badge already drawn into it, or NULL. Representations for scale factors 1
++  /// and 2 are present. The icon can load asynchronously, so an icon that is
++  /// still fully transparent is replaced later: CefExtensionActionObserver::
++  /// OnActionUpdated is called.
++  ///
++  /*--cef(optional_param=tab)--*/
++  virtual CefRefPtr<CefImage> GetIcon(CefRefPtr<CefBrowser> tab,
++                                      int size_dip) = 0;
++
++  ///
++  /// Returns the badge text for |tab| (chrome.action.setBadgeText), or empty.
++  ///
++  /*--cef(optional_param=tab)--*/
++  virtual CefString GetBadgeText(CefRefPtr<CefBrowser> tab) = 0;
++
++  ///
++  /// Returns the badge text color for |tab| as ARGB.
++  ///
++  /*--cef(optional_param=tab,default_retval=0)--*/
++  virtual cef_color_t GetBadgeTextColor(CefRefPtr<CefBrowser> tab) = 0;
++
++  ///
++  /// Returns the badge background color for |tab| as ARGB.
++  ///
++  /*--cef(optional_param=tab,default_retval=0)--*/
++  virtual cef_color_t GetBadgeBackgroundColor(CefRefPtr<CefBrowser> tab) = 0;
++
++  ///
++  /// Returns true if the action is enabled for |tab|.
++  ///
++  /*--cef(optional_param=tab)--*/
++  virtual bool IsEnabled(CefRefPtr<CefBrowser> tab) = 0;
++
++  ///
++  /// Returns true if the user pinned the action to the toolbar.
++  ///
++  /*--cef()--*/
++  virtual bool IsPinned() = 0;
++
++  ///
++  /// Runs the action on the active tab as if the user clicked it: chrome.action.
++  /// onClicked fires, or the popup opens when the action has one. A popup is a
++  /// Chrome bubble anchored below |anchor_screen_rect| (DIP, screen
++  /// coordinates, origin at the top left of the primary display) as a child of
++  /// the BrowserView's window; it closes when the active tab changes or the
++  /// BrowserView's window is activated. With |activate| true the popup takes
++  /// focus and may activate the application. With false it is shown inactive:
++  /// the application is not activated and the popup never becomes the key
++  /// window. Returns false if the action is disabled or invalid.
++  ///
++  /*--cef()--*/
++  virtual bool Execute(const CefRect& anchor_screen_rect, bool activate) = 0;
++
++  ///
++  /// Returns true while this action's popup is showing.
++  ///
++  /*--cef()--*/
++  virtual bool IsShowingPopup() = 0;
++
++  ///
++  /// Closes this action's popup if it is showing.
++  ///
++  /*--cef()--*/
++  virtual void HidePopup() = 0;
++};
++
++///
++/// Implement this interface to be told about extension action changes. Add it
++/// with CefBrowserView::AddExtensionActionObserver. Methods are called
++/// asynchronously on the browser process UI thread, so they may call back into
++/// the API.
++///
++/*--cef(source=client,added=experimental)--*/
++class CefExtensionActionObserver : public virtual CefBaseRefCounted {
++ public:
++  ///
++  /// Called for an action that appeared, including each existing action once
++  /// the toolbar model is ready.
++  ///
++  /*--cef()--*/
++  virtual void OnActionAdded(CefRefPtr<CefExtensionAction> action) {}
++
++  ///
++  /// Called when the extension with |extension_id| was removed or unloaded.
++  ///
++  /*--cef()--*/
++  virtual void OnActionRemoved(const CefString& extension_id) {}
++
++  ///
++  /// Called when an action's icon, title, badge or state changed.
++  ///
++  /*--cef()--*/
++  virtual void OnActionUpdated(CefRefPtr<CefExtensionAction> action) {}
++
++  ///
++  /// Called when the set or order of pinned actions changed.
++  ///
++  /*--cef()--*/
++  virtual void OnPinnedActionsChanged() {}
++};
++
++#endif  // CEF_API_ADDED(CEF_EXPERIMENTAL)
++
++#endif  // CEF_INCLUDE_CEF_EXTENSION_ACTION_H_
+diff --git a/include/views/cef_browser_view.h b/include/views/cef_browser_view.h
+index aa272832e..42d54d1da 100644
+--- a/include/views/cef_browser_view.h
++++ b/include/views/cef_browser_view.h
+@@ -42,6 +42,7 @@
+ 
+ #include "include/cef_api_hash.h"
+ #include "include/cef_browser.h"
++#include "include/cef_extension_action.h"
+ #include "include/views/cef_browser_view_delegate.h"
+ #include "include/views/cef_view.h"
+ 
+@@ -181,6 +182,33 @@ class CefBrowserView : public CefView {
+   ///
+   /*--cef(added=experimental,count_func=tabs:GetTabCount)--*/
+   virtual void GetTabs(std::vector<CefRefPtr<CefBrowser>>& tabs) = 0;
++
++  ///
++  /// Retrieves the toolbar actions (chrome.action) of every extension enabled
++  /// in this BrowserView's profile, for an embedder that draws its own
++  /// toolbar. Only supported with Chrome style, after the first browser has
++  /// been created (CefBrowserViewDelegate::OnBrowserCreated). The list is
++  /// empty until Chrome has loaded the extensions; see
++  /// AddExtensionActionObserver.
++  ///
++  /*--cef(added=experimental,count_func=actions:GetExtensionActionCount)--*/
++  virtual void GetExtensionActions(
++      std::vector<CefRefPtr<CefExtensionAction>>& actions) = 0;
++
++  ///
++  /// Returns the number of extension actions.
++  ///
++  /*--cef(added=experimental)--*/
++  virtual size_t GetExtensionActionCount() = 0;
++
++  ///
++  /// Adds |observer|, which is told about changes to the extension actions
++  /// until this BrowserView is destroyed. Same restrictions as
++  /// GetExtensionActions.
++  ///
++  /*--cef(added=experimental)--*/
++  virtual void AddExtensionActionObserver(
++      CefRefPtr<CefExtensionActionObserver> observer) = 0;
+ #endif
+ };
+ 
+diff --git a/libcef/browser/chrome/extensions/extension_actions.cc b/libcef/browser/chrome/extensions/extension_actions.cc
+new file mode 100644
+index 000000000..6183d22fb
+--- /dev/null
++++ b/libcef/browser/chrome/extensions/extension_actions.cc
+@@ -0,0 +1,469 @@
++// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be found
++// in the LICENSE file.
++
++#include "cef/libcef/browser/chrome/extensions/extension_actions.h"
++
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/scoped_observation.h"
++#include "base/strings/utf_string_conversions.h"
++#include "cef/libcef/browser/browser_host_base.h"
++#include "cef/libcef/browser/image_impl.h"
++#include "cef/libcef/browser/thread_util.h"
++#include "chrome/browser/extensions/extension_tab_util.h"
++#include "chrome/browser/extensions/extension_view_host.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/extensions/extension_action_delegate.h"
++#include "chrome/browser/ui/extensions/extension_action_view_model.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/extensions/extension_popup.h"
++#include "content/public/browser/web_contents.h"
++#include "extensions/browser/extension_action.h"
++#include "extensions/browser/extension_action_manager.h"
++#include "extensions/browser/extension_host_observer.h"
++#include "extensions/browser/extension_registry.h"
++#include "ui/base/models/image_model.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/views/bubble/bubble_border.h"
++
++// Shows the popup of one action as a bubble anchored to a screen rect of the
++// embedder's own Widget (modelled on ExtensionActionDelegateDesktop, minus the
++// Chrome toolbar).
++class CefExtensionActionDelegate : public ExtensionActionDelegate,
++                                   public extensions::ExtensionHostObserver {
++ public:
++  explicit CefExtensionActionDelegate(CefExtensionActionsController* controller)
++      : controller_(controller) {}
++
++  // ExtensionActionDelegate:
++  void AttachToModel(ExtensionActionViewModel* model) override {}
++  void DetachFromModel() override {}
++  void RegisterCommand() override {}
++  void UnregisterCommand() override {}
++  bool IsShowingPopup() const override { return popup_host_ != nullptr; }
++
++  void HidePopup() override {
++    if (!popup_host_) {
++      return;
++    }
++    popup_host_->Close();
++    // Close() may finish later; keep IsShowingPopup() accurate right away.
++    if (popup_host_) {
++      OnPopupClosed();
++    }
++  }
++
++  gfx::NativeView GetPopupNativeView() override {
++    return popup_host_ && popup_host_->view() ? popup_host_->view()->GetNativeView()
++                                              : gfx::NativeView();
++  }
++
++  void TriggerPopup(std::unique_ptr<extensions::ExtensionViewHost> host,
++                    PopupShowAction show_action,
++                    bool by_user,
++                    ShowPopupCallback callback) override {
++    // One popup at a time.
++    controller_->HideAllPopups();
++
++    auto request = controller_->TakePopupRequest();
++    views::Widget* widget = controller_->anchor_widget();
++    if (!request || !widget) {
++      // Not started through CefExtensionAction::Execute(), e.g. a keyboard
++      // command: there is no anchor to show it at.
++      if (callback) {
++        std::move(callback).Run(nullptr);
++      }
++      return;
++    }
++
++    popup_host_ = host.get();
++    popup_host_observation_.Observe(popup_host_.get());
++    ExtensionPopup::ShowPopupAtRect(
++        controller_->browser(), std::move(host), widget, request->screen_rect,
++        views::BubbleBorder::TOP_LEFT, show_action, request->activate,
++        std::move(callback));
++  }
++
++  void ShowContextMenuAsFallback() override {}
++  void CloseExtensionsMenuIfOpen() override {}
++
++  content::WebContents* GetActiveWebContents() const override {
++    return controller_->GetActiveWebContents();
++  }
++
++  // extensions::ExtensionHostObserver:
++  void OnExtensionHostDestroyed(extensions::ExtensionHost* host) override {
++    OnPopupClosed();
++  }
++
++ private:
++  void OnPopupClosed() {
++    popup_host_observation_.Reset();
++    popup_host_ = nullptr;
++  }
++
++  const raw_ptr<CefExtensionActionsController> controller_;
++  raw_ptr<extensions::ExtensionViewHost> popup_host_;
++  base::ScopedObservation<extensions::ExtensionHost,
++                          extensions::ExtensionHostObserver>
++      popup_host_observation_{this};
++};
++
++namespace {
++
++class CefExtensionActionImpl : public CefExtensionAction {
++ public:
++  CefExtensionActionImpl(base::WeakPtr<CefExtensionActionsController> controller,
++                         std::string id)
++      : controller_(std::move(controller)), id_(std::move(id)) {}
++
++  CefString GetId() override { return id_; }
++
++  CefString GetName() override {
++    CEF_REQUIRE_UIT_RETURN(CefString());
++    return controller_ ? controller_->GetName(id_) : CefString();
++  }
++
++  CefString GetTitle(CefRefPtr<CefBrowser> tab) override {
++    CEF_REQUIRE_UIT_RETURN(CefString());
++    return controller_ ? controller_->GetTitle(id_, tab) : CefString();
++  }
++
++  CefRefPtr<CefImage> GetIcon(CefRefPtr<CefBrowser> tab,
++                              int size_dip) override {
++    CEF_REQUIRE_UIT_RETURN(nullptr);
++    return controller_ ? controller_->GetIcon(id_, tab, size_dip) : nullptr;
++  }
++
++  CefString GetBadgeText(CefRefPtr<CefBrowser> tab) override {
++    CEF_REQUIRE_UIT_RETURN(CefString());
++    return controller_ ? controller_->GetBadgeText(id_, tab) : CefString();
++  }
++
++  cef_color_t GetBadgeTextColor(CefRefPtr<CefBrowser> tab) override {
++    CEF_REQUIRE_UIT_RETURN(0);
++    return controller_ ? controller_->GetBadgeTextColor(id_, tab) : 0;
++  }
++
++  cef_color_t GetBadgeBackgroundColor(CefRefPtr<CefBrowser> tab) override {
++    CEF_REQUIRE_UIT_RETURN(0);
++    return controller_ ? controller_->GetBadgeBackgroundColor(id_, tab) : 0;
++  }
++
++  bool IsEnabled(CefRefPtr<CefBrowser> tab) override {
++    CEF_REQUIRE_UIT_RETURN(false);
++    return controller_ && controller_->IsEnabled(id_, tab);
++  }
++
++  bool IsPinned() override {
++    CEF_REQUIRE_UIT_RETURN(false);
++    return controller_ && controller_->IsPinned(id_);
++  }
++
++  bool Execute(const CefRect& anchor_screen_rect, bool activate) override {
++    CEF_REQUIRE_UIT_RETURN(false);
++    return controller_ && controller_->Execute(id_, anchor_screen_rect, activate);
++  }
++
++  bool IsShowingPopup() override {
++    CEF_REQUIRE_UIT_RETURN(false);
++    return controller_ && controller_->IsShowingPopup(id_);
++  }
++
++  void HidePopup() override {
++    CEF_REQUIRE_UIT_RETURN_VOID();
++    if (controller_) {
++      controller_->HidePopup(id_);
++    }
++  }
++
++ private:
++  const base::WeakPtr<CefExtensionActionsController> controller_;
++  const std::string id_;
++
++  IMPLEMENT_REFCOUNTING(CefExtensionActionImpl);
++};
++
++}  // namespace
++
++CefExtensionActionsController::CefExtensionActionsController(
++    BrowserWindowInterface* browser,
++    base::RepeatingCallback<views::Widget*()> anchor_widget)
++    : browser_(browser),
++      anchor_widget_(std::move(anchor_widget)),
++      model_(ToolbarActionsModel::Get(browser->GetProfile())) {
++  if (model_) {
++    model_->AddObserver(this);
++  }
++}
++
++CefExtensionActionsController::~CefExtensionActionsController() {
++  // A view model must not be destroyed while its popup shows.
++  HideAllPopups();
++  view_models_.clear();
++  if (model_) {
++    model_->RemoveObserver(this);
++  }
++}
++
++size_t CefExtensionActionsController::GetActions(
++    std::vector<CefRefPtr<CefExtensionAction>>* actions) {
++  size_t count = 0;
++  if (model_) {
++    for (const auto& id : model_->action_ids()) {
++      count++;
++      if (actions) {
++        actions->push_back(MakeAction(id));
++      }
++    }
++  }
++  return count;
++}
++
++void CefExtensionActionsController::AddObserver(
++    CefRefPtr<CefExtensionActionObserver> observer) {
++  observers_.push_back(observer);
++}
++
++CefRefPtr<CefExtensionAction> CefExtensionActionsController::MakeAction(
++    const std::string& id) {
++  return new CefExtensionActionImpl(weak_ptr_factory_.GetWeakPtr(), id);
++}
++
++content::WebContents* CefExtensionActionsController::GetActiveWebContents()
++    const {
++  return browser_->GetTabStripModel()->GetActiveWebContents();
++}
++
++content::WebContents* CefExtensionActionsController::GetContents(
++    CefRefPtr<CefBrowser> tab) {
++  if (tab) {
++    auto host = CefBrowserHostBase::FromBrowser(tab);
++    return host ? host->GetWebContents() : nullptr;
++  }
++  return GetActiveWebContents();
++}
++
++ExtensionActionViewModel* CefExtensionActionsController::GetViewModel(
++    const std::string& id) {
++  if (!model_ || !model_->HasAction(id)) {
++    return nullptr;
++  }
++  auto it = view_models_.find(id);
++  if (it == view_models_.end()) {
++    // Create() requires an enabled extension with an action.
++    auto* registry = extensions::ExtensionRegistry::Get(browser_->GetProfile());
++    if (!registry->enabled_extensions().GetByID(id)) {
++      return nullptr;
++    }
++    it = view_models_
++             .emplace(id, ExtensionActionViewModel::Create(
++                              id, browser_,
++                              std::make_unique<CefExtensionActionDelegate>(this)))
++             .first;
++  }
++  return it->second.get();
++}
++
++extensions::ExtensionAction* CefExtensionActionsController::GetAction(
++    const std::string& id) {
++  auto* profile = browser_->GetProfile();
++  auto* extension = extensions::ExtensionRegistry::Get(profile)
++                        ->enabled_extensions()
++                        .GetByID(id);
++  return extension ? extensions::ExtensionActionManager::Get(profile)
++                         ->GetExtensionAction(*extension)
++                   : nullptr;
++}
++
++CefString CefExtensionActionsController::GetName(const std::string& id) {
++  auto* vm = GetViewModel(id);
++  return vm ? CefString(base::UTF16ToUTF8(vm->GetActionName())) : CefString();
++}
++
++CefString CefExtensionActionsController::GetTitle(const std::string& id,
++                                                  CefRefPtr<CefBrowser> tab) {
++  auto* vm = GetViewModel(id);
++  auto* contents = GetContents(tab);
++  return vm && contents
++             ? CefString(base::UTF16ToUTF8(vm->GetActionTitle(contents)))
++             : CefString();
++}
++
++CefRefPtr<CefImage> CefExtensionActionsController::GetIcon(
++    const std::string& id,
++    CefRefPtr<CefBrowser> tab,
++    int size_dip) {
++  auto* vm = GetViewModel(id);
++  auto* contents = GetContents(tab);
++  if (!vm || !contents || size_dip <= 0) {
++    return nullptr;
++  }
++  ui::ImageModel model = vm->GetIcon(contents, gfx::Size(size_dip, size_dip));
++  if (!model.IsImage()) {
++    return nullptr;
++  }
++  // The icon is drawn lazily per scale factor: draw both now so CefImage has
++  // them (GetAsBitmap() may be called later, on another thread).
++  gfx::ImageSkia skia = model.GetImage().AsImageSkia();
++  skia.GetRepresentation(1.0f);
++  skia.GetRepresentation(2.0f);
++  return new CefImageImpl(skia);
++}
++
++CefString CefExtensionActionsController::GetBadgeText(
++    const std::string& id,
++    CefRefPtr<CefBrowser> tab) {
++  auto* action = GetAction(id);
++  auto* contents = GetContents(tab);
++  return action ? CefString(action->GetDisplayBadgeText(
++                      extensions::ExtensionTabUtil::GetTabId(contents)))
++                : CefString();
++}
++
++cef_color_t CefExtensionActionsController::GetBadgeTextColor(
++    const std::string& id,
++    CefRefPtr<CefBrowser> tab) {
++  auto* action = GetAction(id);
++  return action ? action->GetBadgeTextColor(
++                      extensions::ExtensionTabUtil::GetTabId(GetContents(tab)))
++                : 0;
++}
++
++cef_color_t CefExtensionActionsController::GetBadgeBackgroundColor(
++    const std::string& id,
++    CefRefPtr<CefBrowser> tab) {
++  auto* action = GetAction(id);
++  return action ? action->GetBadgeBackgroundColor(
++                      extensions::ExtensionTabUtil::GetTabId(GetContents(tab)))
++                : 0;
++}
++
++bool CefExtensionActionsController::IsEnabled(const std::string& id,
++                                              CefRefPtr<CefBrowser> tab) {
++  auto* vm = GetViewModel(id);
++  return vm && vm->IsEnabled(GetContents(tab));
++}
++
++bool CefExtensionActionsController::IsPinned(const std::string& id) {
++  return model_ && model_->IsActionPinned(id);
++}
++
++bool CefExtensionActionsController::Execute(const std::string& id,
++                                            const CefRect& anchor_screen_rect,
++                                            bool activate) {
++  auto* vm = GetViewModel(id);
++  if (!vm || !vm->IsEnabled(GetActiveWebContents())) {
++    return false;
++  }
++  popup_request_ = PopupRequest{
++      gfx::Rect(anchor_screen_rect.x, anchor_screen_rect.y,
++                anchor_screen_rect.width, anchor_screen_rect.height),
++      activate};
++  vm->ExecuteUserAction(ToolbarActionViewModel::InvocationSource::kToolbarButton);
++  popup_request_.reset();
++  return true;
++}
++
++bool CefExtensionActionsController::IsShowingPopup(const std::string& id) {
++  auto it = view_models_.find(id);
++  return it != view_models_.end() && it->second->IsShowingPopup();
++}
++
++void CefExtensionActionsController::HidePopup(const std::string& id) {
++  auto it = view_models_.find(id);
++  if (it != view_models_.end()) {
++    it->second->HidePopup();
++  }
++}
++
++void CefExtensionActionsController::HideAllPopups() {
++  for (auto& [id, vm] : view_models_) {
++    vm->HidePopup();
++  }
++}
++
++std::optional<CefExtensionActionsController::PopupRequest>
++CefExtensionActionsController::TakePopupRequest() {
++  auto request = std::move(popup_request_);
++  popup_request_.reset();
++  return request;
++}
++
++void CefExtensionActionsController::OnToolbarActionAdded(
++    const ToolbarActionsModel::ActionId& id) {
++  CEF_POST_TASK(CEF_UIT,
++                base::BindOnce(&CefExtensionActionsController::NotifyAdded,
++                               weak_ptr_factory_.GetWeakPtr(), id));
++}
++
++void CefExtensionActionsController::OnToolbarActionRemoved(
++    const ToolbarActionsModel::ActionId& id) {
++  auto it = view_models_.find(id);
++  if (it != view_models_.end()) {
++    it->second->HidePopup();
++    view_models_.erase(it);
++  }
++  CEF_POST_TASK(CEF_UIT,
++                base::BindOnce(&CefExtensionActionsController::NotifyRemoved,
++                               weak_ptr_factory_.GetWeakPtr(), id));
++}
++
++void CefExtensionActionsController::OnToolbarActionUpdated(
++    const ToolbarActionsModel::ActionId& id) {
++  CEF_POST_TASK(CEF_UIT,
++                base::BindOnce(&CefExtensionActionsController::NotifyUpdated,
++                               weak_ptr_factory_.GetWeakPtr(), id));
++}
++
++void CefExtensionActionsController::OnToolbarModelInitialized() {
++  // Each action that existed before the model was ready is reported as added.
++  for (const auto& id : model_->action_ids()) {
++    OnToolbarActionAdded(id);
++  }
++}
++
++void CefExtensionActionsController::OnToolbarPinnedActionsChanged() {
++  CEF_POST_TASK(
++      CEF_UIT,
++      base::BindOnce(&CefExtensionActionsController::NotifyPinnedChanged,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void CefExtensionActionsController::OnToolbarActionsModelShutdown() {
++  HideAllPopups();
++  view_models_.clear();
++  model_->RemoveObserver(this);
++  model_ = nullptr;
++}
++
++void CefExtensionActionsController::NotifyAdded(std::string id) {
++  auto observers = observers_;
++  for (auto& o : observers) {
++    o->OnActionAdded(MakeAction(id));
++  }
++}
++
++void CefExtensionActionsController::NotifyRemoved(std::string id) {
++  auto observers = observers_;
++  for (auto& o : observers) {
++    o->OnActionRemoved(id);
++  }
++}
++
++void CefExtensionActionsController::NotifyUpdated(std::string id) {
++  auto observers = observers_;
++  for (auto& o : observers) {
++    o->OnActionUpdated(MakeAction(id));
++  }
++}
++
++void CefExtensionActionsController::NotifyPinnedChanged() {
++  auto observers = observers_;
++  for (auto& o : observers) {
++    o->OnPinnedActionsChanged();
++  }
++}
+diff --git a/libcef/browser/chrome/extensions/extension_actions.h b/libcef/browser/chrome/extensions/extension_actions.h
+new file mode 100644
+index 000000000..63ef3b898
+--- /dev/null
++++ b/libcef/browser/chrome/extensions/extension_actions.h
+@@ -0,0 +1,115 @@
++// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be found
++// in the LICENSE file.
++
++#ifndef CEF_LIBCEF_BROWSER_CHROME_EXTENSIONS_EXTENSION_ACTIONS_H_
++#define CEF_LIBCEF_BROWSER_CHROME_EXTENSIONS_EXTENSION_ACTIONS_H_
++#pragma once
++
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "cef/include/cef_extension_action.h"
++#include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
++#include "ui/gfx/geometry/rect.h"
++
++class BrowserWindowInterface;
++class ExtensionActionViewModel;
++class CefExtensionActionDelegate;
++
++namespace content {
++class WebContents;
++}
++
++namespace extensions {
++class ExtensionAction;
++}
++
++namespace views {
++class Widget;
++}
++
++// Bridges ToolbarActionsModel and ExtensionActionViewModel to the
++// CefExtensionAction API for one Views-hosted Chrome style Browser. Owned by
++// CefBrowserViewImpl. UI thread only.
++class CefExtensionActionsController : public ToolbarActionsModel::Observer {
++ public:
++  // |anchor_widget| returns the CEF Widget the popup bubble is parented to.
++  CefExtensionActionsController(
++      BrowserWindowInterface* browser,
++      base::RepeatingCallback<views::Widget*()> anchor_widget);
++  ~CefExtensionActionsController() override;
++
++  size_t GetActions(std::vector<CefRefPtr<CefExtensionAction>>* actions);
++  void AddObserver(CefRefPtr<CefExtensionActionObserver> observer);
++
++  // CefExtensionAction implementation, keyed by extension id. |tab| NULL means
++  // the active tab.
++  CefString GetName(const std::string& id);
++  CefString GetTitle(const std::string& id, CefRefPtr<CefBrowser> tab);
++  CefRefPtr<CefImage> GetIcon(const std::string& id,
++                              CefRefPtr<CefBrowser> tab,
++                              int size_dip);
++  CefString GetBadgeText(const std::string& id, CefRefPtr<CefBrowser> tab);
++  cef_color_t GetBadgeTextColor(const std::string& id,
++                                CefRefPtr<CefBrowser> tab);
++  cef_color_t GetBadgeBackgroundColor(const std::string& id,
++                                      CefRefPtr<CefBrowser> tab);
++  bool IsEnabled(const std::string& id, CefRefPtr<CefBrowser> tab);
++  bool IsPinned(const std::string& id);
++  bool Execute(const std::string& id,
++               const CefRect& anchor_screen_rect,
++               bool activate);
++  bool IsShowingPopup(const std::string& id);
++  void HidePopup(const std::string& id);
++
++  // Used by CefExtensionActionDelegate.
++  BrowserWindowInterface* browser() const { return browser_; }
++  views::Widget* anchor_widget() const { return anchor_widget_.Run(); }
++  content::WebContents* GetActiveWebContents() const;
++  struct PopupRequest {
++    gfx::Rect screen_rect;
++    bool activate;
++  };
++  // Set by Execute() for the TriggerPopup() call it causes; consumed there.
++  std::optional<PopupRequest> TakePopupRequest();
++  void HideAllPopups();
++
++ private:
++  // ToolbarActionsModel::Observer:
++  void OnToolbarActionAdded(const ToolbarActionsModel::ActionId& id) override;
++  void OnToolbarActionRemoved(const ToolbarActionsModel::ActionId& id) override;
++  void OnToolbarActionUpdated(const ToolbarActionsModel::ActionId& id) override;
++  void OnToolbarModelInitialized() override;
++  void OnToolbarPinnedActionsChanged() override;
++  void OnToolbarActionsModelShutdown() override;
++
++  ExtensionActionViewModel* GetViewModel(const std::string& id);
++  extensions::ExtensionAction* GetAction(const std::string& id);
++  content::WebContents* GetContents(CefRefPtr<CefBrowser> tab);
++  CefRefPtr<CefExtensionAction> MakeAction(const std::string& id);
++
++  // Observer callbacks run from a posted task: calling out synchronously from
++  // a Chromium observer notification can re-enter Chromium.
++  void NotifyAdded(std::string id);
++  void NotifyRemoved(std::string id);
++  void NotifyUpdated(std::string id);
++  void NotifyPinnedChanged();
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++  const base::RepeatingCallback<views::Widget*()> anchor_widget_;
++  raw_ptr<ToolbarActionsModel> model_;
++  std::map<std::string, std::unique_ptr<ExtensionActionViewModel>> view_models_;
++  std::vector<CefRefPtr<CefExtensionActionObserver>> observers_;
++  std::optional<PopupRequest> popup_request_;
++
++  base::WeakPtrFactory<CefExtensionActionsController> weak_ptr_factory_{this};
++};
++
++#endif  // CEF_LIBCEF_BROWSER_CHROME_EXTENSIONS_EXTENSION_ACTIONS_H_
+diff --git a/libcef/browser/views/browser_view_impl.cc b/libcef/browser/views/browser_view_impl.cc
+index 4608c8f25..50a20a66b 100644
+--- a/libcef/browser/views/browser_view_impl.cc
++++ b/libcef/browser/views/browser_view_impl.cc
+@@ -12,6 +12,7 @@
+ #include "cef/libcef/browser/browser_host_base.h"
+ #include "cef/libcef/browser/chrome/chrome_browser_delegate.h"
+ #include "cef/libcef/browser/chrome/chrome_browser_host_impl.h"
++#include "cef/libcef/browser/chrome/extensions/extension_actions.h"
+ #include "cef/libcef/browser/chrome/views/chrome_browser_view.h"
+ #include "cef/libcef/browser/context.h"
+ #include "cef/libcef/browser/request_context_impl.h"
+@@ -22,6 +23,7 @@
+ #include "cef/libcef/common/net/url_util.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "components/input/native_web_keyboard_event.h"
+ #include "ui/content_accelerators/accelerator_util.h"
+@@ -191,6 +193,9 @@ void CefBrowserViewImpl::WebContentsDestroyed(
+     return;
+   }
+ 
++  // The action view models point at the Browser, which goes with the last tab.
++  actions_.reset();
++
+   DisassociateFromWidget();
+ 
+   if (web_view()) {
+@@ -392,6 +397,52 @@ void CefBrowserViewImpl::GetTabs(std::vector<CefRefPtr<CefBrowser>>& tabs) {
+   }
+ }
+ 
++views::Widget* CefBrowserViewImpl::GetAnchorWidget() {
++  return root_view() ? chrome_browser_view()->GetWidget() : nullptr;
++}
++
++CefExtensionActionsController* CefBrowserViewImpl::GetActionsController() {
++  if (is_alloy_style_ || !browser_ || !root_view()) {
++    return nullptr;
++  }
++  if (!actions_) {
++    auto* browser = chrome_browser_view()->browser();
++    if (!browser) {
++      return nullptr;
++    }
++    actions_ = std::make_unique<CefExtensionActionsController>(
++        browser, base::BindRepeating(&CefBrowserViewImpl::GetAnchorWidget,
++                                     base::Unretained(this)));
++  }
++  return actions_.get();
++}
++
++void CefBrowserViewImpl::GetExtensionActions(
++    std::vector<CefRefPtr<CefExtensionAction>>& actions) {
++  CEF_REQUIRE_VALID_RETURN_VOID();
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  actions.clear();
++  if (auto* controller = GetActionsController()) {
++    controller->GetActions(&actions);
++  }
++}
++
++size_t CefBrowserViewImpl::GetExtensionActionCount() {
++  CEF_REQUIRE_VALID_RETURN(0);
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  auto* controller = GetActionsController();
++  return controller ? controller->GetActions(nullptr) : 0;
++}
++
++void CefBrowserViewImpl::AddExtensionActionObserver(
++    CefRefPtr<CefExtensionActionObserver> observer) {
++  CEF_REQUIRE_VALID_RETURN_VOID();
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  if (auto* controller = GetActionsController(); controller && observer) {
++    controller->AddObserver(observer);
++  }
++}
++
+ void CefBrowserViewImpl::OnTabInserted(content::WebContents* contents,
+                                        bool active) {
+   // The first tab is reported through OnBrowserCreated() only.
+diff --git a/libcef/browser/views/browser_view_impl.h b/libcef/browser/views/browser_view_impl.h
+index a9bbe7b92..31d40ef23 100644
+--- a/libcef/browser/views/browser_view_impl.h
++++ b/libcef/browser/views/browser_view_impl.h
+@@ -6,6 +6,7 @@
+ #define CEF_LIBCEF_BROWSER_VIEWS_BROWSER_VIEW_IMPL_H_
+ #pragma once
+ 
++#include <memory>
+ #include <optional>
+ #include <vector>
+ 
+@@ -22,6 +23,7 @@
+ 
+ class CefBrowserHostBase;
+ class CefWidget;
++class CefExtensionActionsController;
+ class CefWindowImpl;
+ class ChromeBrowserView;
+ class Profile;
+@@ -96,6 +98,11 @@ class CefBrowserViewImpl
+   CefRefPtr<CefBrowser> GetActiveTab() override;
+   size_t GetTabCount() override;
+   void GetTabs(std::vector<CefRefPtr<CefBrowser>>& tabs) override;
++  void GetExtensionActions(
++      std::vector<CefRefPtr<CefExtensionAction>>& actions) override;
++  size_t GetExtensionActionCount() override;
++  void AddExtensionActionObserver(
++      CefRefPtr<CefExtensionActionObserver> observer) override;
+ 
+   // CefView methods:
+   CefRefPtr<CefBrowserView> AsBrowserView() override { return this; }
+@@ -169,6 +176,10 @@ class CefBrowserViewImpl
+   // tab of the Browser in creation order. With Alloy style |tabs_| is unused.
+   CefRefPtr<CefBrowserHostBase> browser_;
+   std::vector<CefRefPtr<CefBrowserHostBase>> tabs_;
++  // Created on first use (Chrome style only); gone before the Browser is.
++  CefExtensionActionsController* GetActionsController();
++  views::Widget* GetAnchorWidget();
++  std::unique_ptr<CefExtensionActionsController> actions_;
+   // WebContents created and not yet destroyed (tabs_ lags: see
+   // WebContentsDestroyed).
+   size_t live_contents_ = 0;
+diff --git a/patch/patch.cfg b/patch/patch.cfg
+index 52847485f..ec3b22ab9 100644
+--- a/patch/patch.cfg
++++ b/patch/patch.cfg
+@@ -923,5 +923,10 @@ patches = [
+     # Noche: allow new tabs in a Views-hosted CEF Browser (one Chrome style
+     # BrowserView holding many tabs) instead of opening a separate window.
+     'name': 'chrome_browser_navigator_tabs',
++  },
++  {
++    # Noche: ExtensionPopup::ShowPopupAtRect, a popup bubble anchored to a
++    # screen rect of an embedder window (no toolbar), optionally inactive.
++    'name': 'chrome_browser_ui_extension_popup_rect',
+   }
+ ]
+diff --git a/patch/patches/chrome_browser_ui_extension_popup_rect.patch b/patch/patches/chrome_browser_ui_extension_popup_rect.patch
+new file mode 100644
+index 000000000..7d45f45d6
+--- /dev/null
++++ b/patch/patches/chrome_browser_ui_extension_popup_rect.patch
+@@ -0,0 +1,133 @@
++diff --git chrome/browser/ui/views/extensions/extension_popup.cc chrome/browser/ui/views/extensions/extension_popup.cc
++index f209fe05f1e8b4961c2a6f11fbafc9123ba0fc4e..10b3abab9535c0e688f37ebface5c1d3aa08814b 100644
++--- chrome/browser/ui/views/extensions/extension_popup.cc
+++++ chrome/browser/ui/views/extensions/extension_popup.cc
++@@ -19,6 +19,7 @@
++ #include "content/public/browser/web_contents.h"
++ #include "ui/base/metadata/metadata_impl_macros.h"
++ #include "ui/base/mojom/dialog_button.mojom.h"
+++#include "ui/display/screen.h"
++ #include "ui/gfx/geometry/insets.h"
++ #include "ui/gfx/geometry/rounded_corners_f.h"
++ #include "ui/views/border.h"
++@@ -80,6 +81,24 @@ void ExtensionPopup::ShowPopup(
++ #endif
++ }
++ 
+++// static
+++void ExtensionPopup::ShowPopupAtRect(
+++    BrowserWindowInterface* browser,
+++    std::unique_ptr<extensions::ExtensionViewHost> host,
+++    views::Widget* anchor_widget,
+++    const gfx::Rect& screen_anchor,
+++    views::BubbleBorder::Arrow arrow,
+++    PopupShowAction show_action,
+++    bool activate,
+++    ShowPopupCallback callback) {
+++  CHECK(anchor_widget);
+++  auto* popup = new ExtensionPopup(browser, std::move(host),
+++                                   views::BubbleAnchor(), arrow, show_action,
+++                                   std::move(callback), anchor_widget,
+++                                   screen_anchor, activate);
+++  views::BubbleDialogDelegateView::CreateBubble(popup);
+++}
+++
++ ExtensionPopup::~ExtensionPopup() {
++   // The ExtensionPopup may close before it was ever shown. If so, indicate such
++   // through the callback.
++@@ -192,6 +211,16 @@ gfx::Size ExtensionPopup::GetMaxBounds() {
++ #endif
++ 
++   gfx::Size max_size = kMaxSize;
+++  if (GetAnchor().IsNull()) {
+++    // Anchored to a rect (ShowPopupAtRect), so there is no anchor view to
+++    // measure from.
+++    max_size.SetToMin(display::Screen::Get()
+++                          ->GetDisplayNearestPoint(GetAnchorRect().CenterPoint())
+++                          .work_area()
+++                          .size());
+++    max_size.SetToMax(kMinSize);
+++    return max_size;
+++  }
++   max_size.SetToMin(
++       BubbleDialogDelegate::GetMaxAvailableScreenSpaceToPlaceBubble(
++           GetAnchor(), arrow(), adjust_if_offscreen(),
++@@ -256,7 +285,10 @@ ExtensionPopup::ExtensionPopup(
++     views::BubbleAnchor anchor,
++     views::BubbleBorder::Arrow arrow,
++     PopupShowAction show_action,
++-    ShowPopupCallback callback)
+++    ShowPopupCallback callback,
+++    views::Widget* anchor_widget,
+++    const gfx::Rect& screen_anchor,
+++    bool activate)
++     : BubbleDialogDelegateView(anchor,
++                                arrow,
++                                views::BubbleBorder::STANDARD_SHADOW,
++@@ -267,6 +299,15 @@ ExtensionPopup::ExtensionPopup(
++       shown_callback_(std::move(callback)),
++       deferred_close_weak_ptr_factory_(this) {
++   g_last_popup_for_testing = this;
+++  // Before anything below asks for the anchor (max bounds, CHECK(anchor_widget())).
+++  if (anchor_widget) {
+++    SetAnchorWidget(anchor_widget);
+++    SetAnchorRect(screen_anchor);
+++  }
+++  if (!activate) {
+++    // Widget::Show() then shows the bubble inactive (kInactive).
+++    SetCanActivate(false);
+++  }
++   SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++   set_use_round_corners(false);
++ 
++@@ -336,8 +377,11 @@ void ExtensionPopup::ShowBubble() {
++   GetWidget()->Show();
++   withheld_from_view_.reset();
++ 
++-  // Focus on the host contents when the bubble is first shown.
++-  host_->host_contents()->Focus();
+++  // Focus on the host contents when the bubble is first shown. An inactive
+++  // bubble must not take focus.
+++  if (CanActivate()) {
+++    host_->host_contents()->Focus();
+++  }
++ 
++   if (show_action_ == PopupShowAction::kShowAndInspect) {
++     DevToolsWindow::OpenDevToolsWindow(
++diff --git chrome/browser/ui/views/extensions/extension_popup.h chrome/browser/ui/views/extensions/extension_popup.h
++index 642dfef01b6d2b9dbefdcbe874cf76549940f95c..418dcd946186ef52b8aec41251b0e9d7406e3619 100644
++--- chrome/browser/ui/views/extensions/extension_popup.h
+++++ chrome/browser/ui/views/extensions/extension_popup.h
++@@ -67,6 +67,20 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
++                         PopupShowAction show_action,
++                         ShowPopupCallback callback);
++ 
+++  // Noche (CEF embedders): like ShowPopup(), but the bubble is anchored to
+++  // |screen_anchor| (screen DIP) of |anchor_widget|, a window that has no
+++  // Chrome toolbar. With |activate| false the bubble is shown inactive: it
+++  // does not activate the application or become the key window.
+++  static void ShowPopupAtRect(
+++      BrowserWindowInterface* browser,
+++      std::unique_ptr<extensions::ExtensionViewHost> host,
+++      views::Widget* anchor_widget,
+++      const gfx::Rect& screen_anchor,
+++      views::BubbleBorder::Arrow arrow,
+++      PopupShowAction show_action,
+++      bool activate,
+++      ShowPopupCallback callback);
+++
++   ExtensionPopup(const ExtensionPopup&) = delete;
++   ExtensionPopup& operator=(const ExtensionPopup&) = delete;
++   ~ExtensionPopup() override;
++@@ -120,7 +134,10 @@ class ExtensionPopup : public views::BubbleDialogDelegateView,
++                  views::BubbleAnchor anchor,
++                  views::BubbleBorder::Arrow arrow,
++                  PopupShowAction show_action,
++-                 ShowPopupCallback callback);
+++                 ShowPopupCallback callback,
+++                 views::Widget* anchor_widget = nullptr,
+++                 const gfx::Rect& screen_anchor = gfx::Rect(),
+++                 bool activate = true);
++ 
++   // Shows the bubble, focuses its content, and registers listeners.
++   void ShowBubble();
+-- 
+2.56.0
+

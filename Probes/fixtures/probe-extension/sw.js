@@ -1,12 +1,13 @@
+// Also sets the badge ("badge") and drives the action popup: the popup reports its tabId ("popup") and clicks ("popupClick"), "popupclick" clicks it over the debugger API.
 // Answers {what:"tabs"} with what chrome.tabs sees, runs the probe commands create/activate, and keeps the tabId the popup resolved.
-let popupTab = null;
-console.log("NOCHE-SW loaded v1.2");
+let popupTab = null, popupClicks = 0;
+console.log("NOCHE-SW loaded v1.3");
 self.addEventListener("unhandledrejection", (e) => console.log("NOCHE-SW unhandledrejection", String(e.reason)));
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   console.log("NOCHE-SW msg", JSON.stringify(msg));
   if (msg && msg.what === "tabs") {
     Promise.all([chrome.tabs.query({}), chrome.tabs.query({ active: true })]).then(([all, act]) =>
-      reply({ sw: "1.2", count: all.length, ids: all.map((t) => t.id), activeId: act.length ? act[0].id : null }));
+      reply({ sw: "1.3", count: all.length, ids: all.map((t) => t.id), activeId: act.length ? act[0].id : null }));
     return true;
   }
   if (msg && msg.what === "create") {
@@ -25,6 +26,26 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }).catch((e) => reply({ error: "activate rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
+  if (msg && msg.what === "badge") {  // sets the badge for every tab: text and a #RRGGBB background
+    Promise.all([chrome.action.setBadgeText({ text: msg.text }), chrome.action.setBadgeBackgroundColor({ color: msg.color })])
+      .then(() => reply({ ok: true }), (e) => reply({ error: "badge rejected: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
   if (msg && msg.what === "popup") { popupTab = msg.tabId; reply({ ok: true }); return; }
-  if (msg && msg.what === "popupTab") { reply({ tabId: popupTab }); return; }
+  if (msg && msg.what === "popupClick") { popupClicks++; reply({ ok: true }); return; }
+  if (msg && msg.what === "popupTab") { reply({ tabId: popupTab, clicks: popupClicks }); return; }
+  if (msg && msg.what === "popupclick") {  // a CDP mouse click on #b in the open popup
+    chrome.debugger.getTargets().then((ts) => {
+      const t = ts.find((x) => x.url && x.url.endsWith("/popup.html"));
+      if (!t) { reply({ error: "no popup target among " + ts.map((x) => x.type + ":" + x.url).join(" ") }); return; }
+      const target = { targetId: t.id };
+      return chrome.debugger.attach(target, "1.3").then(async () => {
+        for (const type of ["mousePressed", "mouseReleased"])
+          await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: 40, y: 20, button: "left", clickCount: 1 });
+        await chrome.debugger.detach(target);
+        reply({ ok: true });
+      });
+    }).catch((e) => reply({ error: "popupclick failed: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
 });
