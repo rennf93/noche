@@ -126,6 +126,8 @@ final class SelfTest {
             case "sidebar-scroll": await sidebarScroll()
             case "shortcuts-once": await shortcutsOnce()
             case "eval-async": await evalAsync()
+            case "focus-return": await focusReturn()
+            case "newtab-surface": await newTabSurface()
             case "no-zombie-tab": await noZombieTab()
             case "devtools-quit": await devToolsQuit()
             case "devtools-any-path": await devToolsAnyPath()

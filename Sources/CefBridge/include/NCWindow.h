@@ -38,6 +38,11 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// setting it again re-applies the layout.
 @property(nonatomic) NSEdgeInsets webInsets;
 @property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (0: no mask), re-applied on every bounds change
+/// YES hides the page view (the tab stays alive and its renderer keeps running) so what is behind the web rect shows through;
+/// NO shows it again at the same insets and mask.
+@property(nonatomic) BOOL webContentHidden;
+/// Gives keyboard focus back to the active tab's page (after an AppKit view held it).
+- (void)focusActiveContent;
 @property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
 @property(nonatomic, readonly, nullable) NCTab *activeTab;
 @property(nonatomic, readonly) NSInteger devToolsCount;          // DevTools browsers open for this window's tabs

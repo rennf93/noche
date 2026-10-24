@@ -204,6 +204,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   BOOL _firstEmitted, _closeRequested;
   NSEdgeInsets _webInsets;
   CGFloat _webCornerRadius;
+  BOOL _webContentHidden;
   CAShapeLayer* _mask;
   // What the layout and the mask were last built from, so the same inputs build nothing (the sidebar motion sets insets every tick).
   CefInsets _layoutInsets;
@@ -214,7 +215,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 @synthesize nsWindow = _nsWindow;
-@synthesize webInsets = _webInsets, webCornerRadius = _webCornerRadius;
+@synthesize webContentHidden = _webContentHidden, webInsets = _webInsets, webCornerRadius = _webCornerRadius;
 #ifdef NOCHE_TESTHOOKS
 - (NSInteger)testLayoutPasses { return _layoutPasses; }
 - (NSInteger)testMaskPasses { return _maskPasses; }
@@ -355,6 +356,30 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (void)setWebInsets:(NSEdgeInsets)insets {
   _webInsets = insets;
   [self applyLayout];
+}
+
+// The Views view's visibility, not the layer: the WebContents stays attached and visible to CEF's lifecycle checks as before.
+- (void)setWebContentHidden:(BOOL)hidden {
+  if (NC_TEST_FLAG("NOCHE_TEST_NO_HIDE")) return;  // negative control: the page view never hides
+  _webContentHidden = hidden;
+  if (!_view) return;
+  _view->SetVisible(!hidden);
+  if (_window) _window->Layout();
+}
+
+- (void)focusActiveContent {
+  if (NC_TEST_FLAG("NOCHE_TEST_NO_FOCUS")) return;  // negative control: focus stays where it is
+  if (!_view) return;
+  _view->RequestFocus();
+  if (CefRefPtr<CefBrowser> b = _view->GetActiveTab()) b->GetHost()->SetFocus(true);
+  // Views records the focus but leaves AppKit's first responder alone while the window is not key (hidden runs, a window
+  // behind another): then the page's own responder takes it, as content would on a key window.
+  NSView* page = self.webView;
+  NSResponder* r = _nsWindow.firstResponder;
+  if (page && !([r isKindOfClass:NSView.class] && [(NSView*)r isDescendantOf:page])) {
+    NSView* target = FindByClass(page, @"RenderWidgetHostViewCocoa");
+    if (target) [_nsWindow makeFirstResponder:target];
+  }
 }
 
 - (void)setWebCornerRadius:(CGFloat)radius {

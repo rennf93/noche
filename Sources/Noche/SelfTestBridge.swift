@@ -169,5 +169,43 @@ extension SelfTest {
         line("info", "tabs=\(tabsAtQuit) loaded=\(loads) devtools=\(NCWindow.devToolsCreated()), sending the Quit menu action")
         quitViaMenu()
     }
+
+    // MARK: focus return and hidden page surface (M1.3 Task 3)
+
+    /// An AppKit field takes first responder, then focusActiveContent gives it back to the page's view.
+    func focusReturn() async {
+        guard await ready(), let win, let ns = win.nsWindow, let host = win.chromeHost else { return }
+        func inPage() -> Bool {
+            guard let page = win.webView, let r = ns.firstResponder as? NSView else { return false }
+            return r === page || r.isDescendant(of: page)
+        }
+        let field = NSTextField(frame: NSRect(x: 300, y: 300, width: 200, height: 24))
+        host.addSubview(field)
+        defer { field.removeFromSuperview() }
+        guard ns.makeFirstResponder(field), field.currentEditor() != nil, !inPage() else {
+            return finish(false, "the AppKit field did not take first responder (\(String(describing: ns.firstResponder)))")
+        }
+        win.focusActiveContent()
+        let back = await until(5, { inPage() && field.currentEditor() == nil })
+        finish(back, "field editor first responder, then focusActiveContent: page view first responder=\(inPage()) field editing=\(field.currentEditor() != nil) responder=\(String(describing: ns.firstResponder))")
+    }
+
+    /// webContentHidden hides the page view and keeps the tab alive; NO restores the view, its insets and the corner mask.
+    func newTabSurface() async {
+        guard await ready(), let win, let tab = win.activeTab else { return }
+        win.webInsets = NSEdgeInsets(top: 48, left: 198, bottom: 7, right: 7)
+        win.webCornerRadius = 10
+        func rect() -> NSRect? { win.webView.map { $0.convert($0.bounds, to: nil) } }
+        guard await until(10, { rect() != nil && win.webMaskExists }), let before = rect() else { return finish(false, "no page view or mask before hiding") }
+        win.webContentHidden = true
+        let hid = await until(5, { win.webView == nil })
+        let alive = win.tabs.count == 1 && win.activeTab === tab
+        let sum = await evaluate(tab, "1 + 2")
+        win.webContentHidden = false
+        let shown = await until(5, { rect().map { self.near($0, before.minX, before.minY, before.width, before.height) } ?? false })
+        let masked = await until(5, { win.webMaskExists })
+        finish(hid && alive && sum == "3" && shown && masked && win.tabs.count == 1,
+               "hidden: view gone=\(hid) tabs=\(win.tabs.count) same tab=\(alive) JS in the hidden tab=\(sum ?? "nil"); shown again at \(before): \(shown) mask=\(masked)")
+    }
 }
 #endif
