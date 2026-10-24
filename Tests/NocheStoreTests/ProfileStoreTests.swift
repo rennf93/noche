@@ -204,4 +204,18 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertEqual(try s.retainedProfileDirs(), ["Profile 1"])
         XCTAssertEqual(try s.sweepableProfileDirs(), [])
     }
+
+    func testCorruptRetainedDirsBlockWritesAndKeepRawValue() throws {
+        let s = try Store.inMemory()
+        let a = try s.createProfile(name: "A", colorIndex: 1)
+        let f = try s.createProfile(name: "F", colorIndex: 2)
+        try s.setShareWith(profileId: f.id, target: a.id)
+        try s.setSetting("retainedProfileDirs", "not json")
+        func corrupt(_ body: () throws -> Void) { XCTAssertThrowsError(try body()) { XCTAssertEqual($0 as? ProfileError, .corruptRetainedDirs) } }
+        corrupt { _ = try s.createProfile(name: "B", colorIndex: 3) }
+        corrupt { try s.deleteProfile(id: a.id) }
+        corrupt { _ = try s.retainedProfileDirs() }
+        XCTAssertEqual(try s.setting("retainedProfileDirs"), "not json")
+        XCTAssertEqual(try s.profiles().count, 3)  // the failed delete rolled back
+    }
 }

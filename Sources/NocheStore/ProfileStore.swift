@@ -3,7 +3,7 @@ import GRDB
 import NocheCore
 
 public enum ProfileError: Error, Equatable, Sendable {
-    case invalidName(ProfileNameError), invalidColor, notFound, lastProfile, shareSelf, shareChain
+    case invalidName(ProfileNameError), invalidColor, notFound, lastProfile, corruptRetainedDirs, shareSelf, shareChain
 }
 
 /// What the app must do after a delete: |clearChromiumData| is true when the profile owned the `Default` directory, which stays
@@ -165,7 +165,10 @@ extension Store {
 
     private static func retained(_ db: Database) throws -> [String] {
         let raw = try String.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ? AND deletedAt IS NULL", arguments: [retainedDirsKey])
-        return raw.flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
+        // Missing means none; garbage must throw, or the next write would drop the list and numbers could be reused.
+        guard let raw else { return [] }
+        guard let dirs = try? JSONDecoder().decode([String].self, from: Data(raw.utf8)) else { throw ProfileError.corruptRetainedDirs }
+        return dirs
     }
 
     private static func retain(_ db: Database, _ dir: String, at t: Double) throws {
