@@ -76,7 +76,7 @@ enum Schema {
             CREATE UNIQUE INDEX sitePermission_key ON sitePermission(profileId, origin, kind) WHERE deletedAt IS NULL;
             CREATE TABLE bookmark (
               id TEXT PRIMARY KEY, profileId TEXT NOT NULL REFERENCES profile(id),
-              parentId TEXT REFERENCES bookmark(id), kind TEXT NOT NULL CHECK (kind IN ('folder', 'url')),
+              parentId TEXT REFERENCES bookmark(id), kind TEXT NOT NULL CHECK (kind IN ('folder', 'url')) CHECK (kind = 'folder' OR url IS NOT NULL),
               title TEXT NOT NULL DEFAULT '', url TEXT, position INTEGER NOT NULL DEFAULT 0,
               createdAt REAL NOT NULL, updatedAt REAL NOT NULL, deletedAt REAL);
             CREATE INDEX bookmark_children ON bookmark(profileId, parentId, position) WHERE deletedAt IS NULL;

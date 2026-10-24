@@ -68,6 +68,43 @@ final class BookmarkStoreTests: XCTestCase {
         XCTAssertEqual(try titles(s, bar), ["f"])
     }
 
+    func testOrphanUnderTombstonedFolderHidden() throws {
+        let (s, bar, _) = try make()
+        let f = try s.addFolder(title: "f", parentId: bar.id)
+        let g = try s.addFolder(title: "g", parentId: f.id)
+        _ = try s.addBookmark(title: "kid", url: "https://kid.com", parentId: g.id)
+        try s.db.write { try $0.execute(sql: "UPDATE bookmark SET deletedAt = 5 WHERE id = ?", arguments: [f.id]) }
+        XCTAssertNil(try s.bookmark(forURL: "https://kid.com"))
+        XCTAssertTrue(try s.recentBookmarks().isEmpty)
+        XCTAssertThrowsError(try s.bookmarkChildren(of: f.id)) { XCTAssertEqual($0 as? BookmarkError, .notFound) }
+        // delete walks through an already tombstoned intermediate folder
+        try s.db.write { try $0.execute(sql: "UPDATE bookmark SET deletedAt = NULL WHERE id = ?", arguments: [f.id]) }
+        let h = try s.addFolder(title: "h", parentId: bar.id)
+        let i = try s.addFolder(title: "i", parentId: h.id)
+        _ = try s.addBookmark(title: "deep", url: "https://deep.com", parentId: i.id)
+        try s.db.write { try $0.execute(sql: "UPDATE bookmark SET deletedAt = 5 WHERE id = ?", arguments: [i.id]) }
+        try s.db.write { try $0.execute(sql: "UPDATE bookmark SET deletedAt = NULL WHERE url = 'https://deep.com'") }
+        try s.deleteBookmark(id: h.id)
+        try s.db.read { XCTAssertEqual(try Int.fetchOne($0, sql: "SELECT count(*) FROM bookmark WHERE url = 'https://deep.com' AND deletedAt IS NOT NULL"), 1) }
+    }
+
+    func testMoveAcrossProfilesRefused() throws {
+        let (s, bar, _) = try make()
+        let a = try s.addBookmark(title: "a", url: "https://a.com", parentId: bar.id)
+        try s.db.write { try $0.execute(sql: "INSERT INTO profile (id, name, chromiumDirName, createdAt, updatedAt) VALUES ('p2', 'P', 'P', 1, 1)") }
+        try s.ensureBookmarkRoots(profileId: "p2")
+        let other = try s.db.read { try String.fetchOne($0, sql: "SELECT id FROM bookmark WHERE profileId = 'p2' AND parentId IS NULL LIMIT 1") }
+        XCTAssertThrowsError(try s.moveBookmark(id: a.id, toParent: XCTUnwrap(other), index: nil)) { XCTAssertEqual($0 as? BookmarkError, .crossProfile) }
+    }
+
+    func testUrlKindRequiresURL() throws {
+        let (s, bar, _) = try make()
+        XCTAssertThrowsError(try s.db.write {
+            try $0.execute(sql: "INSERT INTO bookmark (id, profileId, parentId, kind, title, createdAt, updatedAt) VALUES ('x', ?, ?, 'url', 't', 1, 1)",
+                           arguments: [Schema.defaultProfileID, bar.id])
+        })
+    }
+
     func testRename() throws {
         let (s, bar, _) = try make()
         let a = try s.addBookmark(title: "a", url: "https://a.com", parentId: bar.id)

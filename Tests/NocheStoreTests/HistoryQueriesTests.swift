@@ -22,12 +22,32 @@ final class HistoryQueriesTests: XCTestCase {
         XCTAssertEqual(utc[0].visits[0].url, "https://b.com/")
         XCTAssertEqual(utc[1].visits.map(\.title), ["C"])
         XCTAssertEqual(utc[0].day, cal("UTC").startOfDay(for: at(0)))
-        // 01:46 UTC is still the previous day in Los Angeles; A and B share a day with C's neighbour grouping shifting.
+        // 2001-09-09 01:46 UTC is still 09-08 evening in Los Angeles, so the two visits there fall on different days than in UTC.
         let la = try s.historyDays(calendar: cal("America/Los_Angeles"))
         XCTAssertEqual(la.map { $0.visits.count }, [2, 1])
-        let tokyo = try s.historyDays(calendar: cal("Asia/Tokyo"))
-        XCTAssertEqual(tokyo.map { $0.visits.count }, [2, 1])
         XCTAssertNotEqual(la[0].day, utc[0].day)
+    }
+
+    func testMidnightStraddleDiffersByZone() throws {
+        let s = try Store.inMemory()
+        let la = cal("America/Los_Angeles")
+        let midnight = la.date(from: DateComponents(year: 2026, month: 5, day: 10))!
+        try s.recordVisit(url: "https://a.com/", title: "A", typed: false, at: midnight.addingTimeInterval(-60))
+        try s.recordVisit(url: "https://b.com/", title: "B", typed: false, at: midnight.addingTimeInterval(60))
+        XCTAssertEqual(try s.historyDays(calendar: la).map { $0.visits.count }, [1, 1])
+        XCTAssertEqual(try s.historyDays(calendar: cal("UTC")).map { $0.visits.count }, [2])
+    }
+
+    func testDSTDayIsOneGroup() throws {
+        let s = try Store.inMemory()
+        let la = cal("America/Los_Angeles")
+        let start = la.startOfDay(for: la.date(from: DateComponents(year: 2026, month: 3, day: 8))!)
+        try s.recordVisit(url: "https://a.com/", title: "A", typed: false, at: start.addingTimeInterval(60))
+        try s.recordVisit(url: "https://b.com/", title: "B", typed: false, at: start.addingTimeInterval(23 * 3600 - 60))
+        let days = try s.historyDays(calendar: la)
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].visits.count, 2)
+        XCTAssertEqual(days[0].day, start)
     }
 
     func testSearchCaseFoldedTitleOrURLWithEscapingAndLimit() throws {

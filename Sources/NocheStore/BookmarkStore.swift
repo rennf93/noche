@@ -3,7 +3,7 @@ import GRDB
 
 public enum BookmarkKind: String, Sendable { case folder, url }
 
-public enum BookmarkError: Error, Equatable, Sendable { case rootImmutable, notFound, notAFolder, cycle }
+public enum BookmarkError: Error, Equatable, Sendable { case rootImmutable, notFound, notAFolder, cycle, crossProfile }
 
 public struct Bookmark: Equatable, Sendable {
     public let id: String
@@ -49,7 +49,10 @@ extension Store {
     }
 
     public func bookmarkChildren(of parentId: String) throws -> [Bookmark] {
-        try db.read { try Self.children($0, parentId).compactMap(\.bookmark) }
+        try db.read { db in
+            _ = try Self.folder(db, parentId)
+            return try Self.children(db, parentId).compactMap(\.bookmark)
+        }
     }
 
     @discardableResult
@@ -68,7 +71,7 @@ extension Store {
         try db.write { db in
             let row = try Self.row(db, id)
             guard let oldParent = row.parentId else { throw BookmarkError.rootImmutable }
-            _ = try Self.folder(db, parentId)
+            guard try Self.folder(db, parentId).profileId == row.profileId else { throw BookmarkError.crossProfile }
             var cursor: String? = parentId
             while let c = cursor {
                 if c == id { throw BookmarkError.cycle }
@@ -94,27 +97,33 @@ extension Store {
         try db.write { db in
             guard let parent = try Self.row(db, id).parentId else { throw BookmarkError.rootImmutable }
             try db.execute(sql: """
-                WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT b.id FROM bookmark b JOIN sub ON b.parentId = sub.id WHERE b.deletedAt IS NULL)
-                UPDATE bookmark SET deletedAt = ?, updatedAt = ? WHERE id IN (SELECT id FROM sub)
+                WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT b.id FROM bookmark b JOIN sub ON b.parentId = sub.id)
+                UPDATE bookmark SET deletedAt = ?, updatedAt = ? WHERE id IN (SELECT id FROM sub) AND deletedAt IS NULL
                 """, arguments: [id, t, t])
             try Self.renumber(db, parent: parent, excluding: id, inserting: nil, at: 0, now: t)
         }
     }
 
+    /// Rows reachable from a live root through live rows only, so a live row under a tombstoned ancestor never shows.
+    private static let reachable = """
+        WITH RECURSIVE reach(id) AS (
+          SELECT id FROM bookmark WHERE parentId IS NULL AND deletedAt IS NULL
+          UNION SELECT b.id FROM bookmark b JOIN reach ON b.parentId = reach.id WHERE b.deletedAt IS NULL)
+        SELECT * FROM bookmark WHERE id IN (SELECT id FROM reach) AND profileId = ? AND kind = 'url'
+        """
+
     /// Newest url bookmarks first.
     public func recentBookmarks(limit: Int = 5) throws -> [Bookmark] {
         try db.read { db in
-            try BookmarkRow.all().live()
-                .filter(Column("profileId") == Schema.defaultProfileID && Column("kind") == BookmarkKind.url.rawValue)
-                .order(Column("createdAt").desc, Column("rowid").desc).limit(limit).fetchAll(db).compactMap(\.bookmark)
+            try BookmarkRow.fetchAll(db, sql: Self.reachable + " ORDER BY createdAt DESC, rowid DESC LIMIT ?",
+                                     arguments: [Schema.defaultProfileID, limit]).compactMap(\.bookmark)
         }
     }
 
     public func bookmark(forURL url: String) throws -> Bookmark? {
         try db.read { db in
-            try BookmarkRow.all().live()
-                .filter(Column("profileId") == Schema.defaultProfileID && Column("kind") == BookmarkKind.url.rawValue && Column("url") == url)
-                .order(Column("createdAt").desc, Column("rowid").desc).fetchOne(db)?.bookmark
+            try BookmarkRow.fetchOne(db, sql: Self.reachable + " AND url = ? ORDER BY createdAt DESC, rowid DESC",
+                                     arguments: [Schema.defaultProfileID, url])?.bookmark
         }
     }
 
