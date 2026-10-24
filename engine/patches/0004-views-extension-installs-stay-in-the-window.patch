@@ -1,12 +1,12 @@
-From bce24790132fef8b723b6f7b6ca5477e2b1da797 Mon Sep 17 00:00:00 2001
+From 062007bfcd26e8c9f6a50495db91d8fca843c506 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 04:35:09 +0200
 Subject: [PATCH] views: extension installs stay in the window
 
 ---
  patch/patch.cfg                               |  5 ++
- ...browser_ui_extension_install_in_view.patch | 70 +++++++++++++++++++
- 2 files changed, 75 insertions(+)
+ ...browser_ui_extension_install_in_view.patch | 88 +++++++++++++++++++
+ 2 files changed, 93 insertions(+)
  create mode 100644 patch/patches/chrome_browser_ui_extension_install_in_view.patch
 
 diff --git a/patch/patch.cfg b/patch/patch.cfg
@@ -26,22 +26,35 @@ index ec3b22ab9..837cb8587 100644
  ]
 diff --git a/patch/patches/chrome_browser_ui_extension_install_in_view.patch b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
 new file mode 100644
-index 000000000..1f7b143b2
+index 000000000..95658ea55
 --- /dev/null
 +++ b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,88 @@
 +diff --git chrome/browser/ui/extensions/extension_install_ui_desktop.cc chrome/browser/ui/extensions/extension_install_ui_desktop.cc
-+index c9e2a59c3e..5a0fff1f0c 100644
++index c9e2a59c3e0dd03fbf9a6bf9eb1f5d63f1ee4a14..ccd2e7ea1adac7a25adee4ede011e958970cd9cc 100644
 +--- chrome/browser/ui/extensions/extension_install_ui_desktop.cc
 ++++ chrome/browser/ui/extensions/extension_install_ui_desktop.cc
-+@@ -70,6 +70,33 @@
++@@ -54,6 +54,10 @@
++ #include "extensions/common/extension.h"
++ #include "ui/base/l10n/l10n_util.h"
++ 
+++#if BUILDFLAG(ENABLE_CEF)
+++#include "cef/libcef/browser/chrome/browser_delegate.h"
+++#endif
+++
++ #if BUILDFLAG(IS_CHROMEOS)
++ #include "ash/constants/notifier_catalogs.h"
++ #include "ash/public/cpp/system/toast_data.h"
++@@ -70,6 +74,40 @@ using extensions::Extension;
 + namespace {
 + 
 + BrowserWindowInterface* FindOrCreateVisibleBrowser(Profile* profile) {
+++#if BUILDFLAG(ENABLE_CEF)
 ++  // Noche: a Browser hosted by a CEF BrowserView is TYPE_POPUP, so no tabbed
 ++  // Browser exists and the stock path below would create and Show() a separate
-++  // Chrome window (which also activates the app). Use a CEF-hosted Browser of
-++  // the profile instead; the post-install dialog then anchors to its active tab.
+++  // Chrome window (which also activates the app). Use a views-hosted CEF
+++  // Browser of the profile instead; the post-install dialog then anchors to its
+++  // active tab.
 ++  // Note: this is the profile's most recently activated CEF Browser, not
 ++  // necessarily the window that started the install (stock Chromium has the
 ++  // same semantics for tabbed Browsers). Multi-window embedders may want the
@@ -51,8 +64,12 @@ index 000000000..1f7b143b2
 ++    BrowserWindowInterface* cef_browser = nullptr;
 ++    collection->ForEach(
 ++        [&cef_browser](BrowserWindowInterface* browser) {
-++          if (browser->cef_delegate() && !browser->IsDeleteScheduled() &&
+++          if (browser->cef_delegate() &&
+++              browser->cef_delegate()->IsViewsHosted() &&
+++              !browser->IsDeleteScheduled() &&
 ++              browser->GetType() != BrowserWindowInterface::TYPE_DEVTOOLS &&
+++              browser->GetType() !=
+++                  BrowserWindowInterface::TYPE_PICTURE_IN_PICTURE &&
 ++              browser->GetTabStripModel()->GetActiveTab()) {
 ++            cef_browser = browser;
 ++            return false;  // stop iterating
@@ -64,11 +81,12 @@ index 000000000..1f7b143b2
 ++      return cef_browser;
 ++    }
 ++  }
+++#endif  // BUILDFLAG(ENABLE_CEF)
 ++
 +   chrome::ScopedTabbedBrowserDisplayer displayer(profile);
 +   BrowserWindowInterface* browser = displayer.browser_window_interface();
 +   if (browser->GetTabStripModel()->count() == 0) {
-+@@ -142,10 +169,19 @@
++@@ -142,10 +180,19 @@ void ExtensionInstallUIDesktop::OnInstallSuccess(
 +     extensions::TriggerPostInstallDialog(
 +         profile(), extension, icon_to_use,
 +         base::BindOnce(
@@ -91,7 +109,7 @@ index 000000000..1f7b143b2
 +         base::BindOnce(
 +             [](const extensions::ExtensionId& extension_id,
 +                base::WeakPtr<content::WebContents> web_contents) {
-+@@ -160,7 +196,7 @@
++@@ -160,7 +207,7 @@ void ExtensionInstallUIDesktop::OnInstallSuccess(
 +               }
 +               BrowserView* browser_view =
 +                   BrowserView::GetBrowserViewForBrowser(browser_interface);

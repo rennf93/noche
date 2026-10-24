@@ -131,6 +131,50 @@ build_refused count
 git -C "$CEF" checkout -q --detach "$BASE"
 ok build_needs_patch
 
+# patch_restores_chromium: an amended Chromium-side patch re-applies over the old form left in Chromium
+SRCD="$ROOT/chromium_git/chromium/src"
+mkdir -p "$SRCD"
+git init -q "$SRCD"
+S=(git -C "$SRCD" -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@t.invalid -c commit.gpgsign=false)
+printf 'alpha\nbeta\ngamma\n' > "$SRCD/c.txt"
+"${S[@]}" add c.txt
+"${S[@]}" commit -q -m chromium
+CEF2="$TMP/cef2"
+git init -q "$CEF2"
+G2=(git -C "$CEF2" -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@t.invalid -c commit.gpgsign=false)
+mkdir -p "$CEF2/patch/patches"
+printf 'one\n' > "$CEF2/a.txt"
+"${G2[@]}" add a.txt
+"${G2[@]}" commit -q -m base
+BASE2="$(git -C "$CEF2" rev-parse HEAD)"
+chromium_patch() { mkdir -p "$CEF2/patch/patches"; printf 'diff --git c.txt c.txt\n--- c.txt\n+++ c.txt\n@@ -1,3 +1,4 @@\n alpha\n beta\n+%s\n gamma\n' "$1" > "$CEF2/patch/patches/x.patch"; }
+chromium_patch old
+"${G2[@]}" add patch
+"${G2[@]}" commit -q -m "chromium side"
+mkdir "$TMP/v1" "$TMP/v2"
+"${G2[@]}" format-patch -q -1 -o "$TMP/v1"
+"${G2[@]}" reset -q --hard "$BASE2"
+chromium_patch new
+"${G2[@]}" add patch
+"${G2[@]}" commit -q -m "chromium side"
+"${G2[@]}" format-patch -q -1 -o "$TMP/v2"
+git -C "$CEF2" checkout -q --detach "$BASE2"
+c2() { env NOCHE_ENGINE_CEF_DIR="$CEF2" NOCHE_ENGINE_CEF_PIN="$BASE2" NOCHE_ENGINE_PATCH_DIR="$1" "$BUILD" patch; }
+run c2 "$TMP/v1"
+[ "$RC" -eq 0 ] || fail "patch_restores_chromium: v1 exit $RC: $OUT"
+git -C "$SRCD" apply -p0 "$CEF2/patch/patches/x.patch"
+grep -qx old "$SRCD/c.txt" || fail "patch_restores_chromium: v1 not applied to chromium"
+run c2 "$TMP/v2"
+[ "$RC" -eq 0 ] || fail "patch_restores_chromium: v2 exit $RC: $OUT"
+[ "$(cat "$SRCD/c.txt")" = "$(printf 'alpha\nbeta\ngamma')" ] || fail "patch_restores_chromium: old form left: $(cat "$SRCD/c.txt")"
+git -C "$SRCD" apply -p0 --check "$CEF2/patch/patches/x.patch" || fail "patch_restores_chromium: v2 does not apply"
+# already applied in the new form: left alone
+git -C "$SRCD" apply -p0 "$CEF2/patch/patches/x.patch"
+run c2 "$TMP/v2"
+[ "$RC" -eq 0 ] || fail "patch_restores_chromium: rerun exit $RC: $OUT"
+grep -qx new "$SRCD/c.txt" || fail "patch_restores_chromium: applied form was reset"
+ok patch_restores_chromium
+
 # distrib_incomplete: a stub make_distrib that writes an empty distribution
 mkdir -p "$TMP/stubcef/tools"
 printf 'import os,sys\nd=[a for a in sys.argv if a.startswith("--output-dir=")][0].split("=",1)[1]\nos.makedirs(d+"/cef_binary_1_macosarm64_minimal")\n' > "$TMP/stubcef/tools/make_distrib.py"

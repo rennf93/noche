@@ -1,4 +1,4 @@
-From 946ba13de91e3002e22266d0f8b33db8bac13e2f Mon Sep 17 00:00:00 2001
+From e8be27ea712ebb861a396522223fa3a71ee69375 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 04:59:27 +0200
 Subject: [PATCH] views: extension window identity for embedders

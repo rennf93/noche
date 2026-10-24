@@ -77,6 +77,23 @@ LOG="$ROOT/logs/$STEP-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$LOG") 2>&1
 echo "log: $LOG"
 
+# CEF's patcher applies cef/patch/patches to Chromium in place and cannot re-apply a patch whose old form is
+# still there. For each Chromium-side patch file the series adds or changes, put its files back to the Chromium
+# checkout state unless it applies forward (not applied yet) or backward (already applied in this form).
+restore_stale_chromium_files() {
+  [ -d "$SRC/.git" ] || return 0
+  local f p files
+  while IFS= read -r f; do
+    p="$CEF/$f"
+    git -C "$SRC" apply -p0 --check "$p" >/dev/null 2>&1 && continue
+    git -C "$SRC" apply -p0 --check -R "$p" >/dev/null 2>&1 && continue
+    files="$(sed -n 's/^diff --git \([^ ]*\) .*/\1/p' "$p")"
+    echo "restoring Chromium files of $f"
+    # shellcheck disable=SC2086
+    git -C "$SRC" checkout -q -- $files
+  done < <(git diff --name-only --diff-filter=AM "$PIN" HEAD -- patch/patches)
+}
+
 patch_series() {
   [ -d "$CEF/.git" ] || { echo "cef checkout missing: $CEF"; exit 1; }
   cd "$CEF"
@@ -96,6 +113,7 @@ patch_series() {
       exit 1
     fi
   done
+  restore_stale_chromium_files
   echo "patched: $(git rev-parse --short HEAD)"
 }
 
