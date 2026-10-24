@@ -1,0 +1,69 @@
+From 2ec3ca8d3cdbd76ac410c414a00f586947b9d518 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 04:35:09 +0200
+Subject: [PATCH] views: extension installs stay in the window
+
+---
+ patch/patch.cfg                               |  5 +++
+ ...browser_ui_extension_install_in_view.patch | 34 +++++++++++++++++++
+ 2 files changed, 39 insertions(+)
+ create mode 100644 patch/patches/chrome_browser_ui_extension_install_in_view.patch
+
+diff --git a/patch/patch.cfg b/patch/patch.cfg
+index ec3b22ab9..837cb8587 100644
+--- a/patch/patch.cfg
++++ b/patch/patch.cfg
+@@ -928,5 +928,10 @@ patches = [
+     # Noche: ExtensionPopup::ShowPopupAtRect, a popup bubble anchored to a
+     # screen rect of an embedder window (no toolbar), optionally inactive.
+     'name': 'chrome_browser_ui_extension_popup_rect',
++  },
++  {
++    # Noche: the extension post-install dialog anchors to a CEF-hosted Browser
++    # instead of creating and showing a separate Chrome window (P3).
++    'name': 'chrome_browser_ui_extension_install_in_view',
+   }
+ ]
+diff --git a/patch/patches/chrome_browser_ui_extension_install_in_view.patch b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
+new file mode 100644
+index 000000000..11df97767
+--- /dev/null
++++ b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
+@@ -0,0 +1,34 @@
++diff --git chrome/browser/ui/extensions/extension_install_ui_desktop.cc chrome/browser/ui/extensions/extension_install_ui_desktop.cc
++index c9e2a59c3e..781d2568a2 100644
++--- chrome/browser/ui/extensions/extension_install_ui_desktop.cc
+++++ chrome/browser/ui/extensions/extension_install_ui_desktop.cc
++@@ -70,6 +70,29 @@
++ namespace {
++ 
++ BrowserWindowInterface* FindOrCreateVisibleBrowser(Profile* profile) {
+++  // Noche: a Browser hosted by a CEF BrowserView is TYPE_POPUP, so no tabbed
+++  // Browser exists and the stock path below would create and Show() a separate
+++  // Chrome window (which also activates the app). Use a CEF-hosted Browser of
+++  // the profile instead; the post-install dialog then anchors to its active tab.
+++  auto* collection = ProfileBrowserCollection::GetForProfile(profile);
+++  if (!collection->FindTabbedBrowser()) {
+++    BrowserWindowInterface* cef_browser = nullptr;
+++    collection->ForEach(
+++        [&cef_browser](BrowserWindowInterface* browser) {
+++          if (browser->cef_delegate() && !browser->IsDeleteScheduled() &&
+++              browser->GetType() != BrowserWindowInterface::TYPE_DEVTOOLS &&
+++              browser->GetTabStripModel()->GetActiveTab()) {
+++            cef_browser = browser;
+++            return false;  // stop iterating
+++          }
+++          return true;
+++        },
+++        BrowserCollection::Order::kActivation);
+++    if (cef_browser) {
+++      return cef_browser;
+++    }
+++  }
+++
++   chrome::ScopedTabbedBrowserDisplayer displayer(profile);
++   BrowserWindowInterface* browser = displayer.browser_window_interface();
++   if (browser->GetTabStripModel()->count() == 0) {
+-- 
+2.56.0
+
