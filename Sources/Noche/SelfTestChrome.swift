@@ -169,6 +169,9 @@ extension SelfTest {
         "View||", "Refresh|r|cmd", "Force Refresh the Page|r|shift+cmd", "Auto-Hide Tabs|s|cmd", "Zoom to Actual Size|0|cmd",
         "Zoom In|+|cmd", "Zoom Out|-|cmd", "Developer||", "Developer Tools|i|opt+cmd",
         "Tabs||", "Go Back|[|cmd", "Go Forward|]|cmd", "Next Tab|]|shift+cmd", "Previous Tab|[|shift+cmd",
+        "Move Tab Forward|\u{F72D}|ctrl+shift", "Move Tab Backward|\u{F72C}|ctrl+shift",
+        "Select Tab 1|1|cmd", "Select Tab 2|2|cmd", "Select Tab 3|3|cmd", "Select Tab 4|4|cmd", "Select Tab 5|5|cmd", "Select Tab 6|6|cmd",
+        "Select Tab 7|7|cmd", "Select Tab 8|8|cmd", "Select Last Tab|9|cmd",
         "Window||", "Minimize|m|cmd",
     ]
 
@@ -185,7 +188,7 @@ extension SelfTest {
         let editTitles: Set<String> = ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
         let edit = menu.items.first { $0.title == "Edit" }?.submenu?.items.filter { editTitles.contains($0.title) } ?? []
         guard edit.count == 6, edit.allSatisfy({ $0.target == nil }) else { return finish(false, "edit items with a target: \(edit.filter { $0.target != nil }.map(\.title))") }
-        finish(true, "\(got.count) menu lines equal the M1.1 list, the 6 edit actions are nil-targeted")
+        finish(true, "\(got.count) menu lines equal the M1.1 list (plus the tab by-number and move items of M1.2), the 6 edit actions are nil-targeted")
     }
 
     func sidebarToggle() async {

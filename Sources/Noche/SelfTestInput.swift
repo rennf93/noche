@@ -4,14 +4,15 @@ import CefBridge
 
 /// Synthesized input for the checks: key equivalents routed like NSApplication does, typed text, mouse clicks.
 extension SelfTest {
-    /// A key equivalent the way NSApplication routes it: the window first, then the main menu.
+    /// A key equivalent the way NSApplication routes it: the window first, then the main menu. |menuOnly| skips the window: the engine's page view takes
+    /// keys the main menu has no item for to the page and redispatches an unhandled one to the menu only in a key window, which a hidden run never has.
     @discardableResult
-    func key(_ ch: String, code: UInt16, _ mods: NSEvent.ModifierFlags = .command, chars: String? = nil) -> Bool {
+    func key(_ ch: String, code: UInt16, _ mods: NSEvent.ModifierFlags = .command, chars: String? = nil, menuOnly: Bool = false) -> Bool {
         let ns = ctl?.nsWindow  // nil with no window open: the key then reaches the main menu only
         guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods,
               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns?.windowNumber ?? 0, context: nil,
               characters: chars ?? ch, charactersIgnoringModifiers: ch, isARepeat: false, keyCode: code) else { return false }
-        let byWindow = ns?.performKeyEquivalent(with: ev) ?? false
+        let byWindow = menuOnly ? false : (ns?.performKeyEquivalent(with: ev) ?? false)
         let byMenu = byWindow ? false : (NSApp.mainMenu?.performKeyEquivalent(with: ev) ?? false)
         keyLog.append("\(ch)\(mods.contains(.shift) ? "+shift" : ""):window=\(byWindow),menu=\(byMenu) menuClass=\(NSApp.mainMenu.map { String(describing: type(of: $0)) } ?? "nil") ig=\(ev.charactersIgnoringModifiers ?? "nil") chars=\(ev.characters ?? "nil") mods=\(ev.modifierFlags.rawValue)")
         return byWindow || byMenu

@@ -344,6 +344,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         window.activateTab(tab)
     }
 
+    /// IDC_MOVE_TAB_NEXT and _PREVIOUS: the active tab one step along the list (the order of record); at an end nothing happens.
+    func moveTab(_ delta: Int) {
+        note("moveTab")
+        closeNext.removeAll()
+        guard let id = intendedActive.flatMap({ ids[$0.identifier] }) ?? list.activeID,
+              let i = list.items.firstIndex(where: { $0.id == id }), list.items.indices.contains(i + delta) else { return }
+        list.move(id, to: i + delta)
+        refresh()
+        changed()
+    }
+
     func focusAddress() {
         note("focusAddress")
         guard installed, let ns = nsWindow else { focusWhenInstalled = true; return }
@@ -529,6 +540,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         case ChromeCommand.selectPreviousTab: selectPreviousTab()
         case ChromeCommand.selectTab0...ChromeCommand.selectTab0 + 7 where ChromeCommand.selectTab0 >= 0: selectTab(at: commandId - ChromeCommand.selectTab0)
         case ChromeCommand.selectLastTab: selectTab(at: nil)
+        case ChromeCommand.moveTabNext: moveTab(1)
+        case ChromeCommand.moveTabPrevious: moveTab(-1)
         case ChromeCommand.newWindow: app.newWindowAction()
         case ChromeCommand.restoreTab: app.reopenClosedTab(nil)
         case ChromeCommand.closeWindow: close()
@@ -576,7 +589,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 enum ChromeCommand {
     static var back = -1, forward = -1, reload = -1, reloadBypassingCache = -1, reloadClearingCache = -1
     static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
-    static var restoreTab = -1, selectTab0 = -1, selectLastTab = -1
+    static var restoreTab = -1, selectTab0 = -1, selectLastTab = -1, moveTabNext = -1, moveTabPrevious = -1
     static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
 
     static func resolve() {
@@ -590,6 +603,7 @@ enum ChromeCommand {
         newWindow = id("IDC_NEW_WINDOW"); closeWindow = id("IDC_CLOSE_WINDOW"); newTab = id("IDC_NEW_TAB"); closeTab = id("IDC_CLOSE_TAB")
         selectNextTab = id("IDC_SELECT_NEXT_TAB"); selectPreviousTab = id("IDC_SELECT_PREVIOUS_TAB")
         restoreTab = id("IDC_RESTORE_TAB"); selectLastTab = id("IDC_SELECT_LAST_TAB")
+        moveTabNext = id("IDC_MOVE_TAB_NEXT"); moveTabPrevious = id("IDC_MOVE_TAB_PREVIOUS")  // 34032 and 34033 in cef_command_ids.h
         selectTab0 = id("IDC_SELECT_TAB_0")  // IDC_SELECT_TAB_1 to _7 follow it (34018 to 34025 in cef_command_ids.h)
         zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
         focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")

@@ -62,7 +62,15 @@ enum MainMenu {
             a("Go Forward", #selector(AppDelegate.goForward(_:)), "]", cmd),
             a("Next Tab", #selector(AppDelegate.nextTab(_:)), "]", shift),
             a("Previous Tab", #selector(AppDelegate.previousTab(_:)), "[", shift),
-        ]))
+            .separator(),
+            // The engine disables its own tab commands in a views-hosted window, so these keys never arrive as Chrome commands; as menu items
+            // they are answered by Noche from the list (and the page view lets a key the menu owns through to the menu).
+            a("Move Tab Forward", #selector(AppDelegate.moveTabForward(_:)), String(UnicodeScalar(NSPageDownFunctionKey)!), [.control, .shift]),
+            a("Move Tab Backward", #selector(AppDelegate.moveTabBackward(_:)), String(UnicodeScalar(NSPageUpFunctionKey)!), [.control, .shift]),
+            .separator(),
+        ] + (1...8).map { n in
+            let i = a("Select Tab \(n)", #selector(AppDelegate.selectTabNumber(_:)), String(n), cmd); i.tag = n; return i
+        } + [a("Select Last Tab", #selector(AppDelegate.selectLastTab(_:)), "9", cmd)]))
         main.addItem(submenu("Window", [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
         ]))

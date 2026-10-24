@@ -145,6 +145,8 @@ final class SelfTest {
             case "reopen-identity": await reopenIdentity()
             case "frame-storm": await frameStorm()
             case "store-unavailable": await storeUnavailable()
+            case "tab-chords": await tabChords()
+            case "move-tab-relaunch": await moveTabRelaunch()
             default: finish(false, "unknown check")
             }
         }

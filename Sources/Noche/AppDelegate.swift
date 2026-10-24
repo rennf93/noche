@@ -196,6 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func goForward(_ s: Any?) { active?.goForward() }
     @objc func nextTab(_ s: Any?) { active?.selectNextTab() }
     @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
+    @objc func selectTabNumber(_ s: NSMenuItem) { active?.selectTab(at: s.tag - 1) }
+    @objc func selectLastTab(_ s: Any?) { active?.selectTab(at: nil) }
+    @objc func moveTabForward(_ s: Any?) { active?.moveTab(1) }
+    @objc func moveTabBackward(_ s: Any?) { active?.moveTab(-1) }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {

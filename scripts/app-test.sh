@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
@@ -8,7 +8,9 @@
 # `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` (the crash variant `-crash-relaunch`: phase 1 prints `info phase1-ready` and this script SIGKILLs the one app PID) and every control below covers both.
 # Store checks: quit-close-relaunch passes `--selftest-setting quitBehavior=close` in phase 1; crash-mid-write runs both
 # NOCHE_TEST_KILL_AT variants (pending, in-transaction): phase 1 SIGKILLs itself (rc 137 expected), then `sqlite3 <store> "PRAGMA integrity_check"`
-# must print ok before phase 2; corrupt-store overwrites the store file with garbage between its phases.
+# must print ok before phase 2; persist-relaunch prints the phase 2 store's `.schema` and `PRAGMA integrity_check`; corrupt-store overwrites the store file with garbage between its phases.
+# store-unavailable runs two variants: `file` (a plain file where the Store directory belongs) and `unwritable` (an existing store file in a
+# Store directory set to mode 555; the permissions are restored by the EXIT trap whatever happens, and before each wipe of the profile).
 # Controls the app cannot give itself: new Noche*.ips crash reports (diffed per launch after a 3 s settle), the frontmost
 # app (lsappinfo every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s). The app's own limit is
 # 40 s (90 s for quit-100); this script kills the one app PID (TERM, then KILL) 20 s after that.
@@ -65,6 +67,7 @@ ERRF="$(mktemp)"
 APP_PID=""
 # Ctrl-C or a kill of this script must not leave the app running: stop the one app PID this script spawned (never a list).
 cleanup() {
+  chmod -R u+rwx "$PROFILE/Store" 2>/dev/null || true  # the unwritable variant of store-unavailable
   kill "$SERVER_PID" 2>/dev/null || true
   if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
     kill -TERM "$APP_PID" 2>/dev/null || true
@@ -86,14 +89,15 @@ FAILED=0
 for CHECK in "$@"; do
   # Checks ending in -relaunch (and crash-mid-write, corrupt-store) run twice on one profile (phase 1, then 2); each phase must print its own pass line.
   PHASES=""; case "$CHECK" in *-relaunch|crash-mid-write|corrupt-store) PHASES="1 2" ;; esac
-  # crash-mid-write runs once per kill point.
+  # crash-mid-write runs once per kill point, store-unavailable once per variant.
   KILLS="${NOCHE_TEST_KILL_AT:-none}"; [ "$CHECK" != crash-mid-write ] || KILLS="pending in-transaction"
+  [ "$CHECK" != store-unavailable ] || KILLS="file unwritable"  # the variants share the loop variable
   for KILL_AT in $KILLS; do
   for PHASE in ${PHASES:-none}; do
     [ "$PHASE" != none ] || PHASE=""
     : > "$OUTF"; : > "$ERRF"
     # Only phase 1 (or a one-phase check) starts from a wiped profile: phase 2 relaunches on what phase 1 left.
-    if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then rm -rf "$PROFILE"; fi
+    if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then chmod -R u+rwx "$PROFILE" 2>/dev/null || true; rm -rf "$PROFILE"; fi
     # corrupt-store: garbage over the store file (the WAL files stay), then phase 2 must quarantine it and start with one window.
     if [ "$CHECK" = corrupt-store ] && [ "$PHASE" = 2 ]; then
       [ -f "$PROFILE/Store/noche.sqlite" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail no store file left by phase 1"; break; }
@@ -102,8 +106,13 @@ for CHECK in "$@"; do
       head -c 8192 /dev/urandom > "$PROFILE/Store/noche.sqlite"
     fi
     # store-unavailable: a plain file where the Store directory belongs; the app must run on an in-memory store and leave it alone.
-    if [ "$CHECK" = store-unavailable ]; then
+    if [ "$CHECK" = store-unavailable ] && [ "$KILL_AT" = file ]; then
       mkdir -p "$PROFILE"; printf 'not a directory: sentinel bytes' > "$PROFILE/Store"; SENTINEL="$(shasum "$PROFILE/Store")"
+    fi
+    # unwritable: a real store file (one table, closed cleanly so no WAL is left) in a read-only directory.
+    if [ "$CHECK" = store-unavailable ] && [ "$KILL_AT" = unwritable ]; then
+      mkdir -p "$PROFILE/Store"; sqlite3 "$PROFILE/Store/noche.sqlite" "CREATE TABLE sentinel(a); INSERT INTO sentinel VALUES ('kept')"
+      SENTINEL="$(shasum "$PROFILE/Store/noche.sqlite")"; LISTING="$(ls -a "$PROFILE/Store")"; chmod 555 "$PROFILE/Store"
     fi
     EXTRA=(); [ "$CHECK" != quit-close-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
     SELFKILL=0; [ "$CHECK" != crash-mid-write ] || [ "$PHASE" != 1 ] || SELFKILL=1
@@ -111,7 +120,7 @@ for CHECK in "$@"; do
     BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit
     LIMIT=$((BASE + ${NOCHE_TEST_SLACK:-20}))
     # The throttling switches keep timers and renderers running in a window nobody sees.
-    (cd / && { [ "$KILL_AT" = none ] || export NOCHE_TEST_KILL_AT="$KILL_AT"; } && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" ${PHASE:+--selftest-phase $PHASE} ${EXTRA[@]+"${EXTRA[@]}"} \
+    (cd / && { [ "$CHECK" != crash-mid-write ] || [ "$KILL_AT" = none ] || export NOCHE_TEST_KILL_AT="$KILL_AT"; } && exec "$BIN" --selftest "$CHECK" --selftest-url "http://127.0.0.1:$PORT/" ${PHASE:+--selftest-phase $PHASE} ${EXTRA[@]+"${EXTRA[@]}"} \
         --load-extension="$ROOT/Probes/fixtures/probe-extension" \
         --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
         --disable-background-timer-throttling --mute-audio >"$OUTF" 2>"$ERRF") &
@@ -140,8 +149,15 @@ for CHECK in "$@"; do
     fi
     set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
     APP_PID=""
+    if [ "$CHECK" = store-unavailable ] && [ "$KILL_AT" = unwritable ]; then
+      MODE="$(stat -f %Lp "$PROFILE/Store")"; chmod -R u+rwx "$PROFILE/Store"
+      [ "$MODE" = 555 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the Store directory mode changed to $MODE"; }
+      [ "$(shasum "$PROFILE/Store/noche.sqlite" 2>/dev/null)" = "$SENTINEL" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the existing store file changed"; }
+      [ "$(ls -a "$PROFILE/Store")" = "$LISTING" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the Store directory listing changed: $(ls -a "$PROFILE/Store" | tr '\n' ' ')"; }
+      echo "NOCHE_TEST $CHECK info variant=unwritable mode-after-run=$MODE file and listing unchanged"
+    fi
     if [ "$CHECK" = store-unavailable ]; then
-      [ "$(shasum "$PROFILE/Store" 2>/dev/null)" = "$SENTINEL" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the file at the store path changed"; }
+      [ "$KILL_AT" != file ] || [ "$(shasum "$PROFILE/Store" 2>/dev/null)" = "$SENTINEL" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the file at the store path changed"; }
       grep -q '^NOCHE store unavailable: ' "$ERRF" || { FAILED=1; echo "NOCHE_TEST $CHECK fail no 'NOCHE store unavailable' line on stderr"; }
     fi
     # crash-mid-write phase 1: the app SIGKILLs itself from the test hook (rc 137), then the file must pass integrity_check.
@@ -185,6 +201,11 @@ for CHECK in "$@"; do
         [ "$SESSION_URLS" -ge 3 ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail session file has $SESSION_URLS of the 3 fixture URLs (${NEWEST:-no session file})"; } ;;
       esac
       echo "NOCHE_TEST $CHECK info sessions=$(cd "$PROFILE" 2>/dev/null && find . \( -iname 'Session*' -o -iname 'Current *' -o -iname 'Last *' -o -iname 'Tabs_*' \) -exec ls -ldT {} + 2>/dev/null | awk '{print $5 ":" $NF}' | tr '\n' ' ')"
+    fi
+    # persist-relaunch phase 2: the store file the relaunch ran on, as the sqlite3 CLI reads it (evidence: schema and integrity).
+    if [ "$CHECK" = persist-relaunch ] && [ "$PHASE" = 2 ]; then
+      sqlite3 -readonly "$PROFILE/Store/noche.sqlite" ".schema" | sed 's/^/NOCHE_TEST persist-relaunch info schema| /'
+      echo "NOCHE_TEST persist-relaunch info integrity_check=$(sqlite3 -readonly "$PROFILE/Store/noche.sqlite" "PRAGMA integrity_check" 2>&1 || true)"
     fi
     # A phase 1 without its pass (or phase1-ready) line leaves nothing for phase 2 to check.
     if [ "$KILLED" = 1 ]; then grep -q "^NOCHE_TEST $CHECK info phase1-ready" "$OUTF" || break

@@ -99,8 +99,10 @@ extension SelfTest {
             guard await until(10, { self.activeIndex(c1) == active[0] && self.activeIndex(c2) == active[1] }) else {
                 return finish(false, "phase 1: active tabs \(String(describing: activeIndex(c1))) and \(String(describing: activeIndex(c2)))")
             }
-            // The lastActiveAt values phase 2 must read back unchanged (a restore is not a use of the tab).
-            let stamps = (c1.lastActive.merging(c2.lastActive) { a, _ in a }).map { "\($0.key.raw.uuidString)=\($0.value.timeIntervalSince1970)" }.sorted().joined(separator: "\n")
+            // The lastActiveAt values phase 2 must read back unchanged (a restore is not a use of the tab): taken from the store file itself.
+            writer.flush()
+            let stamps = sqlite("SELECT id || '=' || lastActiveAt FROM tab WHERE closedAt IS NULL AND deletedAt IS NULL ORDER BY id")
+            guard stamps.split(separator: "\n").count == 7 else { return finish(false, "phase 1: the store holds \(stamps.split(separator: "\n").count) tab stamps, want 7") }
             try? stamps.write(to: lastActiveFile, atomically: true, encoding: .utf8)
             // The last change, then the quit at once: the debounced save is still pending and the quit flush must write it.
             c1.nsWindow?.setFrame(SelfTest.persistFrames[0], display: false); c2.nsWindow?.setFrame(SelfTest.persistFrames[1], display: false)
@@ -305,11 +307,77 @@ extension SelfTest {
     }
 
     /// scripts/app-test.sh put a plain file where the Store directory belongs: the app opens one window on an in-memory store, logs it, and leaves the file alone.
+    /// (also the unwritable variant: the Store directory is mode 555 around an existing store file, and nothing in it changes.)
     func storeUnavailable() async {
         guard await ready() else { return }
         app.writer?.flush()
         finish(app.storeFallback != nil && app.writer != nil && app.controllers.count == 1 && app.restored.isEmpty && violations.isEmpty,
                "store unavailable (\(app.storeFallback ?? "no fallback")): one window on an in-memory store, launch not blocked \(violations)")
+    }
+
+    /// Cmd+1 to Cmd+8 and Cmd+9 select by position in the list. After a reopen the list is [A, B, C] and the engine strip [A, C, B]:
+    /// Cmd+2 and Cmd+3 differ between the two, and so does Cmd+9 (C in the list, B in the strip).
+    func tabChords() async {
+        guard await ready(), let c = ctl, let win else { return }
+        let a = fixture(""), b = fixture("b.html"), l = fixture("link.html")
+        _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
+        guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+        win.activateTab(win.tabs[1])
+        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate") }
+        cmdW()
+        guard await until(10, { self.urls(c) == [a, l] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+        shiftCmdT()
+        guard await until(15, { self.urls(c) == [a, b, l] && win.tabs.count == 3 }) else { return finish(false, "reopen gave \(urls(c))") }
+        guard win.tabs[1].url != b else { return finish(false, "the strip is in list order, the check proves nothing: \(win.tabs.map(\.url))") }
+        // The engine disables its own tab commands in this window, so the chords are Tabs menu items answered from the list; the key event goes to the main menu (menuOnly).
+        let chords: [(String, UInt16, Int)] = [("1", 18, 0), ("2", 19, 1), ("3", 20, 2), ("9", 25, 2), ("2", 19, 1), ("1", 18, 0), ("9", 25, 2)]
+        var trail: [Int] = []
+        for (ch, code, want) in chords {
+            guard key(ch, code: code, menuOnly: true) else { return finish(false, "Cmd+\(ch) was not handled by the window or the menu") }
+            guard await until(5, { self.activeIndex(c) == want }) else {
+                return finish(false, "Cmd+\(ch) selected list index \(String(describing: activeIndex(c))), want \(want) (list \(urls(c)), engine strip \(win.tabs.map(\.url)), after \(trail)) keys \(keyLog.suffix(2))")
+            }
+            trail.append(want)
+        }
+        finish(violations.isEmpty, "list [A, B, C] over engine strip [A, C, B]: Cmd+1, 2, 3 and Cmd+9 select list positions \(trail) \(violations)")
+    }
+
+    /// Ctrl+Shift+Page Down and Page Up (Chromium's own chords for IDC_MOVE_TAB_NEXT and _PREVIOUS on Linux and Windows; the engine disables the
+    /// commands here, so Noche answers the keys): one step in the list, nothing at the ends, the sidebar and the store follow.
+    func moveTabRelaunch() async {
+        let a = fixture(""), b = fixture("b.html"), l = fixture("link.html")
+        let titles = ["Noche App Fixture", "Link Page", "B Page"]
+        if phase == 1 {
+            guard await ready(), let c = ctl, let win else { return }
+            _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
+            guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+            let down = "\u{F72D}", up = "\u{F72C}"
+            func run(_ forward: Bool, select: Int, want: [String]) async -> String? {
+                guard let pick = win.tabs.first(where: { $0.identifier == c.list.items[select].engineID }) else { return "no engine tab for list index \(select)" }
+                win.activateTab(pick)
+                guard await until(10, { self.activeIndex(c) == select }) else { return "tab \(select) did not activate" }
+                guard key(forward ? down : up, code: forward ? 121 : 116, [.control, .shift], menuOnly: true) else { return "the chord was not handled" }
+                guard await until(5, { self.urls(c) == want }) else { return "\(forward ? "next" : "previous") from \(select) gave \(urls(c)), want \(want)" }
+                try? await Task.sleep(for: .milliseconds(300))  // a second move would show now
+                return urls(c) == want ? nil : "\(forward ? "next" : "previous") from \(select) moved again: \(urls(c))"
+            }
+            let steps: [(Bool, Int, [String])] = [
+                (false, 0, [a, b, l]), (true, 2, [a, b, l]),                         // at the ends: nothing
+                (true, 1, [a, l, b]),                                                // B after C
+                (true, 2, [a, l, b]),                                                // B is last now
+                (false, 2, [a, b, l]), (true, 1, [a, l, b])]
+            for (forward, select, want) in steps { if let bad = await run(forward, select: select, want: want) { return finish(false, "phase 1: \(bad)") } }
+            win.activateTab(win.tabs.first { $0.url == b } ?? win.tabs[2])
+            guard await until(10, { self.activeIndex(c) == 2 }) else { return finish(false, "phase 1: B not active at the end") }
+            guard await until(5, { c.sidebar.rows.map(\.titleField.stringValue) == titles }) else { return finish(false, "phase 1: sidebar shows \(c.sidebar.rows.map(\.titleField.stringValue)), want \(titles)") }
+            guard BrowserWindowController.actionCounts["moveTab"] == steps.count else { return finish(false, "phase 1: moveTab acted \(BrowserWindowController.actionCounts["moveTab"] ?? 0) times, want \(steps.count)") }
+            return finish(violations.isEmpty, "phase 1: B moved after C by Ctrl+Shift+Page Down, ends are no-ops, sidebar [A, C, B], quitting at once \(violations)")
+        }
+        guard await until(20, { self.restoredUp(1) }), let c = ctl else { return finish(false, "phase 2: no restored window") }
+        let (tabs, windows) = await settledCounts()
+        guard urls(c) == [a, l, b], activeIndex(c) == 2, tabs == 3, windows == 1 else { return finish(false, "phase 2: urls \(urls(c)) active \(String(describing: activeIndex(c))) engine tabs \(tabs) NSWindows \(windows), want [A, C, B], 2, 3, 1") }
+        guard await until(5, { c.sidebar.rows.map(\.titleField.stringValue) == titles }) else { return finish(false, "phase 2: sidebar shows \(c.sidebar.rows.map(\.titleField.stringValue)), want \(titles)") }
+        finish(violations.isEmpty, "phase 2: the order [A, C, B] and B active survived the relaunch, sidebar shows it \(violations)")
     }
 }
 #endif
