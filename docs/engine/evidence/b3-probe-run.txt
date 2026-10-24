@@ -1,0 +1,28 @@
+# B3 probe run on distrib cef_binary_156.0.10-noche.3655+g0cebd6a (hidden, NOCHE_PROBE_VISIBLE unset)
+command: NOCHE_TABS_API=1 scripts/probe-engine.sh ext-loaded tabs-one raf-hidden tabs-20 ext-create ext-activate switch-latency rss-20 blank-link per-tab-client close-non-last close-last (1 launch of the script, rc 0)
+PROBE ext-loaded pass service worker answered {"sw":"1.2","count":1,"ids":[357979330],"activeId":357979330}
+PROBE tabs-one pass count=1 ids=357979394 activeId=357979394
+PROBE raf-hidden pass requestAnimationFrame resolved
+PROBE tabs-20 pass extension count=20 GetTabs=20 GetTabCount=20 OnTabAdded=19
+PROBE ext-create pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+PROBE ext-activate pass OnActiveTabChanged=1 GetActiveTab is tab 7=1 callback active is tab 7=1
+PROBE switch-latency pass median=9.4ms p90=11.2ms range=7.9..11.6ms (30 timed after 3 warm-up, fixed cycle order) limit=11.6ms (U2)
+PROBE rss-20 info sample2 rank=1 pid=93128 rss=382.7MB type=browser
+PROBE rss-20 info sample2 rank=2 pid=93172 rss=221.7MB type=renderer
+PROBE rss-20 info sample2 rank=3 pid=93232 rss=212.9MB type=renderer
+PROBE rss-20 info sample2 rank=4 pid=93218 rss=212.6MB type=renderer
+PROBE rss-20 info sample2 rank=5 pid=93193 rss=210.6MB type=renderer
+PROBE rss-20 info sample2 rank=6 pid=93210 rss=210.5MB type=renderer
+PROBE rss-20 info sample2 rank=7 pid=93200 rss=210.5MB type=renderer
+PROBE rss-20 info sample2 rank=8 pid=93171 rss=208.6MB type=renderer
+PROBE rss-20 info sample2 rank=9 pid=93234 rss=208.6MB type=renderer
+PROBE rss-20 info sample2 rank=10 pid=93208 rss=208.6MB type=renderer
+PROBE rss-20 pass rss=5419.7 MB then 5331.9 MB (28 then 27 processes, 20 loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)
+PROBE blank-link pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+PROBE per-tab-client pass own: A=1(id 2, want 2) B=1(id 3, want 3); chrome.tabs.create: OnTabAdded=1 first client OnAfterCreated 1->2 last id=4 new tab id=4; tabs=4 windows 1->1
+PROBE close-non-last pass phase 1 (background tab): OnTabClosed=1 id ok=1 gone=1 window and view alive=1 windows before=1 after=1 GetTabs=19 extension count=19; phase 2 (active tab): OnTabClosed=1 gone=1 GetActiveTab id=7 (closed 6) GetTabs=18 (want 18) OnActiveTabChanged after close=1 window alive=1
+PROBE close-last pass window closed with the last tab (documented behavior), no crash; OnTabClosed=3 of 3 (info only)
+
+regression gate: engine/test.sh 0, test-fetch-cef.sh 0, swift test 0, build-app.sh 0, smoke fixture 0, smoke closed-port 2, check-sandbox.sh 0
+new crash reports: 0 (4 before, 4 after); probe processes left: 0; leftover-helpers lines: 0
+frontmost app samples: 234 (0.5 s), only Warp and Firefox (user apps), never the probe
