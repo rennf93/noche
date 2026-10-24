@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
 # Two-phase checks (names ending in -relaunch): phase 1 runs with `--selftest-phase 1` on the wiped profile, phase 2 with
-# `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` and every control below covers both.
+# `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` (the crash variant `-crash-relaunch`: phase 1 prints `info phase1-ready` and this script SIGKILLs the one app PID) and every control below covers both.
 # Controls the app cannot give itself: new Noche*.ips crash reports (diffed per launch after a 3 s settle), the frontmost
 # app (lsappinfo every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s). The app's own limit is
 # 40 s (90 s for quit-100); this script kills the one app PID (TERM, then KILL) 20 s after that.
@@ -23,7 +23,7 @@ if [ "${1:-}" = "--negative" ]; then
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
   SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
   # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
-  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=3 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=3 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
   IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
@@ -97,9 +97,14 @@ for CHECK in "$@"; do
         --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
         --disable-background-timer-throttling --mute-audio >"$OUTF" 2>"$ERRF") &
     APP_PID=$!
+    KILLED=0
     WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0
     for _ in $(seq 1 $((LIMIT * 10))); do
       kill -0 "$APP_PID" 2>/dev/null || break
+      # The crash variant: phase 1 prints phase1-ready, then this script SIGKILLs the one app PID it started (no quit, no cleanup).
+      if [ "$PHASE" = 1 ] && [[ "$CHECK" == *-crash-relaunch ]] && grep -q "^NOCHE_TEST $CHECK info phase1-ready" "$OUTF"; then
+        sleep 2; kill -KILL "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; KILLED=1; break
+      fi
       if [ $((TICK % 5)) = 0 ]; then
         SAMPLES=$((SAMPLES + 1)); FP="$(front_pid)"
         if [ -z "$FP" ]; then UNKNOWN=$((UNKNOWN + 1)); elif [ "$FP" = "$APP_PID" ]; then FRONT=$((FRONT + 1)); fi
@@ -118,10 +123,14 @@ for CHECK in "$@"; do
     APP_PID=""
     [ "$WATCHDOG" = 1 ] && echo "NOCHE_TEST $CHECK fail watchdog" >> "$OUTF"
     grep '^NOCHE_TEST ' "$OUTF" || echo "NOCHE_TEST $CHECK fail no-output"
-    grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || FAILED=1
+    if [ "$KILLED" = 1 ]; then
+      grep -q "^NOCHE_TEST $CHECK info phase1-ready" "$OUTF" || FAILED=1
+    else
+      grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || FAILED=1
+    fi
     if grep -q '^NOCHE shutdown watchdog' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail NOCHE shutdown watchdog fired"; fi
     if grep -q '^NOCHE devtools still open' "$ERRF"; then FAILED=1; echo "NOCHE_TEST $CHECK fail $(grep -m1 '^NOCHE devtools still open' "$ERRF")"; fi
-    if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then
+    if [ "$WATCHDOG" = 1 ] || { [ "$RC" != 0 ] && [ "$KILLED" = 0 ]; }; then
       FAILED=1; echo "NOCHE_TEST $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"
       grep '^NOCHE' "$ERRF" | head -20 || true
       echo "--- last stderr lines:"; tail -15 "$ERRF" || true
@@ -135,8 +144,13 @@ for CHECK in "$@"; do
     LEFT=""
     for _ in $(seq 1 10); do LEFT="$(helpers | tr '\n' ' ')"; [ -z "$LEFT" ] && break; sleep 0.5; done
     if [ -n "$LEFT" ]; then FAILED=1; echo "NOCHE_TEST leftover-helpers fail pids: $LEFT"; fi
-    # A phase 1 without its pass line leaves nothing for phase 2 to check.
-    grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || break
+    # What Chromium left for the relaunch (positive control: a session must exist for "no restore" to mean anything).
+    if [ "$PHASE" = 1 ]; then
+      echo "NOCHE_TEST $CHECK info sessions=$(cd "$PROFILE" 2>/dev/null && find . \( -iname 'Session*' -o -iname 'Current *' -o -iname 'Last *' -o -iname 'Tabs_*' \) -exec ls -ldT {} + 2>/dev/null | awk '{print $5 ":" $NF}' | tr '\n' ' ')"
+    fi
+    # A phase 1 without its pass (or phase1-ready) line leaves nothing for phase 2 to check.
+    if [ "$KILLED" = 1 ]; then grep -q "^NOCHE_TEST $CHECK info phase1-ready" "$OUTF" || break
+    else grep -qE "^NOCHE_TEST $CHECK pass( .*)?\$" "$OUTF" || break; fi
   done
 done
 rm -rf "$PROFILE"
