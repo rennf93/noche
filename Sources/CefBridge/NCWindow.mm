@@ -365,6 +365,10 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 // Views overrides SetBounds on the browser view (spike S1), so the rect is the window's box layout inside border.
 // CEF has no way to change a box layout's insets after the fact (CefBoxLayoutSettings only go in through SetToBoxLayout), so a
 // changed inset needs a new layout; unchanged insets, which are most calls, build nothing.
+// Tried instead: one layout built once, then CefView::SetInsets on the window plus Layout(). The content rect follows (web-insets
+// and sidebar-toggle pass) but it is not cheaper: measured over one sidebar toggle round (3 toggles, about 10 changed-inset calls
+// each), the rebuild costs a mean 1.39 ms per call (median 1.32 ms) and SetInsets plus Layout() 1.55 ms (median 1.53 ms), so the
+// time is in Layout() itself, not in building the box layout. Kept the rebuild path.
 - (void)applyLayout {
   if (!_window || !_view) return;
   const CefInsets insets((int)lround(_webInsets.top), (int)lround(_webInsets.left), (int)lround(_webInsets.bottom),

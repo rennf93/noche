@@ -59,9 +59,13 @@ class NCApp : public CefApp, public CefBrowserProcessHandler {
     }
     // Chromium clones the whole app bundle into /var/folders on every launch (code_sign_clone_manager.mm),
     // about 700 MB each; Noche does not swap its bundle while running, so the clone buys nothing.
+    // DataSharing and DataSharingJoinOnly (Chrome's account-synced shared tab groups) are switched off: Noche never exposes them
+    // (its own tab groups arrive in M1.6, independent of Chrome's sync). While on, a task posted at startup
+    // (TabGroupSyncServiceImpl::NotifyServiceInitialized) reaches SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar
+    // after its browser was torn down and crashes the engine in CefShutdown when the user quits within seconds of launch.
     std::string features = line->GetSwitchValue("disable-features").ToString();
-    line->AppendSwitchWithValue("disable-features",
-                                features.empty() ? "MacAppCodeSignClone" : features + ",MacAppCodeSignClone");
+    line->AppendSwitchWithValue("disable-features", (features.empty() ? "" : features + ",") +
+                                                        "MacAppCodeSignClone,DataSharing,DataSharingJoinOnly");
   }
 
   // May arrive on any thread.

@@ -24,9 +24,6 @@ final class SelfTest {
         return Options(check: args[i + 1], url: url)
     }
 
-    /// Seconds after the launch before a check may quit the app (see finish).
-    static let engineSettle: TimeInterval = 15
-    private let launched = ProcessInfo.processInfo.systemUptime
     let check: String
     let url: String
     unowned let app: AppDelegate
@@ -103,6 +100,7 @@ final class SelfTest {
             case "hidden": await hidden()
             case "close-last": await closeLast()
             case "quit-many": await quitMany()
+            case "quit-early": await quitEarly()
             case "quit-100": await quit100()
             case "web-insets": await webInsets()
             case "layout": await layout()
@@ -178,6 +176,13 @@ final class SelfTest {
         }.count
     }
 
+    /// A person who quits right after the first page loaded must not crash the engine (its startup tasks are still pending);
+    /// the verdict is the exit and the crash-report diff in scripts/app-test.sh.
+    func quitEarly() async {
+        guard await until(15, { loads >= 1 }) else { return finish(false, "first tab never finished loading") }
+        finish(true, "quit right after the first load")
+    }
+
     func line(_ kind: String, _ detail: String) { print("NOCHE_TEST \(check) \(kind) \(detail)"); fflush(stdout) }
 
     func near(_ a: CGRect?, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> Bool {
@@ -208,11 +213,7 @@ final class SelfTest {
         guard !verdictPrinted else { return }
         verdictPrinted = true
         line(ok ? "pass" : "fail", detail)
-        // Quitting within seconds of the launch can crash the engine's own shutdown (a tab-group sync task that was still pending
-        // runs against a browser that is closing, crash report: SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar).
-        // Not Noche code; the harness lets the engine finish its startup before it quits.
-        let wait = max(0, SelfTest.engineSettle - (ProcessInfo.processInfo.systemUptime - launched))
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [app] in MainActor.assumeIsolated { app.selfTestFinished(ok: ok) } }
+        DispatchQueue.main.async { [app] in MainActor.assumeIsolated { app.selfTestFinished(ok: ok) } }
     }
 }
 
