@@ -13,3 +13,5 @@ CEF's patcher applies `cef/patch/patches/*.patch` to Chromium in place, and `eng
 `engine/build.sh patch` also restores (git checkout) the Chromium files of any Chromium-side patch file the series adds or changes that applies neither forward nor backward to the current Chromium tree, so an amended patch re-applies over its old form. A patch already applied in its new form is left alone. `engine/test.sh` covers this with a fixture.
 
 The series is experimental-API only. The CEF-side parts of popups-as-tabs engage only when `CEF_API_IS_ADDED(CEF_EXPERIMENTAL)`, but the Chromium-side hunks (tabs allowed in a views-hosted Browser, window type reported as normal, installs anchored to the CEF window) apply to every views-hosted Chrome style Browser regardless of `CEF_API_VERSION`. Do not ship the series to a client that pins a stable API version.
+
+0006 closes the teardown window: from the moment the last tab's WebContents is gone (before `OnBeforeClose` and `OnBrowserDestroyed`), `GetTabs`, `GetActiveTab` and `GetTabCount` report only live tabs, and `AddTab` and the extension action calls refuse. Probe check: `close-callbacks`.

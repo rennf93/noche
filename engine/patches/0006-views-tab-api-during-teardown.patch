@@ -1,0 +1,73 @@
+From b6b300f9a27f19a29510f838622a56c9182fb05f Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 14:30:49 +0200
+Subject: [PATCH] views: tab API during teardown
+
+---
+ libcef/browser/views/browser_view_impl.cc | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/libcef/browser/views/browser_view_impl.cc b/libcef/browser/views/browser_view_impl.cc
+index 613e7def8..38e1245bc 100644
+--- a/libcef/browser/views/browser_view_impl.cc
++++ b/libcef/browser/views/browser_view_impl.cc
+@@ -87,6 +87,13 @@ bool IsTabLive(const CefRefPtr<CefBrowserHostBase>& tab) {
+   return tab && tab->GetWebContents();
+ }
+ 
++// False from the moment the last tab's WebContents is gone, which is before
++// NotifyBrowserDestroyed and OnBeforeClose run (contents_destroyed_ is set
++// after them). The tab strip is mid-teardown then: AddTab would CHECK.
++bool HasLiveTab(const std::vector<CefRefPtr<CefBrowserHostBase>>& tabs) {
++  return std::any_of(tabs.begin(), tabs.end(), IsTabLive);
++}
++
+ }  // namespace
+ 
+ // static
+@@ -324,7 +331,8 @@ CefRefPtr<CefBrowser> CefBrowserViewImpl::AddTab(
+   CEF_REQUIRE_VALID_RETURN(nullptr);
+   CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
+ 
+-  if (is_alloy_style_ || contents_destroyed_ || !browser_ || !root_view()) {
++  if (is_alloy_style_ || contents_destroyed_ || !HasLiveTab(tabs_) ||
++      !browser_ || !root_view()) {
+     return nullptr;
+   }
+ 
+@@ -372,7 +380,11 @@ void CefBrowserViewImpl::SetActiveTab(CefRefPtr<CefBrowser> tab) {
+ CefRefPtr<CefBrowser> CefBrowserViewImpl::GetActiveTab() {
+   CEF_REQUIRE_VALID_RETURN(nullptr);
+   CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
+-  return browser_;
++  if (is_alloy_style_) {
++    return browser_;
++  }
++  // |browser_| lags the last close until BrowserDestroyed runs.
++  return IsTabLive(browser_) ? browser_ : nullptr;
+ }
+ 
+ size_t CefBrowserViewImpl::GetTabCount() {
+@@ -401,7 +413,8 @@ void CefBrowserViewImpl::GetTabs(std::vector<CefRefPtr<CefBrowser>>& tabs) {
+     auto* model = chrome_browser_view()->browser()->GetTabStripModel();
+     for (int i = 0; i < model->count(); ++i) {
+       if (auto host = ChromeBrowserHostImpl::GetBrowserForContents(
+-              model->GetWebContentsAt(i))) {
++              model->GetWebContentsAt(i));
++          IsTabLive(host)) {
+         tabs.push_back(host);
+       }
+     }
+@@ -417,7 +430,8 @@ views::Widget* CefBrowserViewImpl::GetAnchorWidget() {
+ }
+ 
+ CefExtensionActionsController* CefBrowserViewImpl::GetActionsController() {
+-  if (is_alloy_style_ || contents_destroyed_ || !browser_ || !root_view()) {
++  if (is_alloy_style_ || contents_destroyed_ || !HasLiveTab(tabs_) ||
++      !browser_ || !root_view()) {
+     return nullptr;
+   }
+   if (!actions_) {
+-- 
+2.56.0
+
