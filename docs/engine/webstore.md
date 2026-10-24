@@ -62,3 +62,9 @@ P3 is written (not built): `engine/patches/0004-views-extension-installs-stay-in
 P4 is dropped (U3: the brand is not the trigger).
 
 The probe check `install-no-window` (same flow as `store-stock`, plus: browser-window count and tab count equal before and after, and the installed extension's service worker answers through `chrome.runtime.getContexts`) runs after the build.
+
+## P3 follow-ups and the pass rule
+
+- M1 follow-up: the Browser P3 picks is the profile's most recently activated CEF Browser, not necessarily the window that started the install (stock Chromium has the same semantics for tabbed Browsers). With several Noche windows the post-install dialog may anchor to another window; M1 should pass the originating window if that matters.
+- The post-install lambdas no longer hold a raw Browser pointer: the first resolves the Browser by SessionID (`BrowserCollection::FindBrowserWithID` through `GlobalBrowserCollection`) and null-checks the Browser and its active tab; the IPH lambda null-checks `browser_view` and `toolbar()`.
+- `install-no-window` passes only if all hold (`Probes/EngineProbe/store_rule.h`): zero windows of class `BrowserNativeWidgetWindow` before and after (the narrowest rule that a stock engine cannot satisfy; the probe window is a `CefNSWindow`, the sheet and dialog are `NativeWidgetMacNSWindow`), zero guard order-in or makeKey hits on that class, no new-tab or apps target (CDP `Target.getTargets`; if the session cannot answer, the window and tab rules stand in), the post-install dialog window really appeared, same tab count, clean exit (probe-engine.sh). Blocked activation attempts are printed as info. `scripts/test-store-rule.sh` replays the stock evidence offline and shows the rule fails on it (browser windows 0 to 1, 2 guard hits).

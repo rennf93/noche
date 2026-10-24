@@ -1,12 +1,12 @@
-From 2ec3ca8d3cdbd76ac410c414a00f586947b9d518 Mon Sep 17 00:00:00 2001
+From bce24790132fef8b723b6f7b6ca5477e2b1da797 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 04:35:09 +0200
 Subject: [PATCH] views: extension installs stay in the window
 
 ---
- patch/patch.cfg                               |  5 +++
- ...browser_ui_extension_install_in_view.patch | 34 +++++++++++++++++++
- 2 files changed, 39 insertions(+)
+ patch/patch.cfg                               |  5 ++
+ ...browser_ui_extension_install_in_view.patch | 70 +++++++++++++++++++
+ 2 files changed, 75 insertions(+)
  create mode 100644 patch/patches/chrome_browser_ui_extension_install_in_view.patch
 
 diff --git a/patch/patch.cfg b/patch/patch.cfg
@@ -26,15 +26,15 @@ index ec3b22ab9..837cb8587 100644
  ]
 diff --git a/patch/patches/chrome_browser_ui_extension_install_in_view.patch b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
 new file mode 100644
-index 000000000..11df97767
+index 000000000..1f7b143b2
 --- /dev/null
 +++ b/patch/patches/chrome_browser_ui_extension_install_in_view.patch
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,70 @@
 +diff --git chrome/browser/ui/extensions/extension_install_ui_desktop.cc chrome/browser/ui/extensions/extension_install_ui_desktop.cc
-+index c9e2a59c3e..781d2568a2 100644
++index c9e2a59c3e..5a0fff1f0c 100644
 +--- chrome/browser/ui/extensions/extension_install_ui_desktop.cc
 ++++ chrome/browser/ui/extensions/extension_install_ui_desktop.cc
-+@@ -70,6 +70,29 @@
++@@ -70,6 +70,33 @@
 + namespace {
 + 
 + BrowserWindowInterface* FindOrCreateVisibleBrowser(Profile* profile) {
@@ -42,6 +42,10 @@ index 000000000..11df97767
 ++  // Browser exists and the stock path below would create and Show() a separate
 ++  // Chrome window (which also activates the app). Use a CEF-hosted Browser of
 ++  // the profile instead; the post-install dialog then anchors to its active tab.
+++  // Note: this is the profile's most recently activated CEF Browser, not
+++  // necessarily the window that started the install (stock Chromium has the
+++  // same semantics for tabbed Browsers). Multi-window embedders may want the
+++  // originating window; tracked as an M1 follow-up.
 ++  auto* collection = ProfileBrowserCollection::GetForProfile(profile);
 ++  if (!collection->FindTabbedBrowser()) {
 ++    BrowserWindowInterface* cef_browser = nullptr;
@@ -64,6 +68,38 @@ index 000000000..11df97767
 +   chrome::ScopedTabbedBrowserDisplayer displayer(profile);
 +   BrowserWindowInterface* browser = displayer.browser_window_interface();
 +   if (browser->GetTabStripModel()->count() == 0) {
++@@ -142,10 +169,19 @@
++     extensions::TriggerPostInstallDialog(
++         profile(), extension, icon_to_use,
++         base::BindOnce(
++-            [](BrowserWindowInterface* bwi) {
++-              return bwi->GetActiveTabInterface()->GetContents();
+++            [](SessionID browser_id) -> content::WebContents* {
+++              // Resolved late: the extension loads after this call, and the
+++              // Browser (a CEF-hosted one included) may be gone by then.
+++              BrowserWindowInterface* bwi =
+++                  GlobalBrowserCollection::GetInstance()->FindBrowserWithID(
+++                      browser_id);
+++              if (!bwi) {
+++                return nullptr;
+++              }
+++              tabs::TabInterface* tab = bwi->GetActiveTabInterface();
+++              return tab ? tab->GetContents() : nullptr;
++             },
++-            browser_window),
+++            browser_window->GetSessionID()),
++         base::BindOnce(
++             [](const extensions::ExtensionId& extension_id,
++                base::WeakPtr<content::WebContents> web_contents) {
++@@ -160,7 +196,7 @@
++               }
++               BrowserView* browser_view =
++                   BrowserView::GetBrowserViewForBrowser(browser_interface);
++-              if (!browser_view->toolbar()) {
+++              if (!browser_view || !browser_view->toolbar()) {
++                 return;
++               }
++               ExtensionsToolbarDesktop* extensions_toolbar =
 -- 
 2.56.0
 

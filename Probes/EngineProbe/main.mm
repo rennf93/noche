@@ -96,8 +96,10 @@ static void (*orig_orderFront)(id, SEL, id);
 static void (*orig_orderBack)(id, SEL, id);
 static void (*orig_orderFrontRegardless)(id, SEL);
 static void (*orig_makeKeyAndOrderFront)(id, SEL, id);
+static int g_browser_window_orders = 0;  // order-in/makeKey attempts on a BrowserNativeWidgetWindow (the stray install window)
 static void GuardWindow(id w, const char* sel) {
   g_guard_calls++;
+  if (!strcmp(class_getName([w class]), "BrowserNativeWidgetWindow")) g_browser_window_orders++;
   const double before = [(NSWindow*)w alphaValue];
   orig_setAlpha(w, @selector(setAlphaValue:), 0);
   [(NSWindow*)w setIgnoresMouseEvents:YES];
@@ -414,6 +416,7 @@ static StoreHost MakeStoreHost() {
   h.ensureVisible = [](std::function<void(bool)> cb) { EnsureWindowVisible(cb); };
   h.activateBlocked = []() { return g_activate_blocked; };
   h.guardsInstalled = []() { return g_activation_guard; };
+  h.browserWindowOrders = []() { return g_browser_window_orders; };
   return h;
 }
 static ActionsHost MakeActionsHost() {

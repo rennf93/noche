@@ -5,6 +5,7 @@
 // Hidden rule: nothing here shows or activates a window. macOS system dialogs are never touched; the sheet is a views
 // dialog of this process and main.mm keeps it at alpha 0.
 #import "store.h"
+#import "store_rule.h"
 #import <CoreGraphics/CoreGraphics.h>
 #include <memory>
 #include <string>
@@ -22,7 +23,9 @@ NSString* g_mode = @"stock";   // stock | ua | brand | ua-brand
 NSMutableDictionary* g_docs;   // requestId -> @{url, headers}: store document requests
 NSString* g_ext_id = nil;
 NSString* g_before = nil;      // window snapshot before the click
-int g_main_before = 0, g_total_before = 0, g_tabs_before = -1;
+int g_main_before = 0, g_total_before = 0, g_tabs_before = -1, g_bw_before = 0;
+NSMutableSet<NSNumber*>* g_known;  // window addresses present when the install sheet closed
+bool g_dialog_seen = false;
 
 void Info(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 void Info(NSString* fmt, ...) {
@@ -100,7 +103,7 @@ NSString* ButtonList(NSDictionary* st) {
 }
 
 // Windows of this process: NSApp.windows, and CGWindowList with every window (alpha 0 and off screen ones included).
-struct Snap { int total = 0, main = 0, cg = 0; NSString* text = @""; };
+struct Snap { int total = 0, main = 0, cg = 0, browser = 0; NSString* text = @""; };
 Snap Snapshot(const H& h) {
   Snap s;
   NSWindow* mainWin = h->window();
@@ -108,6 +111,7 @@ Snap Snapshot(const H& h) {
   NSMutableArray* parts = [NSMutableArray array];
   for (NSWindow* w in NSApp.windows) {
     s.total++;
+    if ([NSStringFromClass([w class]) isEqualToString:@"BrowserNativeWidgetWindow"]) s.browser++;
     if ([NSStringFromClass([w class]) isEqualToString:mainClass] && !w.isSheet && w.parentWindow == nil && w.sheetParent == nil) s.main++;
     [parts addObject:[NSString stringWithFormat:@"%@{vis=%d alpha=%.0f sheet=%d key=%d %.0fx%.0f}", NSStringFromClass([w class]), (int)w.isVisible, w.alphaValue, (int)w.isSheet, (int)w.isKeyWindow, w.frame.size.width, w.frame.size.height]];
   }
@@ -115,7 +119,7 @@ Snap Snapshot(const H& h) {
   for (NSDictionary* d in (__bridge NSArray*)list)
     if ([d[(id)kCGWindowOwnerPID] intValue] == getpid()) s.cg++;
   if (list) CFRelease(list);
-  s.text = [NSString stringWithFormat:@"nsapp-windows=%d main-class(%@)=%d cg-windows=%d appActive=%d [%@]", s.total, mainClass, s.main, s.cg, (int)NSApp.isActive, [parts componentsJoinedByString:@" "]];
+  s.text = [NSString stringWithFormat:@"nsapp-windows=%d main-class(%@)=%d browser-windows=%d cg-windows=%d appActive=%d [%@]", s.total, mainClass, s.main, s.browser, s.cg, (int)NSApp.isActive, [parts componentsJoinedByString:@" "]];
   return s;
 }
 
@@ -200,19 +204,7 @@ NSString* InstalledId() {
   return nil;
 }
 
-// Final steps: the installed extension's service worker, then the verdict.
-void Verdict(H h, bool installed, NSString* summary) {
-  Snap after = Snapshot(h);
-  int tabs = h->tabCount();
-  Info(@"windows after: %@", after.text);
-  Info(@"windows before: %@", g_before);
-  Info(@"tabs before=%d after=%d; activate calls blocked=%d; appActive=%d", g_tabs_before, tabs, h->activateBlocked(), (int)NSApp.isActive);
-  const bool sameWindows = after.main == g_main_before && after.total == g_total_before;
-  const bool sameMain = after.main == g_main_before;
-  const bool sameTabs = g_tabs_before < 0 || tabs == g_tabs_before;
-  if (NSApp.isActive) { h->finish(false, [summary stringByAppendingString:@" APP BECAME ACTIVE"]); return; }
-  if (![g_chk isEqualToString:@"install-no-window"]) { h->finish(true, summary); return; }
-  if (!installed) { h->finish(false, [summary stringByAppendingString:@" install did not complete"]); return; }
+void Verdict2(H h, NSString* summary, bool ruleOk) {
   NSString* manifest = nil;
   NSString* vdir = [ExtensionsDir() stringByAppendingPathComponent:g_ext_id];
   NSString* ver = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:vdir error:nil] firstObject];
@@ -231,10 +223,64 @@ void Verdict(H h, bool installed, NSString* summary) {
       Info(@"extension service worker: %@", s);
       NSDictionary* j = Json(s);
       const bool swAlive = [j[@"bg"] intValue] >= 1;
-      const bool ok = sameMain && sameTabs && swAlive;
-      h->finish(ok, [NSString stringWithFormat:@"%@ sameMainWindows=%d sameTotalWindows=%d sameTabs=%d serviceWorkerAlive=%d", summary, (int)sameMain, (int)sameWindows, (int)sameTabs, (int)swAlive]);
+      const bool ok = ruleOk && swAlive;
+      h->finish(ok, [NSString stringWithFormat:@"%@ serviceWorkerAlive=%d", summary, (int)swAlive]);
     });
   });
+}
+
+// Final steps: the installed extension's service worker, then the verdict.
+void Verdict(H h, bool installed, NSString* summary) {
+  Snap after = Snapshot(h);
+  int tabs = h->tabCount();
+  Info(@"windows after: %@", after.text);
+  Info(@"windows before: %@", g_before);
+  Info(@"tabs before=%d after=%d; activate calls blocked=%d; appActive=%d", g_tabs_before, tabs, h->activateBlocked(), (int)NSApp.isActive);
+  const bool sameTabs = g_tabs_before < 0 || tabs == g_tabs_before;
+  if (NSApp.isActive) { h->finish(false, [summary stringByAppendingString:@" APP BECAME ACTIVE"]); return; }
+  if (![g_chk isEqualToString:@"install-no-window"]) { h->finish(true, summary); return; }
+  if (!installed) { h->finish(false, [summary stringByAppendingString:@" install did not complete"]); return; }
+  // The pass rule (store_rule.h): no browser window at all, no guard hit on one, no new-tab/apps target, the
+  // post-install dialog really showed, same tab count. Blocked activation attempts are printed as info only.
+  h->send(@"Target.getTargets", @{}, [=](NSDictionary* r) {
+    int stale = -1;
+    NSArray* infos = r[@"result"][@"targetInfos"];
+    if ([infos isKindOfClass:NSArray.class]) {
+      stale = 0;
+      for (NSDictionary* t in infos) {
+        NSString* u = t[@"url"] ?: @"";
+        Info(@"target type=%@ url=%@", t[@"type"], u.length > 100 ? [u substringToIndex:100] : u);
+        if ([u hasPrefix:@"chrome://newtab"] || [u hasPrefix:@"chrome://new-tab-page"] || [u hasPrefix:@"chrome://apps"] || [u hasPrefix:@"chrome-untrusted://new-tab-page"]) stale++;
+      }
+    } else {
+      Info(@"Target.getTargets unavailable on this session (%@): new-tab check falls back to the browser-window and tab-count rules", r[@"error"] ?: @"no result");
+    }
+    InstallFacts f;
+    f.browserWindowsBefore = g_bw_before;
+    f.browserWindowsAfter = after.browser;
+    f.browserWindowOrders = h->browserWindowOrders();
+    f.staleTabTargets = stale;
+    f.dialogSeen = g_dialog_seen;
+    f.sameTabs = sameTabs;
+    std::string why;
+    const bool ruleOk = InstallNoWindowOk(f, &why);
+    Info(@"install-no-window facts: browserWindows %d -> %d, browser-window guard hits %d, stale targets %d, dialog seen %d, same tabs %d, activate calls blocked %d (info)",
+         f.browserWindowsBefore, f.browserWindowsAfter, f.browserWindowOrders, f.staleTabTargets, (int)f.dialogSeen, (int)f.sameTabs, h->activateBlocked());
+    if (!ruleOk) { h->finish(false, [NSString stringWithFormat:@"%@ RULE FAILED: %s", summary, why.c_str()]); return; }
+    Verdict2(h, summary, ruleOk);
+  });
+}
+
+void WatchDialog(H h, int left, dispatch_block_t done) {
+  for (NSWindow* w in NSApp.windows) {
+    if ([g_known containsObject:@((uintptr_t)(__bridge void*)w)]) continue;
+    if ([NSStringFromClass([w class]) isEqualToString:@"NativeWidgetMacNSWindow"] && (w.isVisible || w.isSheet)) {
+      if (!g_dialog_seen) Info(@"post-install dialog window seen: NativeWidgetMacNSWindow vis=%d sheet=%d %.0fx%.0f", (int)w.isVisible, (int)w.isSheet, w.frame.size.width, w.frame.size.height);
+      g_dialog_seen = true;
+    }
+  }
+  if (left <= 0) { done(); return; }
+  After(0.25, ^{ WatchDialog(h, left - 1, done); });
 }
 
 void AfterInstallClick(H h, NSDictionary* st) {
@@ -252,9 +298,13 @@ void AfterInstallClick(H h, NSDictionary* st) {
     Info(@"sheet up: %@", withSheet.text);
     AcceptSheet(h, 0, [=] {
       if (FindSheet()) { Verdict(h, false, [base stringByAppendingString:@" install=sheet-not-accepted"]); return; }
+      g_known = [NSMutableSet set];
+      for (NSWindow* w in NSApp.windows) [g_known addObject:@((uintptr_t)(__bridge void*)w)];
       WaitFor(h, 40000, [] { g_ext_id = InstalledId(); return g_ext_id != nil; }, [=](bool installed) {
         Info(@"install result: extension on disk=%d id=%@", (int)installed, g_ext_id ?: @"-");
-        After(6, ^{  // the post-install UI (stray window, bubble) shows up within a moment
+        // The post-install UI (stray window, dialog) shows up within a moment: watch 6 s for a window that did not exist
+        // when the install sheet closed, of the dialog's class (NativeWidgetMacNSWindow), visible or a sheet.
+        WatchDialog(h, 24, ^{
           h->eval(kStateJS, false, [=](NSString* s) {
             NSDictionary* fin = Json(s);
             Info(@"state after install: buttons=%@", fin ? ButtonList(fin) : s);
@@ -279,7 +329,7 @@ void Settled(H h, NSDictionary* st) {
     return;
   }
   Snap before = Snapshot(h);
-  g_before = before.text; g_main_before = before.main; g_total_before = before.total; g_tabs_before = h->tabCount();
+  g_before = before.text; g_main_before = before.main; g_total_before = before.total; g_bw_before = before.browser; g_tabs_before = h->tabCount();
   Info(@"windows before click: %@ tabs=%d", before.text, g_tabs_before);
   Info(@"click %@ at %@,%@ (disabled=%@)", add[@"t"], add[@"x"], add[@"y"], add[@"dis"]);
   Click(h, [add[@"x"] doubleValue], [add[@"y"] doubleValue]);

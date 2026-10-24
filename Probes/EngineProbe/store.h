@@ -16,6 +16,7 @@ struct StoreHost {
   std::function<void(std::function<void(bool)>)> ensureVisible;
   std::function<int()> activateBlocked;                                                     // blocked activate calls so far
   std::function<bool()> guardsInstalled;
+  std::function<int()> browserWindowOrders;                                                 // guard hits on BrowserNativeWidgetWindow
 };
 
 // True if |check| is a store check (it then owns the run and ends it through host.finish).
