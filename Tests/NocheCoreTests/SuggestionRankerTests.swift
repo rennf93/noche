@@ -92,6 +92,12 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(rank("q", pages: [fresh, typed]).first(where: { $0.kind == .page })?.url, "https://typed.com/")
     }
 
+    func testOpenTabHidesSameUrlHistoryPage() {
+        let a = tab("https://alpha.org/x", "Alpha")
+        let rows = rank("alp", pages: [page("https://alpha.org/x", host: "alpha.org", title: "Alpha"), page("https://alpha.org/y", host: "alpha.org", title: "Alpha y")], tabs: [a])
+        XCTAssertEqual(rows.filter { $0.url == "https://alpha.org/x" }.map(\.kind), [.tab])
+    }
+
     func testTabsExcludeActiveAndBlank() {
         let active = tab("https://foo.com", "Foo active"), blank = tab("about:blank", "Foo blank"), ok = tab("https://foo.org", "Foo ok")
         let rows = rank("foo", tabs: [active, blank, ok], active: active.id)

@@ -22,9 +22,14 @@ public enum SuggestionRanker {
             }
             .filter { seen.insert($0.0.url).inserted }
 
+        let tabRows = tabs.filter { $0.id != activeTabID && $0.url != "about:blank"
+            && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
+            .map { Suggestion(kind: .tab, title: "\($0.title) - \(AddressInput.displayHost($0.url))", url: $0.url, tabID: $0.id, frecency: 0) }
+
+        let shownTabURLs = Set(tabRows.prefix(2).compactMap(\.url))
         var head: [Suggestion] = []
         var topURL: String?
-        if tokens.count == 1, let top = matches.first(where: { urlDisplay($0.0.url).lowercased().hasPrefix(q) }) {
+        if tokens.count == 1, let top = matches.first(where: { !shownTabURLs.contains($0.0.url) && urlDisplay($0.0.url).lowercased().hasPrefix(q) }) {
             head.append(pageRow(top.0, top.1))
             topURL = top.0.url
         } else if let url = AddressInput.resolve(typed, searchTemplate: probeTemplate), url.scheme != "noche-probe" {
@@ -33,10 +38,6 @@ public enum SuggestionRanker {
         head.append(Suggestion(kind: .query, title: typed, url: nil, tabID: nil, frecency: 0))
         head += remote.prefix(3).map { Suggestion(kind: .remoteQuery, title: $0, url: nil, tabID: nil, frecency: 0) }
         head = Array(head.prefix(maxRows - 1))
-
-        let tabRows = tabs.filter { $0.id != activeTabID && $0.url != "about:blank"
-            && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
-            .map { Suggestion(kind: .tab, title: "\($0.title) - \(AddressInput.displayHost($0.url))", url: $0.url, tabID: $0.id, frecency: 0) }
 
         var siteRows = sites.filter { siteMatches(q, $0) }
             .map { Suggestion(kind: .site, title: "\($0.name) - \($0.host)", url: "https://\($0.host)", tabID: nil, frecency: 0) }
@@ -47,11 +48,14 @@ public enum SuggestionRanker {
             hostScore[h, default: 0] += f
         }
         let listed = Set(siteRows.compactMap { $0.url })
-        siteRows += order.sorted { (hostScore[$0] ?? 0) > (hostScore[$1] ?? 0) }
+        siteRows += order.enumerated().sorted { a, b in
+                let (x, y) = (hostScore[a.element] ?? 0, hostScore[b.element] ?? 0)
+                return x != y ? x > y : a.offset < b.offset
+            }.map(\.element)
             .filter { !listed.contains("https://\($0)") }
             .map { Suggestion(kind: .site, title: "\($0) - \($0)", url: "https://\($0)", tabID: nil, frecency: hostScore[$0] ?? 0) }
 
-        let pageRows = matches.filter { $0.0.url != topURL }.map { pageRow($0.0, $0.1) }
+        let pageRows = matches.filter { $0.0.url != topURL && !shownTabURLs.contains($0.0.url) }.map { pageRow($0.0, $0.1) }
 
         // One slot stays for a history page, so sites shrink first, then tabs.
         let slots = maxRows - head.count

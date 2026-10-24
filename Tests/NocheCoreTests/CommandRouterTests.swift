@@ -33,7 +33,7 @@ final class CommandRouterTests: XCTestCase {
         let tab = Suggestion(kind: .tab, title: "t", url: "https://a.com", tabID: id, frecency: 0)
         XCTAssertEqual(route("a", tab), .switchTo(id))
         let badTab = Suggestion(kind: .tab, title: "t", url: "data:text/html,x", tabID: id, frecency: 0)
-        XCTAssertEqual(route("a", badTab), .none)
+        XCTAssertEqual(route("a", badTab), .switchTo(id))
         let q = Suggestion(kind: .query, title: "hello", url: nil, tabID: nil, frecency: 0)
         XCTAssertTrue(isSearch(route("hello", q)))
         let go = Suggestion(kind: .goTo, title: "example.com", url: "https://example.com", tabID: nil, frecency: 0)

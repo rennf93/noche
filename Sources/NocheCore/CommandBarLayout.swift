@@ -6,8 +6,10 @@ public struct CommandBarFrames: Equatable, Sendable {
     public var input: CGRect
     public var rows: [CGRect]
     public var chip: CGRect
-    /// Beside the send circle; with the Go pill shown it sits at go.minX - 42 instead.
+    /// Beside the send circle (empty bar): send.minX - 42.
     public var mic: CGRect
+    /// Beside the Go pill (typed text): go.minX - 42.
+    public var micWithGo: CGRect
     /// The 34 pt send circle (empty bar).
     public var send: CGRect
     /// The 102x34 "Go" pill (typed text, rows shown).
@@ -20,7 +22,8 @@ public enum CommandBarLayout {
     public enum Placement: Sendable { case newTab, overlay }
 
     /// cardX is the web card's left edge: 197 with the sidebar shown, 6 hidden, anything in between mid-slide.
-    public static func frames(placement: Placement, rows n: Int, cardX: CGFloat, window: CGSize) -> CommandBarFrames {
+    public static func frames(placement: Placement, rows rowCount: Int, cardX: CGFloat, window: CGSize) -> CommandBarFrames {
+        let n = min(max(rowCount, 0), 6)
         let header: CGFloat = placement == .newTab ? 60 : 55
         let card: CGRect
         switch placement {
@@ -28,7 +31,7 @@ public enum CommandBarLayout {
             let area = window.width - 6 - cardX
             card = CGRect(x: cardX + (area - 774) / 2, y: window.height / 2 - 78, width: 774, height: 0)
         case .overlay:
-            card = CGRect(x: cardX + 106, y: 0, width: window.width - 264.5 - (cardX + 106), height: 0)
+            card = CGRect(x: cardX + 106, y: 0, width: max(0, window.width - 264.5 - (cardX + 106)), height: 0)
         }
         let pillTop: CGFloat = n == 0 ? 60 : header + 40 * CGFloat(n) + 13
         var c = card
@@ -39,10 +42,11 @@ public enum CommandBarLayout {
         let inputH: CGFloat = placement == .newTab ? 23 : 20
         return CommandBarFrames(
             card: c,
-            input: CGRect(x: c.minX + 44, y: c.minY + inputY, width: c.width - 44 - 16, height: inputH),
-            rows: (0..<max(n, 0)).map { CGRect(x: c.minX + 8, y: c.minY + header + 40 * CGFloat($0) + 2, width: c.width - 16, height: 36) },
+            input: CGRect(x: c.minX + 44, y: c.minY + inputY, width: max(0, c.width - 44 - 16), height: inputH),
+            rows: (0..<n).map { CGRect(x: c.minX + 8, y: c.minY + header + 40 * CGFloat($0) + 2, width: max(0, c.width - 16), height: 36) },
             chip: CGRect(x: c.minX + 13, y: send.minY + 3, width: 142, height: 28),
             mic: CGRect(x: send.minX - 42, y: send.minY, width: 34, height: 34),
+            micWithGo: CGRect(x: go.minX - 42, y: send.minY, width: 34, height: 34),
             send: send, go: go)
     }
 }

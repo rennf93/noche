@@ -7,7 +7,7 @@ public enum CommandRouter {
         case none
     }
 
-    /// Stored rows (pages, sites, tabs) only ever open http and https; typed text goes through AddressInput.
+    /// Page and site rows only ever open http and https; a tab row always switches (it loads nothing); typed text goes through AddressInput.
     public static func route(_ row: Suggestion?, typed: String, searchTemplate: String) -> Route {
         guard let row else { return resolve(typed, searchTemplate) }
         switch row.kind {
@@ -15,10 +15,11 @@ public enum CommandRouter {
             return resolve(row.title, searchTemplate)
         case .goTo:
             return resolve(row.url ?? typed, searchTemplate)
-        case .page, .site, .tab:
+        case .tab:
+            return row.tabID.map(Route.switchTo) ?? .none
+        case .page, .site:
             guard let s = row.url, let url = URL(string: s), let scheme = url.scheme?.lowercased(),
                   scheme == "http" || scheme == "https", AddressInput.allowedSchemes.contains(scheme) else { return .none }
-            if row.kind == .tab { return row.tabID.map(Route.switchTo) ?? .none }
             return .navigate(url)
         }
     }

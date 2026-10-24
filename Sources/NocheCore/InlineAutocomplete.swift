@@ -7,8 +7,8 @@ public enum InlineAutocomplete {
         guard !justDeleted, let topHit, topHit.kind == .page, let url = topHit.url,
               !typed.isEmpty, !typed.contains(where: \.isWhitespace) else { return nil }
         let display = urlDisplay(url)
-        guard display.count > typed.count, display.lowercased().hasPrefix(typed.lowercased()) else { return nil }
-        let rest = String(display.dropFirst(typed.count))
+        guard let match = display.range(of: typed, options: [.caseInsensitive, .anchored]), match.upperBound < display.endIndex else { return nil }
+        let rest = String(display[match.upperBound...])
         return (typed + rest, NSRange(location: typed.utf16.count, length: rest.utf16.count))
     }
 }

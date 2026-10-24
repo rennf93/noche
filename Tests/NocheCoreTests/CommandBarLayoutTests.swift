@@ -18,10 +18,19 @@ final class CommandBarLayoutTests: XCTestCase {
         eq(f.go.maxX - f.card.minX, 774 - 13); eq(f.go.minX - f.card.minX, 659)
         eq(f.rows[0].minY - f.card.minY, 62); eq(f.rows[0].height, 36); eq(f.rows[0].minX - f.card.minX, 8)
         eq(f.rows[1].minY - f.rows[0].minY, 40)
-        eq(f.chip.minX - f.card.minX, 13); eq(f.chip.width, 142)
+        eq(f.micWithGo.minX - f.card.minX, 617); eq(f.micWithGo.minY, f.go.minY); eq(f.chip.minX - f.card.minX, 13); eq(f.chip.width, 142)
         let e = CommandBarLayout.frames(placement: .newTab, rows: 3, cardX: 197, window: window)
         eq(e.send.minX - e.card.minX, 727); eq(e.send.width, 34); eq(e.mic.minX, e.send.minX - 42); eq(e.send.minY - e.card.minY, 193)
         eq(e.input.minX - e.card.minX, 44)
+    }
+
+    func testRowsClampedAndTinyWindow() {
+        XCTAssertEqual(CommandBarLayout.frames(placement: .overlay, rows: 9, cardX: 197, window: window).rows.count, 6)
+        XCTAssertEqual(CommandBarLayout.frames(placement: .overlay, rows: -2, cardX: 197, window: window).rows.count, 0)
+        let tiny = CommandBarLayout.frames(placement: .overlay, rows: 3, cardX: 197, window: CGSize(width: 300, height: 200))
+        XCTAssertGreaterThanOrEqual(tiny.card.width, 0)
+        XCTAssertGreaterThanOrEqual(tiny.input.width, 0)
+        XCTAssertTrue(tiny.rows.allSatisfy { $0.width >= 0 })
     }
 
     func testOverlay() {

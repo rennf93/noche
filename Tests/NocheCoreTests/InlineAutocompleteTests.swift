@@ -11,6 +11,15 @@ final class InlineAutocompleteTests: XCTestCase {
         XCTAssertEqual(r?.text, "ExAmple.com/path")
         XCTAssertEqual(r?.selectedRange, NSRange(location: 4, length: 12))
     }
+    func testAccentedAndCjk() {
+        let r = InlineAutocomplete.completion(typed: "CAF", topHit: hit("https://café.example/x"), justDeleted: false)
+        XCTAssertEqual(r?.text, "CAFé.example/x")
+        XCTAssertEqual(r?.selectedRange, NSRange(location: 3, length: 11))
+        let c = InlineAutocomplete.completion(typed: "日本", topHit: hit("https://日本語.jp/ホーム"), justDeleted: false)
+        XCTAssertEqual(c?.text, "日本語.jp/ホーム")
+        XCTAssertEqual(c?.selectedRange, NSRange(location: 2, length: 8))
+        XCTAssertNil(InlineAutocomplete.completion(typed: "İ", topHit: hit("https://x.com"), justDeleted: false))
+    }
     func testNoneAfterDelete() {
         XCTAssertNil(InlineAutocomplete.completion(typed: "exam", topHit: hit("https://example.com"), justDeleted: true))
     }
