@@ -71,3 +71,36 @@ probe processes left: 0
 leftover-helper lines: 0
  229 "Warp" ASN:0x0-0x10010:
 (frontmost app sampled every 0.4 s through the run; the probe was never frontmost)
+
+## Hardening (probe: fail on child crashes, prove the fault handlers)
+
+### segv self-crash (--probe=ext-loaded --probe-selfcrash=segv, handlers via sigaction + SA_ONSTACK + sigaltstack)
+PROBE crash signal=11
+rc=139
+DiagnosticReports unchanged, no processes left, frontmost: Warp (27 samples)
+
+### Final run: NOCHE_TABS_API=1 scripts/probe-engine.sh ext-loaded tabs-one raf-hidden tabs-20 ext-create ext-activate switch-latency rss-20
+PROBE ext-loaded pass service worker answered {"sw":"1.2","count":1,"ids":[357978585],"activeId":357978585}
+PROBE tabs-one pass count=1 ids=357978649 activeId=357978649
+PROBE raf-hidden pass requestAnimationFrame resolved
+PROBE tabs-20 pass extension count=20 GetTabs=20 GetTabCount=20 OnTabAdded=19
+PROBE ext-create pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+PROBE ext-activate pass OnActiveTabChanged=1 GetActiveTab is tab 7=1 callback active is tab 7=1
+PROBE switch-latency pass median=11.0ms p90=15.7ms range=7.2..18.4ms (30 timed after 3 warm-up, fixed cycle order) limit=11.6ms (U2)
+PROBE rss-20 info sample2 rank=1 pid=71540 rss=382.7MB type=browser
+PROBE rss-20 info sample2 rank=2 pid=71561 rss=222.5MB type=renderer
+PROBE rss-20 info sample2 rank=3 pid=71560 rss=210.6MB type=renderer
+PROBE rss-20 info sample2 rank=4 pid=72446 rss=210.4MB type=renderer
+PROBE rss-20 info sample2 rank=5 pid=72438 rss=210.4MB type=renderer
+PROBE rss-20 info sample2 rank=6 pid=72441 rss=210.3MB type=renderer
+PROBE rss-20 info sample2 rank=7 pid=72440 rss=208.5MB type=renderer
+PROBE rss-20 info sample2 rank=8 pid=72437 rss=208.5MB type=renderer
+PROBE rss-20 info sample2 rank=9 pid=72460 rss=208.5MB type=renderer
+PROBE rss-20 info sample2 rank=10 pid=72447 rss=208.5MB type=renderer
+PROBE rss-20 pass rss=5396.5 MB then 5325.7 MB (28 then 27 processes, 20 loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)
+rc=0
+new crash reports: 0; probe processes left: 0; frontmost app samples: 254, all Warp
+
+### Finding: strict A/B tab switching stalls (check switch-latency-ab, not in the gate)
+First run with A/B order (200 ms gap): PROBE switch-latency fail median=1003.4ms p90=1008.7ms range=9.2..1010.0ms
+Per-switch series with a 1500 ms gap (ms): 29.0 11.2 12.6 12.3 13.6 14.7 11.9 10.7 1008.6 1010.2 1009.3 999.9 1006.4 1010.5 1001.7 1002.3 (that run hit the 40 s watchdog)

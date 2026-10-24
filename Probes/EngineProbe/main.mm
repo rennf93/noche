@@ -16,6 +16,7 @@
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_request_handler.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -45,8 +46,26 @@ static void CrashHandler(int sig) {
   _exit(128 + sig);
 }
 static void InstallCrashHandlers() {
-  for (int sig : {SIGABRT, SIGTRAP, SIGSEGV, SIGBUS, SIGILL}) signal(sig, CrashHandler);
+  // An alternate stack lets the handler run after a stack overflow too.
+  static char altstack[64 * 1024];
+  stack_t ss = {.ss_sp = altstack, .ss_size = sizeof altstack, .ss_flags = 0};
+  sigaltstack(&ss, nullptr);
+  struct sigaction sa = {};
+  sa.sa_handler = CrashHandler;
+  sa.sa_flags = SA_ONSTACK;
+  sigemptyset(&sa.sa_mask);
+  for (int sig : {SIGABRT, SIGTRAP, SIGSEGV, SIGBUS, SIGILL}) sigaction(sig, &sa, nullptr);
 }
+
+// Names of this probe's crash reports (app and helpers) in ~/Library/Logs/DiagnosticReports.
+static NSSet<NSString*>* CrashReports() {
+  NSString* dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];
+  NSMutableSet* out = [NSMutableSet set];
+  for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil])
+    if ([n hasPrefix:@"Noche Probe"] && [n hasSuffix:@".ips"]) [out addObject:n];
+  return out;
+}
+static NSSet<NSString*>* g_reports_at_start;
 
 static void Log(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 static void Log(NSString* fmt, ...) {
@@ -62,6 +81,10 @@ static bool g_ok = false;
 static void Finish(bool ok, NSString* detail) {
   if (g_done) return;
   g_done = true;
+  // A helper (GPU, utility) that crashed leaves a report even when no callback fired.
+  NSMutableSet* fresh = [CrashReports() mutableCopy];
+  if (g_reports_at_start) [fresh minusSet:g_reports_at_start]; else [fresh removeAllObjects];
+  if (fresh.count) { ok = false; detail = [detail stringByAppendingFormat:@" child-terminated: %lu new crash report(s) %@", (unsigned long)fresh.count, fresh.allObjects]; }
   g_ok = ok;
   printf("PROBE %s %s %s\n", g_check.UTF8String, ok ? "pass" : "fail", detail.UTF8String);
   fflush(stdout);
@@ -283,20 +306,26 @@ static std::vector<CefRefPtr<CefBrowser>> Tabs() {
 }
 
 static void SwitchStep(std::vector<CefRefPtr<CefBrowser>> tabs, std::vector<double> lat) {
-  if (lat.size() == 10) {
-    std::vector<double> sorted = lat;
-    std::sort(sorted.begin(), sorted.end());
-    double median = (sorted[4] + sorted[5]) / 2;
-    Finish(median <= 11.6, [NSString stringWithFormat:@"median=%.1fms range=%.1f..%.1fms limit=11.6ms (U2)", median, sorted.front(), sorted.back()]);
+  const size_t kWarm = 3, kTimed = 30;
+  if (lat.size() == kWarm + kTimed) {
+    std::vector<double> t(lat.begin() + kWarm, lat.end());
+    std::sort(t.begin(), t.end());
+    double median = (t[kTimed / 2 - 1] + t[kTimed / 2]) / 2, p90 = t[(size_t)(0.9 * kTimed) - 1];
+    Finish(median <= 11.6, [NSString stringWithFormat:@"median=%.1fms p90=%.1fms range=%.1f..%.1fms (%zu timed after %zu warm-up, fixed cycle order) limit=11.6ms (U2)", median, p90, t.front(), t.back(), kTimed, kWarm]);
     return;
   }
-  CefRefPtr<CefBrowser> tab = tabs[lat.size() + 1];  // tab 0 is active at the start; each step goes to a new tab
+  // tab 0 is active at the start. switch-latency cycles through tabs 1..19 in a fixed order; switch-latency-ab
+  // is the strict A, B, A, B order, which shows a ~1 s stall on this engine after about 8 switches (see report).
+  const bool ab = [g_check isEqualToString:@"switch-latency-ab"];
+  CefRefPtr<CefBrowser> tab = tabs[1 + lat.size() % (ab ? 2 : 19)];
   double t0 = NowMs();
   g_view->SetActiveTab(tab);
   EvalOn(tab, @"new Promise(r => requestAnimationFrame(() => r('raf')))", true, [=](NSString* r) mutable {
     if (!r.length) { Finish(false, @"no requestAnimationFrame result; is the screen locked or the window hidden?"); return; }
     lat.push_back(NowMs() - t0);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 3), dispatch_get_main_queue(), ^{ SwitchStep(tabs, lat); });
+    Log(@"SWITCH %zu tab=%d %.1f ms", lat.size(), tab->GetIdentifier(), lat.back());
+    const char* gapEnv = getenv("NOCHE_PROBE_GAP_MS");  // pause between switches, default 200
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (gapEnv ? atoi(gapEnv) : 200) * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ SwitchStep(tabs, lat); });
   });
 }
 
@@ -306,7 +335,7 @@ static void RunTabsCheck() {
   const int total = [g_check isEqualToString:@"tabs-bare-2"] ? 2 : many ? 20 : ([g_check isEqualToString:@"ext-activate"] ? 10 : 1);
   if (!hybrid && !AddTabs(total - 1)) { Finish(false, @"AddTab returned NULL"); return; }
   // Loading is best effort: a slow tab must not hide the check's own answer.
-  WaitFor([total]{ return (int)g_loaded_ids.size() >= total; }, 15000, [total](bool) {
+  WaitFor([total]{ return (int)g_loaded_ids.size() >= total; }, 15000, [total](bool loaded) {
     auto tabs = Tabs();
     if ([g_check hasPrefix:@"tabs-bare"]) {
       // Holds nothing: leaves with no CefRefPtr of its own, to tell a probe leak from an engine leak at shutdown.
@@ -322,11 +351,13 @@ static void RunTabsCheck() {
       });
     } else if ([g_check isEqualToString:@"ext-create"]) {
       const int before = WindowCount(), added0 = g_tab_added;
-      ExtCmdDiag(@{@"what" : @"create", @"url" : g_url}, [before, added0](NSDictionary* j) {
+      const size_t beforeTabs = Tabs().size();
+      ExtCmdDiag(@{@"what" : @"create", @"url" : g_url}, [before, added0, beforeTabs](NSDictionary* j) {
         if (j[@"error"]) { Finish(false, [NSString stringWithFormat:@"chrome.tabs.create failed: %@", j[@"error"]]); return; }
-        WaitFor([added0]{ return g_tab_added > added0; }, 5000, [before](bool added) {
+        WaitFor([added0]{ return g_tab_added > added0; }, 5000, [before, beforeTabs](bool added) {
           const int after = WindowCount();
-          Finish(added && after == before, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs=%zu", (int)added, before, after, Tabs().size()]);
+          const size_t afterTabs = Tabs().size();
+          Finish(added && after == before && afterTabs == beforeTabs + 1, [NSString stringWithFormat:@"OnTabAdded=%d windows before=%d after=%d (must be unchanged) GetTabs before=%zu after=%zu (must be +1)", (int)added, before, after, beforeTabs, afterTabs]);
         });
       });
     } else if ([g_check isEqualToString:@"ext-activate"]) {
@@ -341,10 +372,12 @@ static void RunTabsCheck() {
           Finish(changed && isTab7 && cbTab7, [NSString stringWithFormat:@"OnActiveTabChanged=%d GetActiveTab is tab 7=%d callback active is tab 7=%d", g_active_changed, (int)isTab7, (int)cbTab7]);
         });
       });
-    } else if ([g_check isEqualToString:@"switch-latency"]) {
+    } else if ([g_check hasPrefix:@"switch-latency"]) {
       if (tabs.size() != 20) { Finish(false, [NSString stringWithFormat:@"expected 20 tabs, GetTabs=%zu", tabs.size()]); return; }
+      if (!loaded) { Finish(false, [NSString stringWithFormat:@"only %d of 20 tabs loaded", (int)g_loaded_ids.size()]); return; }
       SwitchStep(tabs, {});
     } else {  // rss-20 and rss-20-hybrid
+      if (!loaded) { Finish(false, [NSString stringWithFormat:@"only %d of %d tabs loaded", (int)g_loaded_ids.size(), total]); return; }
       int p1 = 0;
       double r1 = TreeRssMB(&p1, nullptr);
       Log(@"RSS sample 1: %.1f MB, %d processes, %d loaded of %d", r1, p1, (int)g_loaded_ids.size(), total);
@@ -353,6 +386,7 @@ static void RunTabsCheck() {
         std::vector<Proc> tree;
         double r2 = TreeRssMB(&p2, &tree);
         PrintTop10("sample2", tree);
+        if (p2 < p1 - 1) { Finish(false, [NSString stringWithFormat:@"a child process went away: %d processes at sample 1, %d at sample 2", p1, p2]); return; }
         Finish(std::max(r1, r2) <= 6400,  // M0 hybrid control under these flags measured 5364 to 5426 MB (rss-20-hybrid); plus 20 percent
                 [NSString stringWithFormat:@"rss=%.1f MB then %.1f MB (%d then %d processes, %d loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)", r1, r2, p1, p2, (int)g_loaded_ids.size()]);
       });
@@ -372,9 +406,16 @@ static void RunRafHidden() {
                  ^{ Finish(false, @"requestAnimationFrame did not resolve in 10s while hidden"); });
 }
 
-class Client : public CefClient, public CefLoadHandler {
+class Client : public CefClient, public CefLoadHandler, public CefRequestHandler {
  public:
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  // cef_request_handler.h:260. The only child-exit callback in 156 (no GPU or utility one); other helpers are
+  // caught by the new-crash-report check in Finish().
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser>, TerminationStatus status, int, const CefString& why) override {
+    Log(@"RENDER_TERMINATED status=%d %s", (int)status, why.ToString().c_str());
+    Finish(false, [NSString stringWithFormat:@"child-terminated status=%d", (int)status]);
+  }
   void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, ErrorCode c, const CefString& t, const CefString& u) override {
     Log(@"LOADERROR code=%d %s %s", (int)c, t.ToString().c_str(), u.ToString().c_str());
   }
@@ -432,8 +473,15 @@ class WinDelegate : public CefWindowDelegate {
   NSError* err = nil;
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }
   InstallCrashHandlers();  // after CefInitialize, so Chromium's own handlers do not replace them
-  if ([NSProcessInfo.processInfo.arguments containsObject:@"--probe-selfcrash"])  // test-only: proves the handlers
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ abort(); });
+  g_reports_at_start = CrashReports();
+  // test-only: --probe-selfcrash aborts, --probe-selfcrash=segv writes through a null pointer
+  for (NSString* a in NSProcessInfo.processInfo.arguments) {
+    if (![a hasPrefix:@"--probe-selfcrash"]) continue;
+    const bool segv = [a isEqualToString:@"--probe-selfcrash=segv"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      if (segv) *(volatile int*)nullptr = 1; else abort();
+    });
+  }
   g_view = CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate());
   if ([g_check isEqualToString:@"rss-20-hybrid"])  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
     for (int i = 1; i < 20; i++)
@@ -450,7 +498,7 @@ int main(int argc, const char* argv[]) {
     for (int i = 1; i < argc; i++)
       if (strncmp(argv[i], "--probe=", 8) == 0) g_check = @(argv[i] + 8);
     if (!g_check) { printf("PROBE - fail usage: --probe=<check>\n"); return 2; }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden" ] containsObject:g_check]) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden" ] containsObject:g_check]) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
