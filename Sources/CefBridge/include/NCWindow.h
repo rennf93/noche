@@ -47,12 +47,14 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// ignored whoever orders a window in, and every NSApplication/NSRunningApplication activation call becomes a counted no-op.
 + (void)installHiddenGuards;
 + (NSInteger)activationsBlocked;
-/// Test support: YES while a CEF handler of the bridge is on the stack.
+#ifdef NOCHE_TESTHOOKS
+/// Test support (builds with NOCHE_TESTHOOKS only): YES while a CEF handler of the bridge is on the stack.
 + (BOOL)insideCefCallback;
 /// Test support: DevTools browsers created, whose front end finished loading, and that ended (OnBeforeClose), all windows.
 + (NSInteger)devToolsCreated;
 + (NSInteger)devToolsLoaded;
 + (NSInteger)devToolsClosed;
+#endif
 /// Attempts to set alpha above 0 (clamped to 0), on windows of NCWindow and on any other window.
 + (NSInteger)alphaAttemptsOnOwnWindows;
 + (NSInteger)alphaAttemptsOnOtherWindows;
@@ -76,8 +78,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)loadURL:(NSString *)url;
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
 - (void)showDevTools;
+#ifdef NOCHE_TESTHOOKS
 /// Test support (builds with NOCHE_TESTHOOKS only): runs the Chrome command with this IDC name on the tab, bypassing Noche's actions.
 - (BOOL)testExecuteChromeCommandNamed:(NSString *)name;
+#endif
 - (void)close;
 /// CDP Runtime.evaluate (awaitPromise, returnByValue). |json| is the JSON of the result value, |error| the exception or CDP error.
 - (void)evaluateJavaScript:(NSString *)script completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;

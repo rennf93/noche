@@ -12,7 +12,8 @@ let withApp = env["NOCHE_APP"] == "1" || withSpikes || withProbes
 // The CEF sandbox is on by default; NOCHE_NO_SANDBOX=1 opts out (no helper sandbox init, no_sandbox=true).
 let sandboxFlags = env["NOCHE_NO_SANDBOX"] == "1" ? [] : ["-DNOCHE_SANDBOX=1"]
 // NOCHE_TESTHOOKS=1 compiles test-only hooks (forcing the shutdown watchdog) into the app.
-let testHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS")] : []
+// The -Xcc flag makes the bridge header's #ifdef NOCHE_TESTHOOKS declarations visible to Swift, matching the bridge's own build.
+let testHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS"), .unsafeFlags(["-Xcc", "-DNOCHE_TESTHOOKS=1"])] : []
 // The bridge's test switches and counters compile only with the same switch.
 let bridgeTestFlags = env["NOCHE_TESTHOOKS"] == "1" ? ["-DNOCHE_TESTHOOKS=1"] : []
 let cefFlags = sandboxFlags + [

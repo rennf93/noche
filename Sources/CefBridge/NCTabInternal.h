@@ -5,23 +5,24 @@
 // Bridge-private side of NCTab: NCWindow.mm mutates the state, the public header only reads it.
 NS_ASSUME_NONNULL_BEGIN
 
+// Test switches and the callback depth counter exist only in builds with NOCHE_TESTHOOKS; elsewhere the names are not even in the binary.
+#ifdef NOCHE_TESTHOOKS
 /// Depth of CEF handler calls in progress on the UI thread (test support: +[NCWindow insideCefCallback]).
 inline int g_nc_cef_depth = 0;
 struct NCCefScope {
   NCCefScope() { g_nc_cef_depth++; }
   ~NCCefScope() { g_nc_cef_depth--; }
 };
-// Test switches exist only in builds with NOCHE_TESTHOOKS; elsewhere the name is not even in the binary.
-#ifdef NOCHE_TESTHOOKS
+#define NC_CEF_CALLBACK NCCefScope nc_cef_scope_
 inline bool NCTestFlag(const char* name) {
   const char* v = getenv(name);
   return v && v[0] == '1';
 }
 #define NC_TEST_FLAG(name) NCTestFlag(name)
 #else
+#define NC_CEF_CALLBACK ((void)0)
 #define NC_TEST_FLAG(name) false
 #endif
-#define NC_CEF_CALLBACK NCCefScope nc_cef_scope_
 
 @interface NCTab ()
 @property(nonatomic, readwrite) NSInteger identifier;
