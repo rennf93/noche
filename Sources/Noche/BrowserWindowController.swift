@@ -209,6 +209,14 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func selectTab(at index: Int?) {
         note("selectTab")
         closeNext.removeAll()
+#if NOCHE_TESTHOOKS
+        // Negative control: the engine strip's order instead of the list's.
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_LIST_ORDER"] == "1" {
+            let strip = window.tabs
+            guard let i = index.map({ min($0, strip.count - 1) }) ?? strip.indices.last, strip.indices.contains(i) else { return }
+            intendedActive = strip[i]; window.activateTab(strip[i]); return
+        }
+#endif
         let items = list.items
         guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i), let tab = tabs[items[i].engineID] else { return }
         intendedActive = tab
@@ -348,6 +356,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func moveTab(_ delta: Int) {
         note("moveTab")
         closeNext.removeAll()
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_MOVE"] == "1" { return }  // negative control
+#endif
         guard let id = intendedActive.flatMap({ ids[$0.identifier] }) ?? list.activeID,
               let i = list.items.firstIndex(where: { $0.id == id }), list.items.indices.contains(i + delta) else { return }
         list.move(id, to: i + delta)

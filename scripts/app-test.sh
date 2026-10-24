@@ -28,7 +28,7 @@ if [ "${1:-}" = "--negative" ]; then
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
   SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
   # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
-  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;tab-chords NOCHE_TEST_NO_LIST_ORDER=1 expect-fail;move-tab-relaunch NOCHE_TEST_NO_MOVE=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
   IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
@@ -54,9 +54,10 @@ fi
 for C in "$@"; do
   [[ "$C" =~ ^[a-z0-9-]+$ ]] || { echo "bad check name: $C" >&2; exit 2; }
 done
+PROFILE="$HOME/Library/Application Support/Noche Test"
+[ -n "$HOME" ] && [ -n "$PROFILE" ] && [[ "$PROFILE" == */"Noche Test" ]] || { echo "refusing to run: bad PROFILE '$PROFILE'" >&2; exit 2; }
 APP="$ROOT/build/Noche.app"
 BIN="$APP/Contents/MacOS/Noche"
-PROFILE="$HOME/Library/Application Support/Noche Test"
 NOCHE_TESTHOOKS=1 "$ROOT/scripts/build-app.sh" >&2
 
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
@@ -66,8 +67,10 @@ OUTF="$(mktemp)"
 ERRF="$(mktemp)"
 APP_PID=""
 # Ctrl-C or a kill of this script must not leave the app running: stop the one app PID this script spawned (never a list).
+# The unwritable variant of store-unavailable leaves the Store directory at 555 while the app runs; the EXIT trap restores it. A SIGKILL of
+# this script skips the trap and leaves 555 until the next run's pre-wipe chmod (before its rm -rf of the profile).
 cleanup() {
-  chmod -R u+rwx "$PROFILE/Store" 2>/dev/null || true  # the unwritable variant of store-unavailable
+  [ -n "${PROFILE:-}" ] && [ -d "$PROFILE/Store" ] && { chmod -R u+rwx "$PROFILE/Store" 2>/dev/null || true; }
   kill "$SERVER_PID" 2>/dev/null || true
   if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
     kill -TERM "$APP_PID" 2>/dev/null || true
@@ -97,7 +100,7 @@ for CHECK in "$@"; do
     [ "$PHASE" != none ] || PHASE=""
     : > "$OUTF"; : > "$ERRF"
     # Only phase 1 (or a one-phase check) starts from a wiped profile: phase 2 relaunches on what phase 1 left.
-    if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then chmod -R u+rwx "$PROFILE" 2>/dev/null || true; rm -rf "$PROFILE"; fi
+    if [ -z "$PHASE" ] || [ "$PHASE" = 1 ]; then [ -n "$PROFILE" ] && chmod -R u+rwx "$PROFILE" 2>/dev/null || true; rm -rf "$PROFILE"; fi
     # corrupt-store: garbage over the store file (the WAL files stay), then phase 2 must quarantine it and start with one window.
     if [ "$CHECK" = corrupt-store ] && [ "$PHASE" = 2 ]; then
       [ -f "$PROFILE/Store/noche.sqlite" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail no store file left by phase 1"; break; }

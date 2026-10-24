@@ -1,4 +1,4 @@
-# Noche M1.2 persistence evidence, build/ removed first (swift .build kept, incremental), code HEAD cce72fb plus one harness fix (reopen-identity waits for the popup's address, see re-run), engine cef_binary_156.0.14-noche.3659+g18b1359+chromium-156.0.8078.48
+# Noche M1.2 persistence evidence, build/ removed first (swift .build kept, incremental), code HEAD cce72fb; the reopen-identity harness fix (popup address wait) is in d31424d, the re-run below used it, engine cef_binary_156.0.14-noche.3659+g18b1359+chromium-156.0.8078.48
 # lock state: CGSSessionScreenIsLocked=Yes during this run (screen locked: hidden windows get no frames)
 # uptime: 22:43  up 1 day,  7:32, 1 user, load averages: 37.24 36.88 36.02
 # gate rc per step
@@ -461,3 +461,16 @@ NEGATIVE persist-relaunch with NOCHE_TEST_NOFLUSH=1: failed as expected: NOCHE_T
 NEGATIVE reopen-closed with NOCHE_TEST_NO_CLOSED=1: failed as expected: NOCHE_TEST reopen-closed fail item disabled after closing B
 NEGATIVE shortcuts-once with NOCHE_TEST_NOEXACT=1: failed as expected: NOCHE_TEST shortcuts-once fail Cmd+W closed no tab
 NEGATIVE devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1: pass (recorded, not asserted)
+
+## RED proofs (Task 4 follow-ups; outputs from the runs, not re-run in the full list)
+# tab-chords, selectTab(at:) switched locally to the engine strip order (uncommitted, restored):
+NOCHE_TEST tab-chords fail Cmd+2 selected list index Optional(2), want 1 (list ["http://127.0.0.1:50036/", "http://127.0.0.1:50036/b.html", "http://127.0.0.1:50036/link.html"], engine strip ["http://127.0.0.1:50036/", "http://127.0.0.1:50036/link.html", "http://127.0.0.1:50036/b.html"], after [0]) keys ["1:window=false,menu=true menuClass=ShortcutMenu ig=1 chars=1 mods=1048576", "2:window=false,me
+# persist-relaunch lastActiveAt recorded through sqlite in phase 1, run on a git archive of 03c37ed (own build, deleted afterwards):
+NOCHE_TEST persist-relaunch fail phase 2: 2 windows with frames within 1 pt, tab urls in order, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow) ["lastActiveAt of 127AF065-7654-4C9E-8F5A-3D39FF9677B9 is 1792872658.937897, saved 1792872652.0711331", "lastActiveAt of 7581D7D0-AF16-4E7B-AA34-7CCDD61E0FA0 is 1792872659.310013, saved 1792872652.9020071", "lastActiveAt of 82D8D7D4-FF6F-4D42-A223-6EEBCEBD1B39 is 1792872659.310495, saved 1792872652.902257", "lastActiveAt of 9E0FB0FE-970F-469B-A31F-3AECF6318CD6 is 1792872659.2151089, saved 1792872652.8086371", "lastActiveAt of BF4D440A-F488-42C3-BD2B-CDFFA21C4996 is 1792872658.9821339, saved 1792872652.6039281", "lastActiveAt of DA5
+# store-unavailable unwritable variant, script sent SIGTERM while the Store directory was 555 (always-run trap): mode seen 555, script rc=130, mode after 755
+# move-tab-relaunch with NOCHE_TEST_NO_MOVE=1 (moveTab a no-op), then green:
+NEGATIVE move-tab-relaunch with NOCHE_TEST_NO_MOVE=1: failed as expected: NOCHE_TEST move-tab-relaunch fail phase 1: next from 1 gave ["http://127.0.0.1:55075/", "http://127.0.0.1:55075/b.html", "http://127.0.0.1:55075/link.html"], want ["http://127.0.0.1:55075/", "http://127.0.0.1:55075/link.html", "http://127.0.0.1:55075/b.html"]
+NOCHE_TEST move-tab-relaunch pass phase 1: B moved after C by Ctrl+Shift+Page Down, ends are no-ops, sidebar [A, C, B], quitting at once []
+NOCHE_TEST move-tab-relaunch pass phase 2: the order [A, C, B] and B active survived the relaunch, sidebar shows it []
+# tab-chords negative pair (NOCHE_TEST_NO_LIST_ORDER=1), now in --negative:
+NEGATIVE tab-chords with NOCHE_TEST_NO_LIST_ORDER=1: failed as expected: NOCHE_TEST tab-chords fail Cmd+2 selected list index Optional(2), want 1 (list ["http://127.0.0.1:54204/", "http://127.0.0.1:54204/b.html", "http://127.0.0.1:54204/link.html"], engine strip ["http://127.0.0.1:54204/", "http://127.0.0.1:54204/link.html", "http://127.0.0.1:54204/b.html"], after [0]) keys ["1:window=false,menu=true menuClass=ShortcutMenu ig=1 chars=1 mods=1048576", "2:window=false,menu=true menuClass=ShortcutM

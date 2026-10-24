@@ -85,7 +85,7 @@ Store checks read the store file through the `sqlite3` CLI (read only), the way 
 | tab-chords | with the list [A, B, C] over the engine strip [A, C, B] (a reopen put B back in the middle), Cmd+1, 2, 3 and Cmd+9 each select the tab at that position in the list (Cmd+9 the last). The key event goes to the main menu directly: a hidden window is never key, and the page view takes a key the menu has no item for to the page, redispatching an unhandled one to the menu only in a key window |
 | move-tab-relaunch | two-phase: Ctrl+Shift+Page Down moves the active tab one step along the list, Ctrl+Shift+Page Up one step back, and at the ends nothing happens (and nothing a second time); B moves after C, the sidebar rows show [A, C, B] and phase 2 after a relaunch has the same order with B active |
 
-Negative controls added in M1.2 (`--negative`): `persist-relaunch` with `NOCHE_TEST_NOFLUSH=1` and `reopen-closed` with `NOCHE_TEST_NO_CLOSED=1` must fail. `tab-chords`, `move-tab-relaunch` and the unwritable variant have no switch: their RED runs (the list mapping removed locally, the check run on the sources before the fix, a failing run that leaves the directory at 555) are in the M1.2 task 4 report.
+Negative controls added in M1.2 (`--negative`): `persist-relaunch` with `NOCHE_TEST_NOFLUSH=1` and `reopen-closed` with `NOCHE_TEST_NO_CLOSED=1` must fail. `tab-chords` with `NOCHE_TEST_NO_LIST_ORDER=1` and `move-tab-relaunch` with `NOCHE_TEST_NO_MOVE=1` must fail too. The unwritable variant has no switch; the RED runs (including the lastActiveAt run on the 03c37ed sources and the trap demonstration) are under "RED proofs" in `docs/app/evidence/m1-2-run.txt`.
 
 ## Builder calls and rulings
 
@@ -115,7 +115,7 @@ Deviations and rulings that change behavior:
 
 - Quitting within a few seconds of the launch can crash the engine's own shutdown (`SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar`, a pending tab-group sync task, seen twice in the final run on `window-frame` and `web-insets`). It is engine code, not Noche's; the self-test harness lets 15 s pass after the launch before a check quits the app. A person quitting right after launch can still hit it.
 
-- The engine disables its own tab commands (select next or by number, move) in a views-hosted window, so they never reach Noche as Chrome commands, and a key the main menu has no item for goes to the page first. Cmd+1 to Cmd+8, Cmd+9 (last tab) and Ctrl+Shift+Page Down and Page Up (Chromium's own chords for moving a tab on Linux and Windows; macOS has none) are therefore Tabs menu items, answered from Noche's list, which is the order of record. The engine's hidden strip is not reordered; the sidebar and the store are the order.
+- The engine disables its own tab commands (select next or by number, move) in a views-hosted window, so they never reach Noche as Chrome commands (engine source: `chrome/browser/ui/browser_command_controller.cc` lines 1985 to 2003 enable them only when `supports_tabs`, the window's `kFeatureTabStrip`, is true), and a key the main menu has no item for goes to the page first. Cmd+1 to Cmd+8, Cmd+9 (last tab) and Ctrl+Shift+Page Down and Page Up (Chromium's own chords for moving a tab on Linux and Windows; macOS has none) are therefore Tabs menu items, answered from Noche's list, which is the order of record. The engine's hidden strip is not reordered; the sidebar and the store are the order.
 
 ## Owner checks (manual, visible)
 

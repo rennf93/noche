@@ -63,6 +63,8 @@ enum MainMenu {
             a("Next Tab", #selector(AppDelegate.nextTab(_:)), "]", shift),
             a("Previous Tab", #selector(AppDelegate.previousTab(_:)), "[", shift),
             .separator(),
+            // Engine source: chrome/browser/ui/browser_command_controller.cc:1985-2003 enables IDC_SELECT_NEXT_TAB, IDC_MOVE_TAB_NEXT and _PREVIOUS,
+            // IDC_SELECT_TAB_0 to _7 and IDC_SELECT_LAST_TAB only when supports_tabs (the window's kFeatureTabStrip) is true; a CEF views-hosted window has none.
             // The engine disables its own tab commands in a views-hosted window, so these keys never arrive as Chrome commands; as menu items
             // they are answered by Noche from the list (and the page view lets a key the menu owns through to the menu).
             a("Move Tab Forward", #selector(AppDelegate.moveTabForward(_:)), String(UnicodeScalar(NSPageDownFunctionKey)!), [.control, .shift]),
