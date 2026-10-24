@@ -526,7 +526,8 @@ class WinDelegate : public CefWindowDelegate {
     for (auto& v : g_alloy) w->AddChildView(v);
     // Invisible and inert: never shown or activated; the NSWindow exists already, so hide it before anything draws.
     NSWindow* nw = ((__bridge NSView*)w->GetWindowHandle()).window;
-    nw.alphaValue = 0;
+    // NOCHE_PROBE_VISIBLE=1 is for owner-approved runs only: opaque, still click-through, never key or active.
+    nw.alphaValue = getenv("NOCHE_PROBE_VISIBLE") ? 1 : 0;
     nw.ignoresMouseEvents = YES;
     // CefWindow::Show() ends in NSApp activateIgnoringOtherApps (native_widget_ns_window_bridge.mm, kShowAndActivateWindow),
     // which is forbidden here. Ordering the NSWindow in directly never activates the app or makes the window key.
