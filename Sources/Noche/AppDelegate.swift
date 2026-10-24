@@ -126,9 +126,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let ok = s.frame.width >= 200 && s.frame.height >= 150
             let restore = tabs.isEmpty ? nil : BrowserWindowController.Restore(
                 tabs: tabs, selected: s.selectedTabID, sidebarHidden: s.sidebarMode == "hidden", fullScreen: s.isFullScreen,
-                lastActive: s.tabMeta.mapValues(\.lastActiveAt))
-            newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? s.frame : startupFrame, id: s.id, restore: restore)
+                isZoomed: s.isZoomed, lastActive: s.tabMeta.mapValues(\.lastActiveAt),
+                favicons: s.tabMeta.compactMapValues(\.faviconURL))
+            newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? Self.onScreen(s.frame) : startupFrame, id: s.id, restore: restore)
         }
+    }
+
+    /// A saved frame that meets no screen now (a display was unplugged) moves onto the main screen, keeping its size (cut to fit).
+    static func onScreen(_ f: NSRect) -> NSRect {
+        NSScreen.screens.contains { $0.visibleFrame.intersects(f) } ? f : defaultFrame(size: f.size)
     }
 
     /// File > New Window: same size as the window it is opened from, 22 pt down and right of it (back to the corner at the screen's edge).
@@ -145,7 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func reopenClosedTab(_ s: Any?) {
         guard !closing, let closed = writer?.popClosed() else { return }
         if let c = controllers.first(where: { $0.id == closed.windowID }) ?? active {
-            c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max)
+            // The pop came first (the store has no peek): a tab the engine could not add goes back on the list.
+            if !c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max) { writer?.putBack(closed) }
         } else {
             let url = closed.tab.url
             newWindow(url: url, id: closed.windowID, restore: .init(tabs: [(closed.tab.id, url)], selected: closed.tab.id, sidebarHidden: false, fullScreen: false, lastActive: [:]))

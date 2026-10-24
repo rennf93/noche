@@ -65,7 +65,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   BOOL _waitingForDevTools;  // the 10 s of polling ran out with the DevTools still open
 }
 
-@synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon;
+@synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon, faviconURL = _faviconURL;
 @synthesize isLoading = _isLoading, canGoBack = _canGoBack, canGoForward = _canGoForward;
 @synthesize browser = _browser, closeRequested = _closeRequested;
 @synthesize faviconListSeen = _faviconListSeen, clearFaviconAtLoadEnd = _clearFaviconAtLoadEnd, lastLoadURL = _lastLoadURL;
@@ -219,6 +219,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 - (void)clearFavicon {
   _faviconGeneration++;
   _favicon = nil;
+  _faviconURL = nil;
 }
 
 - (void)loadFaviconFromURL:(NSString*)url done:(void (^)(void))done {

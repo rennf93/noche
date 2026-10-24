@@ -95,3 +95,5 @@ Hidden runs can never have a key window or a visible screen, so these need a per
 4. The sidebar slide looks right.
 5. The bottom corners of the page are visibly rounded.
 6. The vibrancy behind the sidebar looks right.
+7. Full screen across a relaunch (M1.2): put a window in full screen, quit with Cmd+Q, relaunch: the window comes back in full screen. Hidden runs store and assert the saved value but never enter full screen (a hidden window must not take a Space).
+8. A window zoomed with the green light comes back zoomed after a relaunch.

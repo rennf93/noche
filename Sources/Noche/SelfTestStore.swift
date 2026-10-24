@@ -59,6 +59,19 @@ extension SelfTest {
         return NSApp.mainMenu.flatMap(find)
     }
     var reopenEnabled: Bool { reopenItem().map { $0.menu?.update(); return $0.isEnabled } ?? false }
+    /// One query against the live store file through the sqlite3 CLI (read only), the way scripts/app-test.sh checks it.
+    func sqlite(_ sql: String) -> String {
+        guard let url = app.storeURL else { return "" }
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        p.arguments = ["-readonly", url.path, sql]
+        p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return "" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    var lastActiveFile: URL { storeDir.deletingLastPathComponent().appendingPathComponent("lastactive.txt") }
     func shiftCmdT() { key("t", code: 17, [.command, .shift]) }
 
     /// Controllers restored, each with its window up and every saved tab added.
@@ -77,10 +90,18 @@ extension SelfTest {
             guard await until(20, { self.urls(c1) == want[0] && self.urls(c2) == want[1] }) else {
                 return finish(false, "phase 1: tab urls \(urls(c1)) and \(urls(c2)), want \(want)")
             }
+            // The favicon address and the sidebar width reach the store (the favicon page is tab 4 of window 2).
+            guard await until(15, { second.tabs[safe: 3]?.faviconURL != nil }), let writer = app.writer else { return finish(false, "phase 1: no favicon address for favicon.html") }
+            writer.flush()
+            let icons = sqlite("SELECT count(*) FROM tab WHERE url LIKE '%favicon.html' AND faviconURL IS NOT NULL"), widths = sqlite("SELECT count(*) FROM window WHERE sidebarWidth IS NOT NULL")
+            guard icons == "1", widths == "2" else { return finish(false, "phase 1: stored favicon rows \(icons) (want 1), windows with a sidebarWidth \(widths) (want 2)") }
             c1.window.activateTab(c1.window.tabs[active[0]]); second.activateTab(second.tabs[active[1]])
             guard await until(10, { self.activeIndex(c1) == active[0] && self.activeIndex(c2) == active[1] }) else {
                 return finish(false, "phase 1: active tabs \(String(describing: activeIndex(c1))) and \(String(describing: activeIndex(c2)))")
             }
+            // The lastActiveAt values phase 2 must read back unchanged (a restore is not a use of the tab).
+            let stamps = (c1.lastActive.merging(c2.lastActive) { a, _ in a }).map { "\($0.key.raw.uuidString)=\($0.value.timeIntervalSince1970)" }.sorted().joined(separator: "\n")
+            try? stamps.write(to: lastActiveFile, atomically: true, encoding: .utf8)
             // The last change, then the quit at once: the debounced save is still pending and the quit flush must write it.
             c1.nsWindow?.setFrame(SelfTest.persistFrames[0], display: false); c2.nsWindow?.setFrame(SelfTest.persistFrames[1], display: false)
             return finish(violations.isEmpty, "phase 1: 2 windows with 3 and 4 tabs, active 2 and 4, frames set, quitting at once \(violations)")
@@ -100,7 +121,18 @@ extension SelfTest {
             if app.restored[safe: i]?.tabs.count != want[i].count || app.restored[safe: i]?.isFullScreen != false { bad.append("window \(i + 1) stored \(String(describing: app.restored[safe: i]?.tabs.count)) tabs, full screen \(String(describing: app.restored[safe: i]?.isFullScreen))") }
             if ns?.styleMask.contains(.fullScreen) == true { bad.append("window \(i + 1) is in full screen") }  // a hidden window must never take a Space
         }
-        finish(bad.isEmpty && violations.isEmpty, "phase 2: 2 windows with frames within 1 pt, tab urls in order, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow) \(bad) \(violations)")
+        // A save after the restore must keep the saved lastActiveAt, favicon address and sidebar width.
+        app.writer?.flush()
+        let saved = ((try? String(contentsOf: lastActiveFile, encoding: .utf8)) ?? "").split(separator: "\n").map { $0.split(separator: "=") }
+        let now = Dictionary(uniqueKeysWithValues: sqlite("SELECT id || '=' || lastActiveAt FROM tab WHERE closedAt IS NULL AND deletedAt IS NULL").split(separator: "\n").compactMap { l -> (String, Double)? in
+            let p = l.split(separator: "="); return p.count == 2 ? (String(p[0]), Double(p[1]) ?? 0) : nil })
+        if saved.count != 7 { bad.append("phase 1 left \(saved.count) lastActiveAt values, want 7") }
+        for p in saved where p.count == 2 {
+            if abs((now[String(p[0])] ?? 0) - (Double(p[1]) ?? -1)) > 1 { bad.append("lastActiveAt of \(p[0]) is \(now[String(p[0])] ?? 0), saved \(p[1])") }
+        }
+        if sqlite("SELECT count(*) FROM tab WHERE url LIKE '%favicon.html' AND faviconURL IS NOT NULL") != "1" { bad.append("favicon address lost across the relaunch") }
+        if sqlite("SELECT count(*) FROM window WHERE sidebarWidth IS NOT NULL") != "2" { bad.append("sidebarWidth lost across the relaunch") }
+        finish(bad.isEmpty && violations.isEmpty, "phase 2: 2 windows with frames within 1 pt, tab urls in order, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow), lastActiveAt, favicon address and sidebarWidth kept \(bad) \(violations)")
     }
 
     func quitCloseRelaunch() async {
@@ -149,7 +181,19 @@ extension SelfTest {
         guard !reopenEnabled else { return finish(false, "item enabled after the only closed tab was reopened") }
         shiftCmdT()
         try? await Task.sleep(for: .milliseconds(500))
-        finish(urls(c) == [a, b, l] && win.tabs.count == 3 && violations.isEmpty, "A B C, Cmd+W on B, Shift+Cmd+T restores B at index 1 and active with its id; disabled and inert with an empty list, blank tabs never recorded \(violations)")
+        guard urls(c) == [a, b, l], win.tabs.count == 3 else { return finish(false, "the shortcut did something with an empty list: \(urls(c))") }
+        // The list is the order of record: the engine's strip is now [A, C, B], the list [A, B, C].
+        win.activateTab(win.tabs[0])
+        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "A did not activate") }
+        nextTab()
+        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "Next Tab from A selected row \(String(describing: activeIndex(c))), want B (row 2)") }
+        win.activateTab(win.tabs[0])
+        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "A did not activate again") }
+        cmdW()
+        guard await until(10, { self.urls(c) == [b, l] && win.tabs.count == 2 && self.activeIndex(c) == 0 }) else { return finish(false, "Cmd+W on A left \(urls(c)) active \(String(describing: activeIndex(c))), want B active in [B, C]") }
+        cmdW()
+        guard await until(10, { self.urls(c) == [l] && win.tabs.count == 1 && self.activeIndex(c) == 0 }) else { return finish(false, "Cmd+W on B left \(urls(c)), want C active in [C]") }
+        finish(violations.isEmpty, "A B C, Cmd+W on B, Shift+Cmd+T restores B at index 1 and active with its id; disabled and inert with an empty list, blank tabs never recorded; Next Tab and the Cmd+W successor follow the list order, not the engine strip \(violations)")
     }
 
     func reopenClosedRelaunch() async {
@@ -214,6 +258,58 @@ extension SelfTest {
         let kept = ((try? FileManager.default.contentsOfDirectory(atPath: storeDir.path)) ?? []).filter { $0.hasPrefix("noche.sqlite.corrupt-") }
         finish(tabs == 1 && windows == 1 && !kept.isEmpty && app.restored.isEmpty && app.storeFallback == nil && violations.isEmpty,
                "phase 2: corrupt store quarantined (\(kept)), one window with one tab (engine tabs=\(tabs) NSWindows=\(windows)), real store reopened empty (fallback=\(app.storeFallback ?? "none")) \(violations)")
+    }
+
+    /// Shift+Cmd+T then Cmd+T in one run-loop turn, and a popup the page opens right after the reopen: the reopened row keeps its id and
+    /// address, the other new tabs are not given them. B is favicon.html so it differs from the popup (b.html) and from the blank tab.
+    func reopenIdentity() async {
+        guard await ready(), let c = ctl, let win else { return }
+        let a = fixture(""), f = fixture("favicon.html"), l = fixture("link.html"), b = fixture("b.html")
+        _ = win.addTab(withURL: f, activate: false); _ = win.addTab(withURL: l, activate: false)
+        guard await until(20, { self.urls(c) == [a, f, l] }) else { return finish(false, "urls \(urls(c))") }
+        let idB = c.list.items[1].id
+        win.activateTab(win.tabs[1])
+        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate") }
+        cmdW()
+        guard await until(10, { self.urls(c) == [a, l] }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+        shiftCmdT(); cmdT()   // one turn: the reopened tab and a Chrome-style new tab
+        guard await until(15, { self.urls(c).count == 4 && win.tabs.count == 4 }) else { return finish(false, "after reopen and Cmd+T: \(urls(c))") }
+        let row = c.list.items.first { $0.id == idB }
+        let blank = c.list.items.filter { $0.id != idB && $0.url == "about:blank" }.count
+        guard row?.url == f, urls(c) == [a, f, l, "about:blank"], blank == 1 else { return finish(false, "reopen and Cmd+T in one turn: \(urls(c)), reopened row \(String(describing: row?.url))") }
+        // Now a popup between: close B again, reopen it, and let the page of C open b.html in a new tab.
+        win.activateTab(win.tabs.first { $0.url == f } ?? win.tabs[1])
+        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate again") }
+        cmdW()
+        guard await until(10, { self.urls(c) == [a, l, "about:blank"] }) else { return finish(false, "second Cmd+W on B left \(urls(c))") }
+        guard let cTab = win.tabs.first(where: { $0.url == l }) else { return finish(false, "no tab on link.html") }
+        shiftCmdT()
+        _ = await evaluate(cTab, "document.getElementById('l').click()")
+        guard await until(15, { self.urls(c).count == 5 && win.tabs.count == 5 }) else { return finish(false, "after reopen and popup: \(urls(c))") }
+        let reopened = c.list.items.first { $0.id == idB }, popups = c.list.items.filter { $0.url == b }.count
+        finish(reopened?.url == f && popups == 1 && violations.isEmpty, "reopened tab keeps its id and address with a Cmd+T and a popup around it (urls \(urls(c)), popups \(popups)) \(violations)")
+    }
+
+    /// 50 setFrame calls change the window row only: the tab rows stay byte for byte as they were.
+    func frameStorm() async {
+        guard await ready(), await openTabs(3), let ns = ctl?.nsWindow, let writer = app.writer else { return finish(false, "no window or writer") }
+        writer.flush()
+        try? await Task.sleep(for: .seconds(1))
+        let tabsQuery = "SELECT id, updatedAt, position, url, title, lastActiveAt FROM tab ORDER BY id"
+        let before = sqlite(tabsQuery), windowBefore = sqlite("SELECT updatedAt FROM window")
+        guard before.split(separator: "\n").count == 3, !windowBefore.isEmpty else { return finish(false, "store holds \(before.split(separator: "\n").count) tab rows before the storm") }
+        for i in 0..<50 { ns.setFrame(NSRect(x: 300, y: 200, width: 800 + CGFloat(i), height: 600), display: false) }
+        guard await until(8, { Double(self.sqlite("SELECT w FROM window")) == 849 }) else { return finish(false, "window w is \(sqlite("SELECT w FROM window")) after the storm, want 849") }
+        let after = sqlite(tabsQuery)
+        finish(after == before && sqlite("SELECT updatedAt FROM window") != windowBefore && violations.isEmpty, "50 resizes updated the window row (w 849) and left the 3 tab rows untouched \(after == before ? "" : "tab rows changed: \(before) -> \(after)") \(violations)")
+    }
+
+    /// scripts/app-test.sh put a plain file where the Store directory belongs: the app opens one window on an in-memory store, logs it, and leaves the file alone.
+    func storeUnavailable() async {
+        guard await ready() else { return }
+        app.writer?.flush()
+        finish(app.storeFallback != nil && app.writer != nil && app.controllers.count == 1 && app.restored.isEmpty && violations.isEmpty,
+               "store unavailable (\(app.storeFallback ?? "no fallback")): one window on an in-memory store, launch not blocked \(violations)")
     }
 }
 #endif

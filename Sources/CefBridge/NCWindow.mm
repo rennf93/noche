@@ -634,11 +634,12 @@ static NSView* FindVisible(NSView* v, NSString* cls) {
   if (!tab) return;
   tab.faviconListSeen = YES;
   if (urls.empty()) {  // the page has no icon: the placeholder comes back, the previous page's icon does not stay
-    if (!tab.favicon) return;
+    if (!tab.favicon) { tab.faviconURL = nil; return; }
     [tab clearFavicon];
     [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];
     return;
   }
+  tab.faviconURL = @(urls[0].ToString().c_str());
   [tab loadFaviconFromURL:@(urls[0].ToString().c_str()) done:^{
     if (!tab.browser || self->_table[@(tab.identifier)] != tab) return;  // closed meanwhile
     [self post:^(id<NCWindowDelegate> d) { [d window:self didUpdateTab:tab]; }];

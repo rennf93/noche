@@ -41,16 +41,25 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         var selected: TabID?
         var sidebarHidden: Bool
         var fullScreen: Bool
+        var isZoomed = false
         var lastActive: [TabID: Date]
+        var favicons: [TabID: String] = [:]
     }
-    /// Ids (and urls) the next tabs the engine adds take: restored tabs and a reopened one keep their saved identity.
-    private var pendingTabs: [PendingTab] = []
+    /// Identity (id, address, index) for the tabs Noche itself asked the engine to add, keyed by the NCTab `addTab` returned: a reopened
+    /// tab and the restored tabs after the first keep their saved identity, and a tab the engine adds on its own (Cmd+T through Chrome,
+    /// window.open, target=_blank) never takes one. The restored window's first tab is created with the window: it is |initialPending|.
+    private var pendingByTab: [Int: PendingTab] = [:]
+    private var initialPending: PendingTab?
+    private var restoreRest: [PendingTab] = []
+    private var firstAdded = false
+    private var skipActivation: TabID?           // the restore's own activation of the selected tab is not the user using it
     private var restore: Restore?
     private var restoreAdded = 0
     private var restoreStarted = false
     private let initialFrame: NSRect
     private var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
-    private var lastActive: [TabID: Date] = [:]
+    private(set) var lastActive: [TabID: Date] = [:]
+    private var faviconSeeds: [TabID: (url: String, icon: String)] = [:]   // saved icon address, used until the page reports its own
     private var windowClosing = false           // close() was asked: the tabs that go with the window are not "closed tabs"
     private var observers: [NSObjectProtocol] = []
     private(set) var cardX = ChromeStyle.sidebarWidth
@@ -74,8 +83,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         super.init()
         if let restore {
             restoring = true
-            pendingTabs = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil) }
+            let all = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil) }
+            initialPending = all.first
+            restoreRest = Array(all.dropFirst())
             lastActive = restore.lastActive
+            for t in restore.tabs { if let icon = restore.favicons[t.id] { faviconSeeds[t.id] = (t.url, icon) } }
             // A saved window whose tabs never arrive must not stay unsaved forever.
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in MainActor.assumeIsolated { self?.restoring = false } }
         }
@@ -116,7 +128,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         installed = true
         let center = NotificationCenter.default
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
-            observers.append(center.addObserver(forName: name, object: ns, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.changed() } })
+            observers.append(center.addObserver(forName: name, object: ns, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.changed(geometry: true) } })
         }
         observers.append(center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: ns, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.normalFrame = self?.nsWindow?.frame }
@@ -164,19 +176,43 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         let ns = nsWindow
         let full = ns?.styleMask.contains(.fullScreen) == true
         let frame = full ? (normalFrame ?? ns?.frame ?? initialFrame) : (ns?.frame ?? initialFrame)
-        let meta = Dictionary(uniqueKeysWithValues: list.items.map { ($0.id, TabMeta(faviconURL: nil, lastActiveAt: lastActive[$0.id] ?? Date())) })
-        return WindowSnapshot(id: id, frame: frame, isFullScreen: full, isZoomed: ns?.isZoomed ?? false, sidebarWidth: nil,
+        // Every tab got its lastActive when it was added, so the default is never used; a restored value is never replaced by "now".
+        let meta = Dictionary(uniqueKeysWithValues: list.items.map { item -> (TabID, TabMeta) in
+            let icon = tabs[item.engineID]?.faviconURL ?? faviconSeeds[item.id].flatMap { $0.url == item.url ? $0.icon : nil }
+            return (item.id, TabMeta(faviconURL: icon, lastActiveAt: lastActive[item.id] ?? Date()))
+        })
+        return WindowSnapshot(id: id, frame: frame, isFullScreen: full, isZoomed: ns?.isZoomed ?? false, sidebarWidth: Double(ChromeStyle.sidebarWidth),
                               sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: list.items, selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta)
     }
 
-    private func changed() { if !restoring { app.writer?.markDirty(window: id) } }
+    private func changed(geometry: Bool = false) { if !restoring { app.writer?.markDirty(window: id, geometry: geometry) } }
 
     /// Reopen Closed Tab: the tab keeps its id, goes to |index| (clamped) and becomes active.
-    func reopen(_ item: TabItem, at index: Int) {
+    /// False when the engine could not add the tab (the caller puts it back on the closed list).
+    @discardableResult
+    func reopen(_ item: TabItem, at index: Int) -> Bool {
         closeNext.removeAll()
-        pendingTabs.append(PendingTab(id: item.id, url: item.url, index: index))
-        guard let tab = window.addTab(withURL: item.url, activate: true) else { pendingTabs.removeLast(); return }
+        guard let tab = window.addTab(withURL: item.url, activate: true) else { return false }
+        pendingByTab[tab.identifier] = PendingTab(id: item.id, url: item.url, index: index)
         intendedActive = tab
+        return true
+    }
+
+    /// The window's tabs in Noche's order (the list is the order of record), then any the engine has that the list has not heard of yet
+    /// (opened in the same turn), in strip order.
+    private func orderedTabs() -> [NCTab] {
+        let known = list.items.compactMap { tabs[$0.engineID] }
+        return known + window.tabs.filter { t in !known.contains { $0 === t } }
+    }
+
+    /// Cmd+1 to Cmd+8 and Cmd+9: the tab at |index| of the list (nil: the last).
+    func selectTab(at index: Int?) {
+        note("selectTab")
+        closeNext.removeAll()
+        let items = list.items
+        guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i), let tab = tabs[items[i].engineID] else { return }
+        intendedActive = tab
+        window.activateTab(tab)
     }
 
     func applyLayout() {
@@ -288,7 +324,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func closeActiveTab() {
         note("closeTab")
         guard let active = survivor(from: intendedActive ?? activeTab) else { return }
-        let open = window.tabs.filter { !isClosing($0) }
+        let open = orderedTabs().filter { !isClosing($0) }
         if let i = open.firstIndex(where: { $0 === active }) {
             closeNext[active.identifier] = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
         }
@@ -389,24 +425,33 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     func window(_ window: NCWindow, didAdd tab: NCTab, active: Bool) {
         installChrome()
         tabs[tab.identifier] = tab
-        let pending = pendingTabs.isEmpty ? nil : pendingTabs.removeFirst()
+        var pending = pendingByTab.removeValue(forKey: tab.identifier)
+        if !firstAdded, pending == nil { pending = initialPending; initialPending = nil }
+        firstAdded = true
         if let pending { ids[tab.identifier] = pending.id }
-        // Keep the rows in the engine's strip order: the new tab goes right after the tab before it in the strip.
+        // The new tab goes right after the tab before it in the engine's strip (a popup after its opener); one the engine appended goes
+        // last in the list, which can differ from the strip after a reopen put a tab in the middle.
         let strip = window.tabs
-        let before = strip.firstIndex(where: { $0 === tab }).flatMap { $0 > 0 ? strip[$0 - 1] : nil }
+        let at = strip.firstIndex(where: { $0 === tab })
+        let before = at.flatMap { $0 > 0 && $0 < strip.count - 1 ? strip[$0 - 1] : nil }
         var added = item(for: tab)
         if let pending { added.url = pending.url }   // the saved address until the engine reports its own
         list.insert(added, after: before.flatMap { ids[$0.identifier] }, activate: active)
         if let at = pending?.index { list.move(added.id, to: at) }
-        lastActive[added.id] = Date()
+        if lastActive[added.id] == nil { lastActive[added.id] = Date() }
         if let restore {
             if !restoreStarted {
                 restoreStarted = true
-                for p in pendingTabs { _ = window.addTab(withURL: p.url, activate: false) }
+                for p in restoreRest { if let t = window.addTab(withURL: p.url, activate: false) { pendingByTab[t.identifier] = p } }
             }
-            restoreAdded += 1
-            if added.id == restore.selected, !active { window.activateTab(tab); intendedActive = tab }
-            if restoreAdded == restore.tabs.count { restoring = false; self.restore = nil }
+            if let pending, pending.index == nil {
+                restoreAdded += 1
+                if added.id == restore.selected, !active { skipActivation = added.id; window.activateTab(tab); intendedActive = tab }
+                if restoreAdded == restore.tabs.count {
+                    restoring = false; self.restore = nil
+                    if restore.isZoomed, !restore.fullScreen { nsWindow?.zoom(nil) }
+                }
+            }
         }
         refresh()
         changed()
@@ -414,7 +459,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     }
 
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
-        if let id = ids[tab.identifier] { list.activate(id); lastActive[id] = Date() }
+        if let id = ids[tab.identifier] {
+            // Using a tab stamps it; the restore's own activation (and the engine re-announcing the active tab) does not.
+            if id == skipActivation { skipActivation = nil } else if list.activeID != id { lastActive[id] = Date() }
+            list.activate(id)
+        }
         if intendedActive === tab { intendedActive = nil }
         refresh()
         changed()
@@ -478,6 +527,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         case ChromeCommand.closeTab: closeActiveTab()
         case ChromeCommand.selectNextTab: selectNextTab()
         case ChromeCommand.selectPreviousTab: selectPreviousTab()
+        case ChromeCommand.selectTab0...ChromeCommand.selectTab0 + 7 where ChromeCommand.selectTab0 >= 0: selectTab(at: commandId - ChromeCommand.selectTab0)
+        case ChromeCommand.selectLastTab: selectTab(at: nil)
         case ChromeCommand.newWindow: app.newWindowAction()
         case ChromeCommand.restoreTab: app.reopenClosedTab(nil)
         case ChromeCommand.closeWindow: close()
@@ -525,7 +576,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
 enum ChromeCommand {
     static var back = -1, forward = -1, reload = -1, reloadBypassingCache = -1, reloadClearingCache = -1
     static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
-    static var restoreTab = -1
+    static var restoreTab = -1, selectTab0 = -1, selectLastTab = -1
     static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
 
     static func resolve() {
@@ -538,7 +589,8 @@ enum ChromeCommand {
         reloadBypassingCache = id("IDC_RELOAD_BYPASSING_CACHE"); reloadClearingCache = id("IDC_RELOAD_CLEARING_CACHE")
         newWindow = id("IDC_NEW_WINDOW"); closeWindow = id("IDC_CLOSE_WINDOW"); newTab = id("IDC_NEW_TAB"); closeTab = id("IDC_CLOSE_TAB")
         selectNextTab = id("IDC_SELECT_NEXT_TAB"); selectPreviousTab = id("IDC_SELECT_PREVIOUS_TAB")
-        restoreTab = id("IDC_RESTORE_TAB")
+        restoreTab = id("IDC_RESTORE_TAB"); selectLastTab = id("IDC_SELECT_LAST_TAB")
+        selectTab0 = id("IDC_SELECT_TAB_0")  // IDC_SELECT_TAB_1 to _7 follow it (34018 to 34025 in cef_command_ids.h)
         zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
         focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")
     }

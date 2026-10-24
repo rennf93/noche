@@ -14,7 +14,8 @@ final class StoreWriter {
     var windowIDs: () -> [UUID] = { [] }
 
     private var debouncer = Debouncer(now: { Date() })
-    private var dirty = Set<UUID>()
+    private var dirty = Set<UUID>()      // tabs or state changed: the whole window is saved
+    private var geometry = Set<UUID>()   // only the frame changed: one UPDATE of the window row, tab rows untouched
     private var polling = false
     private var frozen = false
 #if NOCHE_TESTHOOKS
@@ -31,12 +32,12 @@ final class StoreWriter {
 #endif
     }
 
-    func markDirty(window: UUID) {
+    func markDirty(window: UUID, geometry onlyGeometry: Bool = false) {
         guard !frozen else { return }
 #if NOCHE_TESTHOOKS
         if killArmed, Self.killAt == "pending" { kill(getpid(), SIGKILL) }  // between the event and its write
 #endif
-        dirty.insert(window)
+        if onlyGeometry { if !dirty.contains(window) { geometry.insert(window) } } else { dirty.insert(window); geometry.remove(window) }
         debouncer.event()
         poll()
     }
@@ -48,8 +49,12 @@ final class StoreWriter {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.polling = false
-                guard !self.dirty.isEmpty else { return }
-                if self.debouncer.due() { self.save(self.dirty, async: true); self.dirty.removeAll(); self.debouncer.fired() } else { self.poll() }
+                guard !(self.dirty.isEmpty && self.geometry.isEmpty) else { return }
+                if self.debouncer.due() {
+                    self.save(self.dirty, async: true)
+                    for id in self.geometry { self.saveFrame(id) }
+                    self.dirty.removeAll(); self.geometry.removeAll(); self.debouncer.fired()
+                } else { self.poll() }
             }
         }
     }
@@ -63,6 +68,11 @@ final class StoreWriter {
         }
     }
 
+    private func saveFrame(_ id: UUID) {
+        guard let s = snapshot(id) else { return }
+        attempt("save frame") { try store.saveFrame(id, frame: s.frame, isFullScreen: s.isFullScreen, isZoomed: s.isZoomed) }
+    }
+
     nonisolated private static func log(_ what: String, _ error: any Error) {
         FileHandle.standardError.write(Data("NOCHE store \(what) failed: \(error)\n".utf8))
     }
@@ -74,7 +84,7 @@ final class StoreWriter {
 #endif
         guard !frozen else { return }
         save(Set(windowIDs()))
-        dirty.removeAll()
+        dirty.removeAll(); geometry.removeAll()
         debouncer.fired()
     }
 
@@ -98,12 +108,12 @@ final class StoreWriter {
 #endif
         if let s = snapshot(window) { attempt("save") { try store.save(s) } }
         attempt("record closed tab") { try store.recordClosed(tab, windowID: window, index: index) }
-        dirty.remove(window)
+        dirty.remove(window); geometry.remove(window)
     }
 
     func windowClosed(_ id: UUID) {
         guard !frozen else { return }
-        dirty.remove(id)
+        dirty.remove(id); geometry.remove(id)
         attempt("remove window") { try store.removeWindow(id) }
     }
 
@@ -111,6 +121,11 @@ final class StoreWriter {
         var tab: ClosedTab?
         attempt("pop closed tab") { tab = try store.popLastClosed() }
         return tab
+    }
+
+    /// A reopen that could not add its tab: the tab goes back on the closed list.
+    func putBack(_ closed: ClosedTab) {
+        attempt("restore closed tab") { try store.recordClosed(closed.tab, windowID: closed.windowID, index: closed.index) }
     }
 
     var hasClosed: Bool { ((try? store.hasClosedTabs()) ?? false) }

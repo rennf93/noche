@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
@@ -101,6 +101,10 @@ for CHECK in "$@"; do
       sqlite3 "$PROFILE/Store/noche.sqlite" "PRAGMA wal_checkpoint(TRUNCATE)" >/dev/null 2>&1 || true
       head -c 8192 /dev/urandom > "$PROFILE/Store/noche.sqlite"
     fi
+    # store-unavailable: a plain file where the Store directory belongs; the app must run on an in-memory store and leave it alone.
+    if [ "$CHECK" = store-unavailable ]; then
+      mkdir -p "$PROFILE"; printf 'not a directory: sentinel bytes' > "$PROFILE/Store"; SENTINEL="$(shasum "$PROFILE/Store")"
+    fi
     EXTRA=(); [ "$CHECK" != quit-close-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
     SELFKILL=0; [ "$CHECK" != crash-mid-write ] || [ "$PHASE" != 1 ] || SELFKILL=1
     REPORTS_BEFORE="$(crash_reports)"
@@ -136,6 +140,10 @@ for CHECK in "$@"; do
     fi
     set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
     APP_PID=""
+    if [ "$CHECK" = store-unavailable ]; then
+      [ "$(shasum "$PROFILE/Store" 2>/dev/null)" = "$SENTINEL" ] || { FAILED=1; echo "NOCHE_TEST $CHECK fail the file at the store path changed"; }
+      grep -q '^NOCHE store unavailable: ' "$ERRF" || { FAILED=1; echo "NOCHE_TEST $CHECK fail no 'NOCHE store unavailable' line on stderr"; }
+    fi
     # crash-mid-write phase 1: the app SIGKILLs itself from the test hook (rc 137), then the file must pass integrity_check.
     if [ "$SELFKILL" = 1 ]; then
       KILLED=1

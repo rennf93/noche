@@ -357,4 +357,20 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(loaded.first?.tabs.map(\.id), [b.id])
         XCTAssertEqual(loaded.first?.selectedTabID, b.id)
     }
+
+    /// saveFrame changes only the window geometry: tab rows keep every byte (updatedAt included).
+    func testSaveFrameLeavesTabRowsAlone() throws {
+        let store = try makeStore()
+        let a = tab("https://a.example"), win = UUID()
+        try store.save(snapshot([a], id: win, selected: a.id))
+        let query = "SELECT id, updatedAt, position, url, title, lastActiveAt FROM tab"
+        let before = try store.db.read { try Row.fetchAll($0, sql: query).map { "\($0)" } }
+        try store.saveFrame(win, frame: CGRect(x: 5, y: 6, width: 700, height: 500), isFullScreen: true, isZoomed: false)
+        XCTAssertEqual(try store.db.read { try Row.fetchAll($0, sql: query).map { "\($0)" } }, before)
+        let w = try XCTUnwrap(try store.loadWindows().first)
+        XCTAssertEqual(w.frame, CGRect(x: 5, y: 6, width: 700, height: 500))
+        XCTAssertTrue(w.isFullScreen)
+        XCTAssertFalse(w.isZoomed)
+        try store.saveFrame(UUID(), frame: .zero, isFullScreen: false, isZoomed: false)  // an unsaved window is left alone
+    }
 }

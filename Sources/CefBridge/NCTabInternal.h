@@ -35,6 +35,7 @@ inline int NCTestInt(const char* name) {
 @property(nonatomic, readwrite, copy) NSString* title;
 @property(nonatomic, readwrite) BOOL isLoading, canGoBack, canGoForward;
 @property(nonatomic, readwrite, nullable) NSImage* favicon;
+@property(nonatomic, readwrite, copy, nullable) NSString* faviconURL;
 /// YES from [close] until the tab ends or the close is reported cancelled (a beforeunload dialog answered Stay).
 @property(nonatomic) BOOL closeRequested;
 /// Favicon bookkeeping for the current main-frame load: Chrome sends no icon list for a page without icons, so a load that ended

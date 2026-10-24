@@ -85,6 +85,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, copy) NSString *title;
 @property(nonatomic, readonly) BOOL isLoading, canGoBack, canGoForward;
 @property(nonatomic, readonly, nullable) NSImage *favicon;
+/// The address of the icon Chrome reported for the page (the first of its list), nil when the page has none.
+@property(nonatomic, readonly, copy, nullable) NSString *faviconURL;
 @property(nonatomic) double zoomLevel;
 - (void)loadURL:(NSString *)url;
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;

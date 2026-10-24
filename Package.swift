@@ -13,6 +13,7 @@ let withApp = env["NOCHE_APP"] == "1" || withSpikes || withProbes
 let sandboxFlags = env["NOCHE_NO_SANDBOX"] == "1" ? [] : ["-DNOCHE_SANDBOX=1"]
 // NOCHE_TESTHOOKS=1 compiles test-only hooks (forcing the shutdown watchdog) into the app.
 // The -Xcc flag makes the bridge header's #ifdef NOCHE_TESTHOOKS declarations visible to Swift, matching the bridge's own build.
+let storeHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS")] : []
 let testHookSettings: [SwiftSetting] = env["NOCHE_TESTHOOKS"] == "1" ? [.define("NOCHE_TESTHOOKS"), .unsafeFlags(["-Xcc", "-DNOCHE_TESTHOOKS=1"])] : []
 // The bridge's test switches and counters compile only with the same switch.
 let bridgeTestFlags = env["NOCHE_TESTHOOKS"] == "1" ? ["-DNOCHE_TESTHOOKS=1"] : []
@@ -31,7 +32,7 @@ var targets: [Target] = [
     .target(name: "NocheCore"),
     .testTarget(name: "NocheCoreTests", dependencies: ["NocheCore"]),
     // The SQLite store builds with no CEF either, so plain `swift test` runs its tests.
-    .target(name: "NocheStore", dependencies: [.product(name: "GRDB", package: "GRDB.swift"), "NocheCore"]),
+    .target(name: "NocheStore", dependencies: [.product(name: "GRDB", package: "GRDB.swift"), "NocheCore"], swiftSettings: storeHookSettings),
     .testTarget(name: "NocheStoreTests", dependencies: ["NocheStore", "NocheCore"]),
 ]
 

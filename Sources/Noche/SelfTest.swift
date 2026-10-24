@@ -142,6 +142,9 @@ final class SelfTest {
             case "reopen-closed-relaunch": await reopenClosedRelaunch()
             case "crash-mid-write": await crashMidWrite()
             case "corrupt-store": await corruptStore()
+            case "reopen-identity": await reopenIdentity()
+            case "frame-storm": await frameStorm()
+            case "store-unavailable": await storeUnavailable()
             default: finish(false, "unknown check")
             }
         }

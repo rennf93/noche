@@ -6,8 +6,10 @@ public final class Store: Sendable {
     let db: any DatabaseWriter
     let now: @Sendable () -> Date
     static let closedCap = 25
-    /// Called inside `save`'s transaction after the upserts, before the commit. Nil outside the app's crash test.
+#if NOCHE_TESTHOOKS
+    /// Test only (compiled with NOCHE_TESTHOOKS): called inside `save`'s transaction after the writes, before the commit.
     nonisolated(unsafe) public static var inTransactionHook: (() -> Void)?
+#endif
 
     private init(_ db: any DatabaseWriter, now: @escaping @Sendable () -> Date) throws {
         self.db = db
@@ -132,7 +134,18 @@ public final class Store: Sendable {
                                  meta?.lastActiveAt.timeIntervalSince1970 ?? t, t, t])
         }
         try Self.tombstoneLiveTabs(db, window: w.id, except: w.tabs.map { $0.id.raw.uuidString }, at: t)
+#if NOCHE_TESTHOOKS
         Self.inTransactionHook?()
+#endif
+    }
+
+    /// Geometry only: one UPDATE of the window row (a move or resize storm must not rewrite tab rows). A window never saved is left alone.
+    public func saveFrame(_ window: UUID, frame: CGRect, isFullScreen: Bool, isZoomed: Bool) throws {
+        let t = now().timeIntervalSince1970
+        try db.write { db in
+            try db.execute(sql: "UPDATE window SET x = ?, y = ?, w = ?, h = ?, isFullScreen = ?, isZoomed = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL",
+                           arguments: [Double(frame.origin.x), Double(frame.origin.y), Double(frame.width), Double(frame.height), isFullScreen, isZoomed, t, window.uuidString])
+        }
     }
 
     public func loadWindows() throws -> [WindowSnapshot] {
