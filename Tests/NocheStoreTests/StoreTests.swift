@@ -219,9 +219,121 @@ final class StoreTests: XCTestCase {
         let main = try XCTUnwrap(names.first { $0.hasPrefix("noche.sqlite.corrupt-") })
         let suffix = String(main.dropFirst("noche.sqlite".count))
         XCTAssertTrue(names.contains("noche.sqlite-wal" + suffix), "the stale -wal moves with the same suffix")
-        // no stale -wal is left beside the new store
+        // SQLite itself may empty a stale -wal while failing to open the garbage db, so only the move is asserted here
+        // (the same-second test checks that quarantined bytes are preserved); the new store's own -wal is not the stale one
         let wal = dir.appendingPathComponent("noche.sqlite-wal")
-        XCTAssertFalse((try? Data(contentsOf: wal))?.starts(with: Data("junk".utf8)) ?? false)
+        XCTAssertNotEqual(try? Data(contentsOf: wal), Data("junk".utf8))
+    }
+
+    private func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("noche-store-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    func testTwoQuarantinesInTheSameSecondBothSucceed() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("noche.sqlite")
+        for round in 0..<2 {
+            for ext in ["", "-wal", "-shm"] { try Data("r\(round)".utf8).write(to: URL(fileURLWithPath: file.path + ext)) }
+            try Store.quarantine(file)
+        }
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(names.filter { $0.hasPrefix("noche.sqlite.corrupt-") }.count, 2)
+        XCTAssertEqual(names.count, 6)
+        XCTAssertFalse(names.contains("noche.sqlite"))
+        let wals = try names.filter { $0.hasPrefix("noche.sqlite-wal.corrupt-") }.map { try Data(contentsOf: dir.appendingPathComponent($0)) }
+        XCTAssertEqual(Set(wals), [Data("r0".utf8), Data("r1".utf8)])
+    }
+
+    func testQuarantineMoveFailureIsThrown() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path); try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("noche.sqlite")
+        try Data("x".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        XCTAssertThrowsError(try Store.quarantine(file)) { XCTAssertTrue($0 is Store.QuarantineError) }
+    }
+
+    func testClassifier() {
+        XCTAssertTrue(Store.isCorruption(DatabaseError(resultCode: .SQLITE_NOTADB)))
+        XCTAssertTrue(Store.isCorruption(DatabaseError(resultCode: .SQLITE_CORRUPT)))
+        XCTAssertTrue(Store.isCorruption(DatabaseError(resultCode: ResultCode(rawValue: 11 | (1 << 8)))))  // CORRUPT_VTAB, extended
+        for code in [ResultCode.SQLITE_BUSY, .SQLITE_FULL, .SQLITE_READONLY, .SQLITE_CANTOPEN, .SQLITE_PERM, .SQLITE_ERROR] {
+            XCTAssertFalse(Store.isCorruption(DatabaseError(resultCode: code)), "\(code)")
+        }
+        XCTAssertFalse(Store.isCorruption(CocoaError(.fileReadNoPermission)))
+    }
+
+    func testFailedQuickCheckIsQuarantined() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("noche.sqlite")
+        do {
+            let store = try Store.open(at: file)
+            for i in 0..<300 {
+                try store.save(snapshot((0..<5).map { tab("https://example.com/\(i)/\($0)", title: String(repeating: "t", count: 200)) }))
+            }
+        }
+        var bytes = try Data(contentsOf: file)
+        XCTAssertGreaterThan(bytes.count, 4096 * 6)
+        // wreck a page body in the middle (the header stays intact, so the file still opens)
+        let mid = (bytes.count / 4096 / 2) * 4096
+        for i in (mid + 100)..<(mid + 3000) { bytes[i] = 0xFF }
+        try bytes.write(to: file)
+        let store = try Store.open(at: file)
+        XCTAssertEqual(try store.loadWindows(), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix("noche.sqlite.corrupt-") }.count, 1)
+    }
+
+    func testNonCorruptionOpenErrorIsRethrownAndFileUntouched() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path); try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("noche.sqlite")
+        try Store.open(at: file).save(snapshot([tab()]))
+        let before = try Data(contentsOf: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: file.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        XCTAssertThrowsError(try Store.open(at: file))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.contains("corrupt") }, [])
+        XCTAssertEqual(try Data(contentsOf: file), before)
+    }
+
+    func testPopSkipsAndTombstonesMalformedClosedRow() throws {
+        let store = try makeStore()
+        let good = tab("https://good.com")
+        let snap = snapshot([tab()])
+        try store.save(snap)
+        try store.recordClosed(good, windowID: snap.id, index: 0)
+        try store.db.write { db in
+            try db.execute(sql: "INSERT INTO tab (id, windowId, url, position, lastActiveAt, closedAt, closedIndex, closedWindowId, createdAt, updatedAt) VALUES ('not-a-uuid', ?, 'https://bad.com', 0, 0, 9999999999, 0, NULL, 0, 0)",
+                           arguments: [snap.id.uuidString])
+        }
+        XCTAssertEqual(try store.popLastClosed()?.tab.id, good.id)
+        XCTAssertFalse(try store.hasClosedTabs())
+        try store.db.read { db in
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT deletedAt IS NOT NULL FROM tab WHERE id = 'not-a-uuid'"), 1)
+        }
+    }
+
+    func testSaveRevivesATabItStillHoldsAfterRecordClosed() throws {
+        let store = try makeStore()
+        let t = tab()
+        let snap = snapshot([t])
+        try store.save(snap)
+        try store.recordClosed(t, windowID: snap.id, index: 0)
+        XCTAssertTrue(try store.hasClosedTabs())
+        try store.save(snap)   // stale snapshot: the contract says callers drop the tab first
+        XCTAssertFalse(try store.hasClosedTabs())
+        XCTAssertEqual(try store.loadWindows()[0].tabs.map(\.id), [t.id])
+    }
+
+    func testRecordClosedForUnsavedWindowThrows() throws {
+        let store = try makeStore()
+        XCTAssertThrowsError(try store.recordClosed(tab(), windowID: UUID(), index: 0))
     }
 
     func testFileStoreSurvivesReopen() throws {

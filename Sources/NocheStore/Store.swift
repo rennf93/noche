@@ -33,38 +33,60 @@ public final class Store: Sendable {
         try Store(DatabaseQueue(configuration: configuration()), now: now)
     }
 
-    /// Migrates the file at |url|. A file that fails to open or fails quick_check is moved aside (with its -wal and -shm) as
-    /// `<name>.corrupt-<yyyyMMdd-HHmmss>` and an empty store is opened, so a bad store never blocks launch.
+    /// Thrown when a corrupt store cannot be moved aside; never swallowed, so the caller sees why launch cannot continue.
+    public struct QuarantineError: Error { public let path: String; public let underlying: any Error }
+
+    private struct QuickCheckFailed: Error {}
+
+    /// Migrates the file at |url|. Only a corrupt file (SQLITE_NOTADB, SQLITE_CORRUPT or a failed quick_check) is moved aside,
+    /// with its -wal and -shm, as `<name>.corrupt-<yyyyMMdd-HHmmss-SSS>[-n]`, and an empty store is opened. Every other error
+    /// (busy, full disk, permissions, a migration bug) is rethrown unchanged and leaves the files alone.
     public static func open(at url: URL) throws -> Store {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
             return try openFile(url)
-        } catch {
-            quarantine(url)
+        } catch where isCorruption(error) {
+            try quarantine(url)
             return try openFile(url)
         }
+    }
+
+    static func isCorruption(_ error: any Error) -> Bool {
+        if error is QuickCheckFailed { return true }
+        guard let e = error as? DatabaseError else { return false }
+        return e.resultCode.primaryResultCode == .SQLITE_NOTADB || e.resultCode.primaryResultCode == .SQLITE_CORRUPT
     }
 
     private static func openFile(_ url: URL) throws -> Store {
         let pool = try DatabasePool(path: url.path, configuration: configuration())
         let check = try pool.read { try String.fetchOne($0, sql: "PRAGMA quick_check") }
-        guard check == "ok" else { throw DatabaseError(message: "quick_check failed: \(check ?? "nil")") }
+        guard check == "ok" else { throw QuickCheckFailed() }
         return try Store(pool, now: { Date() })
     }
 
-    private static func quarantine(_ url: URL) {
+    /// Moves the db, -wal and -shm to one shared unique suffix (a counter is appended until all three destinations are free).
+    static func quarantine(_ url: URL) throws {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        let suffix = ".corrupt-" + f.string(from: Date())
+        f.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        let base = ".corrupt-" + f.string(from: Date())
+        let fm = FileManager.default
+        var suffix = base, n = 1
+        while ["", "-wal", "-shm"].contains(where: { fm.fileExists(atPath: url.path + $0 + suffix) }) {
+            suffix = base + "-\(n)"
+            n += 1
+        }
         for ext in ["", "-wal", "-shm"] {
-            let from = URL(fileURLWithPath: url.path + ext)
-            try? FileManager.default.moveItem(at: from, to: URL(fileURLWithPath: from.path + suffix))
+            let from = url.path + ext
+            guard fm.fileExists(atPath: from) else { continue }
+            do { try fm.moveItem(atPath: from, toPath: from + suffix) } catch { throw QuarantineError(path: from, underlying: error) }
         }
     }
 
     // MARK: Windows and tabs
 
+    /// Contract: the caller removes a closed tab from its list before the next snapshot. A snapshot that still holds a tab
+    /// revives it (live, no longer in the closed list), because the snapshot is the truth for live tabs.
     /// One transaction: upserts the window and its tabs (positions renumbered 0..n-1) and tombstones live tabs of the
     /// window that are not in the snapshot. Closed-list rows are never touched.
     public func save(_ w: WindowSnapshot) throws {
@@ -137,6 +159,7 @@ public final class Store: Sendable {
     // MARK: Closed tabs
 
     /// Upserts the row as recently closed (also revives it if a save tombstoned it first), then keeps the newest 25.
+    /// Throws a foreign-key error if |windowID| was never saved; save the window first. See |save| for the ordering contract.
     public func recordClosed(_ tab: TabItem, windowID: UUID, index: Int) throws {
         guard !tab.url.isEmpty, tab.url != "about:blank" else { return }
         let t = now().timeIntervalSince1970
@@ -161,11 +184,17 @@ public final class Store: Sendable {
     public func popLastClosed() throws -> ClosedTab? {
         let t = now().timeIntervalSince1970
         return try db.write { db in
-            guard let r = try Self.closedRequest().fetchOne(db), let item = r.item,
-                  let closedAt = r.closedAt, let wid = r.closedWindowId.flatMap(UUID.init(uuidString:)) else { return nil }
-            try db.execute(sql: "UPDATE tab SET closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = ? WHERE id = ?",
-                           arguments: [t, r.id])
-            return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
+            // A malformed row (bad id or window id) is tombstoned so it cannot block the older rows behind it.
+            while let r = try Self.closedRequest().fetchOne(db) {
+                guard let item = r.item, let closedAt = r.closedAt, let wid = r.closedWindowId.flatMap(UUID.init(uuidString:)) else {
+                    try db.execute(sql: "UPDATE tab SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [t, t, r.id])
+                    continue
+                }
+                try db.execute(sql: "UPDATE tab SET closedAt = NULL, closedIndex = NULL, closedWindowId = NULL, updatedAt = ? WHERE id = ?",
+                               arguments: [t, r.id])
+                return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
+            }
+            return nil
         }
     }
 
