@@ -28,6 +28,7 @@
 #include "include/views/cef_window_delegate.h"
 #include "actions.h"
 #include "store.h"
+#include "surfaces.h"
 
 static NSString* g_check = nil;
 static NSString* g_logPath = nil;
@@ -291,6 +292,8 @@ static void CheckTabs(NSString* s);
 static void RunTabsCheck();
 static void RunRafHidden();
 static ActionsHost MakeActionsHost();
+static int WindowCount();
+static SurfHost MakeSurfHost();
 static void EnsureWindowVisible(std::function<void(bool)> cb);
 
 // Checks that need drawn frames and a window Chromium treats as visible: the latency checks, the popups, raf-visible.
@@ -346,6 +349,7 @@ static void CheckTabs(NSString* s) {
   } else if (![g_check isEqualToString:@"tabs-one"]) {
     auto route = [] {
       if (RunActionsCheck(g_check, MakeActionsHost())) {}
+      else if (RunSurfacesCheck(g_check, MakeSurfHost())) {}
       else if ([g_check isEqualToString:@"raf-hidden"] || [g_check isEqualToString:@"raf-visible"]) RunRafHidden();
       else RunTabsCheck();
     };
@@ -479,6 +483,29 @@ static StoreHost MakeStoreHost() {
   h.activateBlocked = []() { return g_activate_blocked; };
   h.guardsInstalled = []() { return g_activation_guard; };
   h.browserWindowOrders = []() { return g_browser_window_orders; };
+  return h;
+}
+// A DevTools command on one tab (every tab has an observer, see OnBrowserCreated). Posted, like CdpSend.
+static void CdpOn(CefRefPtr<CefBrowser> b, NSString* method, NSDictionary* params, std::function<void(NSDictionary*)> cb) {
+  if (!b) { if (cb) cb(@{@"error" : @"no tab"}); return; }
+  int rid = ++g_cdp_id;
+  NSData* d = [NSJSONSerialization dataWithJSONObject:@{@"id" : @(rid), @"method" : method, @"params" : params ?: @{}} options:0 error:nil];
+  if (cb) g_pending[rid] = cb;
+  dispatch_async(dispatch_get_main_queue(), ^{ b->GetHost()->SendDevToolsMessage(d.bytes, d.length); });
+}
+static SurfHost MakeSurfHost() {
+  SurfHost h;
+  h.finish = [](bool ok, NSString* d) { Finish(ok, d); };
+  h.extCmd = [](NSDictionary* c, std::function<void(NSDictionary*)> cb) { ExtCmd(c, cb); };
+  h.view = []() { return g_view; };
+  h.first = []() { return g_browser; };
+  h.eval = [](CefRefPtr<CefBrowser> b, NSString* e, bool await, std::function<void(NSString*)> cb) { dispatch_async(dispatch_get_main_queue(), ^{ EvalOn(b, e, await, cb); }); };
+  h.cdp = [](CefRefPtr<CefBrowser> b, NSString* m, NSDictionary* p, std::function<void(NSDictionary*)> cb) { CdpOn(b, m, p, cb); };
+  h.windowCount = []() { return WindowCount(); };
+  h.guardCalls = []() { return g_guard_calls; };
+  h.activateBlocked = []() { return g_activate_blocked; };
+  h.url = []() { return g_url; };
+  h.done = []() { return g_done; };
   return h;
 }
 static ActionsHost MakeActionsHost() {
@@ -1053,6 +1080,9 @@ class Client : public CefClient, public CefLoadHandler, public CefRequestHandler
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override { g_before_close.insert(b->GetIdentifier()); TeardownCalls("OnBeforeClose"); }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return SurfContextMenuHandler(); }
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return SurfDownloadHandler(); }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return SurfPermissionHandler(); }
   // cef_request_handler.h:260. The only child-exit callback in 156 (no GPU or utility one); other helpers are
   // caught by the new-crash-report check in Finish().
   void OnRenderProcessTerminated(CefRefPtr<CefBrowser>, TerminationStatus status, int, const CefString& why) override {
@@ -1064,6 +1094,7 @@ class Client : public CefClient, public CefLoadHandler, public CefRequestHandler
   }
   void OnLoadEnd(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, int status) override {
     if (!f->IsMain()) return;
+    SurfOnLoadEnd(b->GetIdentifier(), status);
     g_loaded_ids.insert(b->GetIdentifier());
     if (g_started) return;
     Log(@"LOADEND status=%d url=%s", status, f->GetURL().ToString().c_str());
@@ -1145,13 +1176,14 @@ class WinDelegate : public CefWindowDelegate {
       if (segv) *(volatile int*)nullptr = 1; else abort();
     });
   }
+  SurfEarly(g_check);
   g_view = CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate());
   if ([g_check isEqualToString:@"rss-20-hybrid"] || ([g_check hasPrefix:@"switch-latency"] && [g_check hasSuffix:@"-hybrid"]))  // the M0 S1 hybrid layout: 1 Chrome-style view plus 19 Alloy-style ones
     for (int i = 1; i < 20; i++)
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
   // Own watchdog; the script has an outer one on top. rss-20 waits a minute between its two samples.
-  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : 40;
+  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : ([g_check isEqualToString:@"cmd-enabled"] || [g_check isEqualToString:@"bubbles"] || [g_check hasPrefix:@"download-"] || [g_check isEqualToString:@"ctx-ext-items"] || [g_check isEqualToString:@"zoom-scope"] || [g_check isEqualToString:@"chrome-pages"]) ? 90 : 40;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, watchdog * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ Finish(false, @"timeout"); });
 }
 @end
@@ -1167,7 +1199,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"ctx-ext-items", @"zoom-scope", @"chrome-pages" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

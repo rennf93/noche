@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal)
+# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, ctx-ext-items, zoom-scope, chrome-pages)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe (store checks: Noche Probe Store, emptied every run). Check names are [a-z0-9-]+.
@@ -9,6 +9,9 @@
 # (lsappinfo every 0.5 s, fails if it is ever the probe) and leftover helpers (polled up to 5 s, PIDs printed).
 # switch-latency needs frames; it orders its alpha-0 window in without activating. The tab checks need NOCHE_TABS_API=1 (new engine).
 # NOCHE_PROBE_VISIBLE=1 makes the probe window opaque on screen: it needs the owner's approval each time and is never on by default.
+# Surfaces checks (M1.4/M1.5 research): 90 s probe watchdog / 110 s outer. The script serves Probes/fixtures/pages next to index.html and starts
+# Probes/fixtures/slow_server.py (200 MB at about 2 MB/s, Range-capable) for the download checks: NOCHE_PROBE_SLOW_URL, downloads land in a temp
+# NOCHE_PROBE_DL_DIR that is deleted on exit. Run with NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 like the tab checks.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
@@ -27,6 +30,12 @@ SITE="$(mktemp -d)"
 echo '<!doctype html><title>probe</title><p>probe page' > "$SITE/index.html"
 # u10: NOCHE_PROBE_MEASURE=pagestatic puts the in-page visibility/rAF recorder in the page (same script as kPageJS in main.mm).
 [ "${NOCHE_PROBE_MEASURE:-}" = pagestatic ] && echo "<script>(()=>{window.__sw=[];document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const v=performance.timeOrigin+performance.now();requestAnimationFrame(()=>{window.__sw.push([v,performance.timeOrigin+performance.now()])});});})()</script>" >> "$SITE/index.html"
+cp "$ROOT"/Probes/fixtures/pages/*.html "$SITE/"
+DL_DIR="$(mktemp -d)"
+SLOW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+python3 "$ROOT/Probes/fixtures/slow_server.py" "$SLOW_PORT" >/dev/null 2>&1 &
+SLOW_PID=$!
+export NOCHE_PROBE_SLOW_URL="http://127.0.0.1:$SLOW_PORT/big.bin" NOCHE_PROBE_DL_DIR="$DL_DIR"
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$SITE" >/dev/null 2>&1 &
 SERVER_PID=$!
@@ -34,7 +43,8 @@ OUTF="$(mktemp)"
 APP_PID=""
 # Ctrl-C or a kill of this script must not leave the probe running: stop the one app PID this script spawned (never a list).
 cleanup() {
-  kill "$SERVER_PID" 2>/dev/null || true
+  kill "$SERVER_PID" "$SLOW_PID" 2>/dev/null || true
+  case "$DL_DIR" in /var/folders/*|/tmp/*|/private/*) rm -rf "$DL_DIR" ;; esac
   if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
     kill -TERM "$APP_PID" 2>/dev/null || true
     for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
@@ -63,6 +73,7 @@ for CHECK in "$@"; do
   REPORTS_BEFORE="$(crash_reports)"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
   [[ "$CHECK" == rss-20* || "$CHECK" == tabs-bare-wait ]] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
+  [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
   # Web Store checks (store-*, install-no-window) load a live page and wait for an install: 150 s probe watchdog.
   [[ "$CHECK" == store-* || "$CHECK" == install-no-window ]] && LIMIT=$((150 + ${NOCHE_PROBE_SLACK:-20}))
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
