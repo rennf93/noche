@@ -699,6 +699,7 @@ int DbCount(NSString* profileDir, NSString* db, NSString* sql) {
 int HistoryRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"History", [NSString stringWithFormat:@"select count(*) from urls where url like '%%%@%%'", like]); }
 int HistoryRows(NSString* like) { return HistoryRowsIn(@"Default", like); }
 int DownloadRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"History", [NSString stringWithFormat:@"select count(*) from downloads_url_chains where url like '%%%@%%'", like]); }
+int PwRows(NSString* profileDir, NSString* user) { return DbCount(profileDir, @"Login Data", [NSString stringWithFormat:@"select count(*) from logins where username_value='%@'", user]); }
 int FormRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"Web Data", [NSString stringWithFormat:@"select count(*) from autocomplete where value like '%%%@%%'", like]); }
 void CheckIncognito(H h) {
   NSString* tok = Token();
@@ -767,7 +768,7 @@ void CheckIncognito2(H h) {
 // ---- profile-clear ----
 #ifdef NOCHE_CLEAR_API
 void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, NSString* uB);
-void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, std::function<void()> next);
+void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, bool pwSeeded, std::function<void()> next);
 #endif
 NSString* SlowFile(NSString* name) {
   const char* s = getenv("NOCHE_PROBE_SLOW_URL");
@@ -782,7 +783,7 @@ void PollCount(H h, int ms, std::function<int()> query, std::function<bool(int)>
 // "cleared" reading means something. B: a visited page (History urls), a finished download of small.bin (History downloads_url_chains), a submitted text
 // form (Web Data autocomplete; may not be creatable hidden: reported, not asserted). Saved passwords cannot be created hidden (the save is a Chrome
 // bubble that needs user interaction), so the PASSWORDS bit stays source-read only. These witnesses run on every engine; the clearing runs with NOCHE_CLEAR_API.
-void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, std::function<void(bool)> next) {
+void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, std::function<void(bool, bool)> next) {
   NSString* like = [@"histB=" stringByAppendingString:tok];
   NSString* likeA = [@"histA=" stringByAppendingString:tok];
   auto bVisit = wB->view->AddTab(Localhost(Page(h, [NSString stringWithFormat:@"index.html?%@", like])).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
@@ -804,7 +805,10 @@ void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, s
                 g_c.Ok("download-witness-B", okD, [NSString stringWithFormat:@"Profile 1/History downloads_url_chains rows for small.bin: %d (the download ran through B's client handler into the temp dir)", nD]);
                 PollCount(h, 30000, [=] { return FormRowsIn(@"Profile 1", tok); }, [](int n) { return n >= 1; }, [=](bool okF, int nF) {
                   PI(@"form data witness: Profile 1/Web Data autocomplete rows for %@: %d, %s", tok, nF, okF ? "created hidden: the FORM_DATA clear is asserted" : "NOT created in a hidden run (the programmatic submit was not recorded as a user entry): FORM_DATA is source-read only here, no assertion");
-                  next(okF);
+                  // Passwords: ProfilesPreEngine seeded one logins row per profile before CefInitialize; prove the engine kept them.
+                  const int pwB = PwRows(@"Profile 1", @"nochetest-B"), pwA = PwRows(@"Default", @"nochetest-A");
+                  g_c.Ok("password-witness-seeded-rows-survive-startup", pwB >= 1 && pwA >= 1, [NSString stringWithFormat:@"logins rows after engine start: Profile 1 'nochetest-B' %d, Default 'nochetest-A' %d (want >= 1 each; the rows were inserted into Login Data files before CefInitialize)", pwB, pwA]);
+                  next(okF, pwB >= 1 && pwA >= 1);
                 });
               });
             });
@@ -851,13 +855,13 @@ void CheckClear(H h) {
                   hit(tabA, u1, [=](NSString* ha) { hit(tabB, u1, [=](NSString* hb) {
                     g_c.Ok("A-cache-cleared", ha.intValue > 0, [NSString stringWithFormat:@"force-cache fetch in A after ClearHttpCache: transferSize %@ (>0 means a network fetch)", ha]);
                     g_c.Ok("B-cache-kept", [hb isEqualToString:@"0"], [NSString stringWithFormat:@"force-cache fetch in B: transferSize %@ (0 = still cached)", hb]);
-                    ChromeWitness(h, tok, wB, cB, [=](bool formMade) {
+                    ChromeWitness(h, tok, wB, cB, [=](bool formMade, bool pwSeeded) {
 #ifndef NOCHE_CLEAR_API
                       PI(@"CefRequestContext::ClearBrowsingData is not in this engine build (NOCHE_CLEAR_API unset): the history, downloads, form data, time-range, storage and everything parts cannot be called; needs patch 0010");
                       g_c.Ok("clear-api", false, @"NOT RUN: CefRequestContext::ClearBrowsingData (engine patch 0010) missing; build with NOCHE_CLEAR_API=1 against the 0010 engine");
                       End(h, @"profile-clear");
 #else
-                      ClearChrome(h, tok, cB, formMade, [=] { ClearRanges(h, tok, wB, cB, u1); });
+                      ClearChrome(h, tok, cB, formMade, pwSeeded, [=] { ClearRanges(h, tok, wB, cB, u1); });
 #endif
                     });
                   }); });
@@ -877,7 +881,7 @@ void CheckClear(H h) {
 // and leave B (written after t0 too) untouched. Then ClearBrowsingData(all, since = 0) on A removes the rest.
 // Chrome-layer bits on B (patch 0010): downloads first (the download rows go, the visited-page rows stay), then history (its rows go, A's stay),
 // then form data when the witness created some.
-void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, std::function<void()> next) {
+void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, bool pwSeeded, std::function<void()> next) {
   NSString* like = [@"histB=" stringByAppendingString:tok];
   NSString* likeA = [@"histA=" stringByAppendingString:tok];
   cB->ClearBrowsingData(CEF_BROWSING_DATA_DOWNLOADS, CefBaseTime(), new CB([=] {
@@ -889,8 +893,14 @@ void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formM
           const int histA = HistoryRowsIn(@"Default", likeA);
           g_c.Ok("history-clear-removes-B-rows-and-keeps-A", hGone && histA >= 1, [NSString stringWithFormat:@"after ClearBrowsingData(HISTORY) on B: B urls rows %d (want 0), A urls rows %d (want >= 1)", nH, histA]);
           auto finish = [=] {
-            PI(@"PASSWORDS bit: not exercised (a saved password needs the Chrome save bubble and user input; source-read mapping only)");
-            next();
+            if (!pwSeeded) { PI(@"PASSWORDS bit: not exercised, the seeded logins rows did not survive engine start (see password-witness); owner check"); next(); return; }
+            cB->ClearBrowsingData(CEF_BROWSING_DATA_PASSWORDS, CefBaseTime(), new CB([=] {
+              PollCount(h, 15000, [=] { return PwRows(@"Profile 1", @"nochetest-B"); }, [](int n) { return n == 0; }, [=](bool pGone, int nP) {
+                const int pwA = PwRows(@"Default", @"nochetest-A");
+                g_c.Ok("passwords-clear-removes-B-rows-and-keeps-A", pGone && pwA >= 1, [NSString stringWithFormat:@"after ClearBrowsingData(PASSWORDS) on B: B logins rows %d (want 0), A logins rows %d (want >= 1)", nP, pwA]);
+                next();
+              });
+            }));
           };
           if (!formMade) { finish(); return; }
           cB->ClearBrowsingData(CEF_BROWSING_DATA_FORM_DATA, CefBaseTime(), new CB([=] {
@@ -1021,6 +1031,19 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
   NSFileManager* fm = NSFileManager.defaultManager;
   if (![check hasSuffix:@"-2"]) {
     for (NSString* n in @[ @"Profile 1", @"Profile 2" ]) [fm removeItemAtPath:[root stringByAppendingPathComponent:n] error:nil];
+    if ([check isEqualToString:@"profile-clear"]) {
+      // Seed one saved-password row per profile (no password can be saved hidden): Profile 1's Login Data is a copy of Default's (a prior launch wrote the schema),
+      // both emptied and given one row with a blank password_value on the fixture host. The witness in ChromeWitness proves the rows survive engine start.
+      NSString* src = [root stringByAppendingPathComponent:@"Default/Login Data"];
+      NSString* p1 = [root stringByAppendingPathComponent:@"Profile 1"];
+      [fm createDirectoryAtPath:p1 withIntermediateDirectories:YES attributes:nil error:nil];
+      [fm copyItemAtPath:src toPath:[p1 stringByAppendingPathComponent:@"Login Data"] error:nil];
+      for (NSArray* t in @[ @[ @"Default/Login Data", @"nochetest-A" ], @[ @"Profile 1/Login Data", @"nochetest-B" ] ]) {
+        NSString* sql = [NSString stringWithFormat:@"delete from logins; insert into logins (origin_url, action_url, username_element, username_value, password_element, password_value, signon_realm, date_created, blacklisted_by_user, scheme) values ('http://localhost/', 'http://localhost/', 'u', '%@', 'p', x'', 'http://localhost/', 13300000000000000, 0, 0);", t[1]];
+        std::string cmd = std::string("sqlite3 '") + [root stringByAppendingPathComponent:t[0]].UTF8String + "' \"" + sql.UTF8String + "\" 2>&1";
+        if (FILE* f = popen(cmd.c_str(), "r")) { char b[256]; while (fgets(b, sizeof b, f)) fprintf(stderr, "[PROBE] seed %s", b); pclose(f); }
+      }
+    }
     return;
   }
   if (![check isEqualToString:@"profile-delete-2"]) return;
