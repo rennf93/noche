@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include "include/cef_id_mappers.h"
 #include "include/cef_command_ids.h"
+#include "include/cef_command_line.h"
 
 #ifndef NOCHE_TABS_API
 void SurfEarly(NSString*) {}
@@ -20,7 +21,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -853,6 +854,340 @@ void CheckChromePages(H h) {
   });
 }
 
+
+// ---- patch 0009 research: tab discarding (note m1-6 3.1 to 3.4, probes P1, P1b, P2, P3) ----
+struct DiscStat { int created = 0, closed = 0, loads = 0, discardedCb = 0, restoredCb = 0; };
+std::map<int, DiscStat> g_ds;  // browser id -> callbacks seen by the per-tab client
+bool g_ds_quiet = false;       // set once the verdict is out: no more lines after it
+class DiscClient : public CefClient, public CefLifeSpanHandler, public CefLoadHandler
+#ifdef NOCHE_DISCARD_API
+    , public CefDisplayHandler
+#endif
+{
+ public:
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+#ifdef NOCHE_DISCARD_API
+  CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+  void OnTabDiscarded(CefRefPtr<CefBrowser> b, bool discarded) override {
+    (discarded ? g_ds[b->GetIdentifier()].discardedCb : g_ds[b->GetIdentifier()].restoredCb)++;
+    if (!g_ds_quiet) PI(@"callback OnTabDiscarded browser=%d discarded=%d t=%.0fms", b->GetIdentifier(), (int)discarded, NowMs() - g_t0);
+  }
+#endif
+  void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    g_ds[b->GetIdentifier()].created++;
+    if (!g_ds_quiet) PI(@"callback OnAfterCreated browser=%d t=%.0fms", b->GetIdentifier(), NowMs() - g_t0);
+  }
+  void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    g_ds[b->GetIdentifier()].closed++;
+    if (!g_ds_quiet) PI(@"callback OnBeforeClose browser=%d t=%.0fms", b->GetIdentifier(), NowMs() - g_t0);
+  }
+  void OnLoadEnd(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, int status) override {
+    if (!f->IsMain()) return;
+    g_ds[b->GetIdentifier()].loads++;
+    g_load[b->GetIdentifier()] = status;
+    if (!g_ds_quiet) PI(@"callback OnLoadEnd browser=%d status=%d t=%.0fms", b->GetIdentifier(), status, NowMs() - g_t0);
+  }
+ private:
+  IMPLEMENT_REFCOUNTING(DiscClient);
+};
+
+void DiscDone(const H& h, bool ok, NSString* d) { g_ds_quiet = true; Done(h, ok, d); }
+int DiscTab(const H& h, NSString* url, bool activate = false) {
+  auto v = h->view();
+  auto b = v ? v->AddTab(url.UTF8String, new DiscClient(), CefBrowserSettings(), nullptr, activate) : nullptr;
+  return b ? b->GetIdentifier() : -1;
+}
+NSString* Slim(NSString* u) { NSRange r = [u rangeOfString:@"/" options:NSBackwardsSearch]; return r.location == NSNotFound ? u : [u substringFromIndex:r.location + 1]; }
+// Every tab the view lists, by id, with its main frame URL and the per-tab client's counters.
+NSString* DiscDump(const H& h) {
+  std::vector<CefRefPtr<CefBrowser>> t;
+  if (auto v = h->view()) v->GetTabs(t);
+  auto act = ActiveId(h);
+  NSMutableArray* o = [NSMutableArray array];
+  for (auto& b : t) {
+    auto& s = g_ds[b->GetIdentifier()];
+    [o addObject:[NSString stringWithFormat:@"%d%s[valid=%d url=%@ loading=%d created=%d closed=%d loads=%d]", b->GetIdentifier(), b->GetIdentifier() == act ? "*" : "", (int)b->IsValid(), Slim(@(b->GetMainFrame()->GetURL().ToString().c_str())), (int)b->IsLoading(), s.created, s.closed, s.loads]];
+  }
+  return [NSString stringWithFormat:@"%zu tabs, active=%d: %@", t.size(), act, [o componentsJoinedByString:@" "]];
+}
+NSString* ArgsFact() {
+  auto cl = CefCommandLine::GetGlobalCommandLine();
+  auto sw = [&](const char* n) { return cl && cl->HasSwitch(n) ? [NSString stringWithFormat:@"--%s=%s", n, cl->GetSwitchValue(n).ToString().c_str()] : [NSString stringWithFormat:@"(no --%s)", n]; };
+  return [NSString stringWithFormat:@"%@ %@ %@ %@ (CefCommandLine::GetGlobalCommandLine)", sw("enable-features"), sw("disable-features"), sw("disable-renderer-backgrounding"), sw("disable-background-timer-throttling")];
+}
+void ExtJson(const H& h, NSDictionary* cmd, std::function<void(NSDictionary*)> cb) { h->extCmd(cmd, cb); }
+NSString* Js(NSDictionary* d) {
+  NSData* j = [NSJSONSerialization dataWithJSONObject:d ?: @{} options:0 error:nil];
+  return j ? [[NSString alloc] initWithData:j encoding:NSUTF8StringEncoding] : @"{}";
+}
+NSString* TabsInfoLine(NSDictionary* r) {
+  if (r[@"error"]) return [NSString stringWithFormat:@"tabsinfo error: %@", r[@"error"]];
+  NSMutableArray* o = [NSMutableArray array];
+  for (NSDictionary* t in r[@"tabs"]) [o addObject:[NSString stringWithFormat:@"%@%@[%@ idx=%@ discarded=%@ pinned=%@ autoDiscardable=%@ status=%@]", t[@"id"], [t[@"active"] boolValue] ? @"*" : @"", Slim(t[@"url"] ?: @"?"), t[@"index"], t[@"discarded"], t[@"pinned"], t[@"autoDiscardable"], t[@"status"]]];
+  return [NSString stringWithFormat:@"chrome.tabs: %@", [o componentsJoinedByString:@" "]];
+}
+NSNumber* ChromeIdFor(NSDictionary* r, NSString* needle) {
+  for (NSDictionary* t in r[@"tabs"]) if ([(t[@"url"] ?: @"") containsString:needle]) return t[@"id"];
+  return nil;
+}
+NSDictionary* ChromeTab(NSDictionary* r, NSString* needle) {
+  for (NSDictionary* t in r[@"tabs"]) if ([(t[@"url"] ?: @"") containsString:needle]) return t;
+  return nil;
+}
+// A tab whose main frame URL contains |needle| (the browser id can change when a WebContents is replaced).
+CefRefPtr<CefBrowser> ByUrl(const H& h, NSString* needle) {
+  std::vector<CefRefPtr<CefBrowser>> t;
+  if (auto v = h->view()) v->GetTabs(t);
+  for (auto& b : t) if ([@(b->GetMainFrame()->GetURL().ToString().c_str()) containsString:needle]) return b;
+  return nullptr;
+}
+
+// Target.getTargetInfo of a tab's own DevTools session: a new targetId after a discard means the WebContents (and its agent host) was replaced.
+void TargetIdOf(const H& h, int id, const char* label, std::function<void()> next) {
+  auto b = ById(h, id);
+  if (!b) { PI(@"%s: tab %d has no CefBrowser", label, id); next(); return; }
+  h->cdp(b, @"Target.getTargetInfo", @{}, [=](NSDictionary* r) {
+    NSDictionary* ti = r[@"result"][@"targetInfo"];
+    PI(@"%s: tab %d Target.getTargetInfo -> %@", label, id, ti ? [NSString stringWithFormat:@"targetId=%@ type=%@ url=%@", ti[@"targetId"], ti[@"type"], Slim(ti[@"url"] ?: @"")] : Js(r));
+    next();
+  });
+}
+
+// P1 (feature on) and P1b (default flags): 6 tabs (first active, 5 background), discard the 5 through chrome.tabs.discard (the extension API
+// that ends in the lifecycle unit, like chrome://discards), then activate one, then try the active tab. Judged (P1 only): at least one
+// background tab discarded, every CefBrowser id still valid, activating the discarded tab reloads (OnLoadEnd fires), and the process lives.
+void CheckDiscard(H h, bool featureOn) {
+  PI(@"mode: WebContentsDiscard %s; switches: %@", featureOn ? "ON (--enable-features)" : ([g_name isEqualToString:@"discard-p1b-off"] ? "OFF (explicit --disable-features=WebContentsDiscard)" : "OFF (default flags)"), ArgsFact());
+  auto ids = std::make_shared<std::vector<int>>();
+  for (int i = 1; i <= 5; i++) ids->push_back(DiscTab(h, Page(h, [NSString stringWithFormat:@"index.html?t=%d", i])));
+  PI(@"AddTab ids %d %d %d %d %d (first tab %d, active %d)", (*ids)[0], (*ids)[1], (*ids)[2], (*ids)[3], (*ids)[4], h->first()->GetIdentifier(), ActiveId(h));
+  WaitFor(h, 20000, [=] { for (int id : *ids) if (id < 0 || !g_load.count(id)) return false; return true; }, [=](bool loaded) {
+    if (!loaded) { DiscDone(h, false, @"background tabs did not finish loading in 20 s"); return; }
+    ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* before) {
+      PI(@"before: %@", TabsInfoLine(before));
+      PI(@"before: cef %@", DiscDump(h));
+      TargetIdOf(h, (*ids)[0], "before discard", [=] {
+      auto discardedOk = std::make_shared<int>(0), replied = std::make_shared<int>(0);
+      auto step = std::make_shared<std::function<void(int)>>();
+      *step = [=](int i) {
+        if (i == 5) {
+          Later(2.0, [=] { *step = nullptr;
+            ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* after) {
+              int nDisc = 0;
+              for (NSDictionary* t in after[@"tabs"]) if ([t[@"discarded"] boolValue]) nDisc++;
+              PI(@"after discarding 5 background tabs: %@", TabsInfoLine(after));
+              PI(@"after: cef %@", DiscDump(h));
+              PI(@"after: %@", h->fallback());
+              bool allValid = true; int missing = 0;
+              for (int id : *ids) { auto b = ById(h, id); if (!b || !b->IsValid()) { allValid = false; missing++; } }
+              PI(@"summary: discard calls ok=%d replied=%d, chrome.tabs discarded=%d, original CefBrowser ids missing or invalid=%d", *discardedOk, *replied, nDisc, missing);
+              // activate the discarded t=1 tab and time the reload
+              auto target = ByUrl(h, @"t=1");
+              int tid = target ? target->GetIdentifier() : (*ids)[0];
+              int loadsBefore = g_ds[tid].loads;
+              double t0 = NowMs();
+              auto tb = ById(h, tid);
+              if (!tb) { PI(@"activate: no CefBrowser with id %d (replaced?)", tid); DiscDone(h, !featureOn, [NSString stringWithFormat:@"%s: discarded=%d, browser %d gone after discard", featureOn ? "RED" : "facts", nDisc, tid]); return; }
+              h->view()->SetActiveTab(tb);
+              WaitFor(h, 10000, [=] { return g_ds[tid].loads > loadsBefore; }, [=](bool reloaded) {
+                double ms = NowMs() - t0;
+                PI(@"activate discarded tab %d: OnLoadEnd %s after %.0f ms; active=%d", tid, reloaded ? "fired" : "did NOT fire within 10 s", ms, ActiveId(h));
+                Eval(h, tid, @"JSON.stringify({href: location.href, vis: document.visibilityState, wasDiscarded: document.wasDiscarded})", false, [=](NSString* r) {
+                  PI(@"activated tab page state: %@", r.length ? r : @"(no value)");
+                  TargetIdOf(h, tid, "after reload", [=] {
+                  ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* mid) {
+                    PI(@"after activation: %@", TabsInfoLine(mid));
+                    NSNumber* actChrome = nil;
+                    for (NSDictionary* t in mid[@"tabs"]) if ([t[@"active"] boolValue]) actChrome = t[@"id"];
+                    ExtJson(h, @{@"what" : @"discard", @"id" : actChrome ?: @0}, [=](NSDictionary* dr) {
+                      PI(@"explicit chrome.tabs.discard of the ACTIVE tab (chrome id %@): %@", actChrome, Js(dr));
+                      Later(1.5, [=] {
+                        ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* fin) {
+                          PI(@"after active-tab attempt: %@", TabsInfoLine(fin));
+                          PI(@"after active-tab attempt: cef %@", DiscDump(h));
+                          PI(@"final: %@", h->fallback());
+                          bool ok = nDisc >= 1 && allValid && reloaded;
+                          NSString* d = [NSString stringWithFormat:@"discarded=%d of 5 background tabs, all original CefBrowser ids valid=%d, activation reload OnLoadEnd=%d (%.0f ms), active-tab explicit discard reply %@", nDisc, (int)allValid, (int)reloaded, ms, Js(dr)];
+                          DiscDone(h, featureOn ? ok : true, featureOn ? d : [@"facts only (feature off): " stringByAppendingString:d]);
+                        });
+                      });
+                    });
+                  });
+                  });
+                });
+              });
+            });
+          });
+          return;
+        }
+        NSNumber* cid = ChromeIdFor(before, [NSString stringWithFormat:@"t=%d", i + 1]);
+        if (!cid) { PI(@"no chrome tab id for t=%d", i + 1); (*step)(i + 1); return; }
+        double t0 = NowMs();
+        ExtJson(h, @{@"what" : @"discard", @"id" : cid}, [=](NSDictionary* r) {
+          (*replied)++;
+          if (r[@"ok"] && [r[@"ok"] boolValue]) (*discardedOk)++;
+          PI(@"chrome.tabs.discard(t=%d chrome id %@) -> %@ in %.0f ms", i + 1, cid, Js(r), NowMs() - t0);
+          Later(0.5, [=] { (*step)(i + 1); });
+        });
+      };
+      (*step)(0);
+      });
+    });
+  });
+}
+
+// P2: pin immunity. chrome://discards (its mojo DetailsProvider, loaded from the page with a dynamic import) lists can_discard and the reasons, and
+// discards by tab with the URGENT reason (the policy path, not the always-allowed EXTERNAL one). Tabs are matched by URL or focus on every call,
+// because the listing's ids are not stable between calls. A pinned tab must refuse; an unpinned control and the active tab (URGENT) are recorded;
+// chrome.tabs.discard (EXTERNAL) of the pinned tab is recorded last.
+void CheckDiscardP2(H h) {
+  PI(@"mode: WebContentsDiscard ON; switches: %@", ArgsFact());
+  int pinned = DiscTab(h, Page(h, @"index.html?t=11")), ctl = DiscTab(h, Page(h, @"index.html?t=12")), ui = DiscTab(h, @"chrome://discards/");
+  PI(@"AddTab pinned-candidate=%d control=%d chrome://discards=%d first=%d", pinned, ctl, ui, h->first()->GetIdentifier());
+  if (pinned < 0 || ctl < 0 || ui < 0) { DiscDone(h, false, @"AddTab returned NULL"); return; }
+  static NSString* kSetup = @"(async()=>{try{const m=await import('chrome://discards/discards.mojom-webui.js');const l=await import('chrome://discards/lifecycle_unit_state.mojom-webui.js');window.__dp=m.DetailsProvider.getRemote();window.__R=l.LifecycleUnitDiscardReason;window.__S=l.LifecycleUnitState;window.__nm=(v)=>Object.keys(window.__S).find(k=>k!=='MIN_VALUE'&&k!=='MAX_VALUE'&&window.__S[k]===v)||v;return 'ok reasons='+JSON.stringify(window.__R)}catch(e){return 'import failed: '+e}})()";
+  static NSString* kInfo = @"(async()=>{try{const r=await window.__dp.getTabDiscardsInfo();return JSON.stringify(r.infos.map(i=>({id:i.id,url:i.tabUrl.split('/').pop(),state:window.__nm(i.state),canDiscard:i.canDiscard,why:i.cannotDiscardReasons,discardCount:i.discardCount,auto:i.isAutoDiscardable,vis:i.visibility,focus:i.hasFocus})))}catch(e){return 'info failed: '+e}})()";
+  auto discardWhere = [=](NSString* pred, NSString* what, std::function<void()> next) {
+    NSString* js = [NSString stringWithFormat:@"(async()=>{try{const r=await window.__dp.getTabDiscardsInfo();const i=r.infos.find(%@);if(!i)return 'no match';await window.__dp.discardById(i.id, window.__R.URGENT);return 'sent id='+i.id+' url='+i.tabUrl.split('/').pop()}catch(e){return 'failed: '+e}})()", pred];
+    Eval(h, ui, js, true, [=](NSString* r) { PI(@"webui discardById(URGENT) for %@ -> %@", what, r); Later(1.5, next); });
+  };
+  WaitFor(h, 20000, [=] { return g_load.count(pinned) && g_load.count(ctl) && g_load.count(ui); }, [=](bool loaded) {
+    if (!loaded) { DiscDone(h, false, @"tabs did not finish loading in 20 s"); return; }
+    ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* t0) {
+      NSNumber* pid = ChromeIdFor(t0, @"t=11");
+      ExtJson(h, @{@"what" : @"pin", @"id" : pid ?: @0, @"pinned" : @YES}, [=](NSDictionary* pr) {
+        PI(@"chrome.tabs.update(t=11 chrome id %@, pinned:true) -> %@", pid, Js(pr));
+        Eval(h, ui, kSetup, true, [=](NSString* setup) {
+          PI(@"webui setup: %@", setup.length ? setup : @"(no value)");
+          if (![setup hasPrefix:@"ok"]) { DiscDone(h, false, [NSString stringWithFormat:@"chrome://discards mojo not reachable from the page: %@", setup]); return; }
+          Eval(h, ui, kInfo, true, [=](NSString* info0) {
+            PI(@"webui info before: %@", info0);
+            discardWhere(@"(i)=>i.tabUrl.endsWith('index.html?t=11')", @"the PINNED tab", [=] {
+              discardWhere(@"(i)=>i.tabUrl.endsWith('index.html?t=12')", @"the unpinned control", [=] {
+                discardWhere(@"(i)=>i.hasFocus", @"the ACTIVE (focused) tab", [=] {
+                  Eval(h, ui, kInfo, true, [=](NSString* info1) {
+                    PI(@"webui info after: %@", info1);
+                    NSArray* a1 = [NSJSONSerialization JSONObjectWithData:[info1 dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                    NSDictionary *p = nil, *c = nil, *act = nil;
+                    for (NSDictionary* i in a1) {
+                      if ([i[@"url"] isEqualToString:@"index.html?t=11"]) p = i;
+                      if ([i[@"url"] isEqualToString:@"index.html?t=12"]) c = i;
+                      if ([i[@"focus"] boolValue]) act = i;
+                    }
+                    auto discarded = [](NSDictionary* i) { return i && ([i[@"discardCount"] intValue] > 0 || [i[@"state"] isEqual:@"DISCARDED"]); };
+                    bool pOk = p && !discarded(p), cDisc = discarded(c), aOk = act && !discarded(act);
+                    PI(@"pinned t=11 reasons %@; active tab discarded by URGENT=%d", p[@"why"], (int)!aOk);
+                    ExtJson(h, @{@"what" : @"tabsinfo"}, [=](NSDictionary* t1) {
+                      PI(@"after: %@", TabsInfoLine(t1));
+                      ExtJson(h, @{@"what" : @"discard", @"id" : ChromeIdFor(t1, @"t=11") ?: @0}, [=](NSDictionary* er) {
+                        PI(@"explicit chrome.tabs.discard (EXTERNAL) of the PINNED tab -> %@", Js(er));
+                        Later(1.5, [=] {
+                          PI(@"final cef %@", DiscDump(h));
+                          NSString* d = [NSString stringWithFormat:@"pinned tab survived the URGENT discard=%d, unpinned control discarded by the same call=%d (the control must discard or the pin result proves nothing), active tab survived URGENT=%d", (int)pOk, (int)cDisc, (int)aOk];
+                          DiscDone(h, pOk && cDisc && aOk, d);
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
+// P3: hidden-tab treatment inside one Browser. Tab T (page discard-ticks.html: 100 ms interval, visibility and lifecycle events) is active for
+// 4 s (baseline), then another tab is activated; T is sampled every 5 s for 50 s: ticks per second over the last window, visibilityState, events.
+void CheckDiscardP3(H h) {
+  PI(@"mode: default background treatment (no anti-throttling switches); switches: %@", ArgsFact());
+  int t = DiscTab(h, Page(h, @"discard-ticks.html"), true);
+  if (t < 0) { DiscDone(h, false, @"AddTab returned NULL"); return; }
+  WaitFor(h, 15000, [=] { return g_load.count(t) > 0; }, [=](bool) {
+    PI(@"tab T=%d active=%d first=%d", t, ActiveId(h), h->first()->GetIdentifier());
+    auto read = [=](NSString* label, std::function<void(NSDictionary*)> cb) {
+      Eval(h, t, @"JSON.stringify({ticks: window.__d.ticks, now: Math.round(performance.now()), vis: document.visibilityState, hidden: document.hidden, ev: window.__d.ev})", false, [=](NSString* r) {
+        NSDictionary* j = r.length ? [NSJSONSerialization JSONObjectWithData:[r dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+        PI(@"%@: %@", label, r.length ? r : @"(no value)");
+        cb([j isKindOfClass:NSDictionary.class] ? j : @{});
+      });
+    };
+    Later(4.0, [=] {
+      read(@"visible baseline end", [=](NSDictionary* a) {
+        double baseTicks = [a[@"ticks"] doubleValue], baseNow = [a[@"now"] doubleValue];
+        double baseRate = baseNow > 0 ? baseTicks / (baseNow / 1000.0) : 0;
+        PI(@"visible tick rate %.2f per second (%.0f ticks in %.0f ms) visibilityState=%@", baseRate, baseTicks, baseNow, a[@"vis"]);
+        auto first = h->first();
+        h->view()->SetActiveTab(first);
+        double hideAt = NowMs();
+        auto lastTicks = std::make_shared<double>([a[@"ticks"] doubleValue]), lastNow = std::make_shared<double>([a[@"now"] doubleValue]);
+        auto lastRate = std::make_shared<double>(-1);
+        auto lastVis = std::make_shared<NSString*>(@"?");
+        auto hiddenFlag = std::make_shared<bool>(false);
+        auto freezeAt = std::make_shared<double>(-1);
+        auto rate10 = std::make_shared<double>(-1);
+        auto sample = std::make_shared<std::function<void(int)>>();
+        *sample = [=](int n) {
+          if (n > 9) {
+            Later(0, [sample] { *sample = nullptr; });  // not from inside the closure that is running
+            bool hid = *hiddenFlag && [*lastVis isEqualToString:@"hidden"];
+            PI(@"summary: visible %.2f/s; hidden last-window rate %.2f/s (rate in the 5 s window after 10 s hidden: %.2f/s); hidden=%d visibilityState=%@; freeze event %@", baseRate, *lastRate, *rate10, (int)*hiddenFlag, *lastVis, *freezeAt >= 0 ? [NSString stringWithFormat:@"at %.1f s hidden", *freezeAt / 1000] : @"none within 50 s hidden");
+            DiscDone(h, baseRate >= 8 && hid && *rate10 >= 0 && *rate10 <= 2.5, [NSString stringWithFormat:@"visible %.2f/s, hidden after 10 s %.2f/s (want <= 2.5, about 1), hidden=%d, freeze %@", baseRate, *rate10, (int)hid, *freezeAt >= 0 ? [NSString stringWithFormat:@"%.1f s", *freezeAt / 1000] : @"not within 50 s"]);
+            return;
+          }
+          Later(5.0, [=] {
+            read([NSString stringWithFormat:@"hidden +%.1f s", (NowMs() - hideAt) / 1000], [=](NSDictionary* r) {
+              double dt = ([r[@"now"] doubleValue] - *lastNow) / 1000.0;
+              if (dt > 0) { *lastRate = ([r[@"ticks"] doubleValue] - *lastTicks) / dt; if (n == 2) *rate10 = *lastRate; if (n == 3 && *rate10 < 0) *rate10 = *lastRate; }
+              PI(@"hidden window %d: %.2f ticks/s over %.1f s", n + 1, *lastRate, dt);
+              *lastTicks = [r[@"ticks"] doubleValue]; *lastNow = [r[@"now"] doubleValue];
+              *hiddenFlag = [r[@"hidden"] boolValue]; *lastVis = r[@"vis"] ?: @"?";
+              for (NSArray* e in r[@"ev"]) if ([e[0] isEqual:@"freeze"] && *freezeAt < 0) *freezeAt = [e[1] doubleValue] - 0;
+              (*sample)(n + 1);
+            });
+          });
+        };
+        (*sample)(0);
+      });
+    });
+  });
+}
+
+// discard-api: the 0009 engine API (CefBrowserHost::DiscardTab, CefDisplayHandler::OnTabDiscarded). Compiled only with NOCHE_DISCARD_API=1.
+void CheckDiscardApi(H h) {
+#ifndef NOCHE_DISCARD_API
+  PI(@"CefBrowserHost::DiscardTab and CefDisplayHandler::OnTabDiscarded are not in this engine build (NOCHE_DISCARD_API unset): nothing to call; needs patch 0009");
+  DiscDone(h, false, @"NOT RUN: engine patch 0009 API missing (build with NOCHE_DISCARD_API=1 against the 0009 engine)");
+#else
+  PI(@"mode: WebContentsDiscard ON; switches: %@", ArgsFact());
+  int a = DiscTab(h, Page(h, @"index.html?t=21")), b = DiscTab(h, Page(h, @"index.html?t=22"));
+  if (a < 0 || b < 0) { DiscDone(h, false, @"AddTab returned NULL"); return; }
+  WaitFor(h, 20000, [=] { return g_load.count(a) && g_load.count(b); }, [=](bool loaded) {
+    if (!loaded) { DiscDone(h, false, @"tabs did not finish loading in 20 s"); return; }
+    auto ba = ById(h, a);
+    bool r = ba->GetHost()->DiscardTab();
+    PI(@"DiscardTab() on background tab %d returned %d; active tab %d", a, (int)r, ActiveId(h));
+    Later(2.0, [=] {
+      PI(@"after: %@", DiscDump(h));
+      bool discardedCb = g_ds[a].discardedCb == 1;
+      PI(@"OnTabDiscarded(true) calls for %d: %d", a, g_ds[a].discardedCb);
+      int act = ActiveId(h);
+      auto ac = ById(h, act);
+      bool activeRefused = ac && !ac->GetHost()->DiscardTab();
+      PI(@"DiscardTab() on the active tab %d refused=%d", act, (int)activeRefused);
+      int loads = g_ds[a].loads;
+      h->view()->SetActiveTab(ById(h, a));
+      WaitFor(h, 10000, [=] { return g_ds[a].loads > loads; }, [=](bool reloaded) {
+        PI(@"activation of the discarded tab: reload OnLoadEnd=%d OnTabDiscarded(false) calls=%d", (int)reloaded, g_ds[a].restoredCb);
+        DiscDone(h, r && discardedCb && activeRefused && reloaded && g_ds[a].restoredCb == 1, @"DiscardTab + OnTabDiscarded(true then false) + active tab refused + reload");
+      });
+    });
+  });
+#endif
+}
 }  // namespace
 
 void SurfEarly(NSString* check) {
@@ -880,7 +1215,8 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     @"cmd-enabled" : @0, @"bubbles" : @1, @"download-restart-1" : @2, @"download-restart-2" : @3, @"download-tab-close" : @4,
     @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,
     @"download-restart-crash-1" : @10, @"download-restart-crash-2" : @11, @"download-control-cancel-1" : @12,
-    @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15 };
+    @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15,
+    @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -901,6 +1237,12 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     case 5: CheckCtx(h); break;
     case 6: CheckZoom(h); break;
     case 7: CheckChromePages(h); break;
+    case 16: CheckDiscard(h, true); break;
+    case 17: CheckDiscard(h, false); break;
+    case 18: CheckDiscardP2(h); break;
+    case 19: CheckDiscardP3(h); break;
+    case 20: CheckDiscardApi(h); break;
+    case 21: CheckDiscard(h, false); break;
     default: CheckZoomNoBubble(h); break;
   }
   return true;

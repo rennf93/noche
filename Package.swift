@@ -36,7 +36,8 @@ if withApp {
         .target(
             name: "CefBridge",
             publicHeadersPath: "include",
-            cxxSettings: [.unsafeFlags(cefFlags)],
+            // NOCHE_DISCARD_API=1 compiles the calls that need CefBrowserHost::DiscardTab and CefDisplayHandler::OnTabDiscarded (engine patch 0009).
+        cxxSettings: [.unsafeFlags(cefFlags)],
             linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore")]
         ),
         .executableTarget(name: "Noche", dependencies: ["NocheCore", "CefBridge"], swiftSettings: testHookSettings),
@@ -73,7 +74,8 @@ if withProbes {
         // NOCHE_DOWNLOAD_API=1 compiles the calls that need CefRequestContext::SetDownloadHandler (engine patch 0008).
         cxxSettings: [.unsafeFlags(cefFlags + (env["NOCHE_TABS_API"] == "1" || env["NOCHE_ACTIONS_API"] == "1" ? ["-DNOCHE_TABS_API=1"] : [])
                                    + (env["NOCHE_ACTIONS_API"] == "1" ? ["-DNOCHE_ACTIONS_API=1"] : [])
-                                   + (env["NOCHE_DOWNLOAD_API"] == "1" ? ["-DNOCHE_DOWNLOAD_API=1"] : []))],
+                                   + (env["NOCHE_DOWNLOAD_API"] == "1" ? ["-DNOCHE_DOWNLOAD_API=1"] : [])
+                                   + (env["NOCHE_DISCARD_API"] == "1" ? ["-DNOCHE_DISCARD_API=1"] : []))],
         linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
     ))
 }

@@ -47,6 +47,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       (e) => reply({ error: "windows rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
+  // Discard probes (patch 0009 research): what chrome.tabs sees per tab, pin/unpin, and chrome.tabs.discard of one tab id.
+  if (msg && msg.what === "tabsinfo") {
+    chrome.tabs.query({}).then((all) => reply({ tabs: all.map((t) => ({ id: t.id, url: t.url || t.pendingUrl, index: t.index, active: t.active, pinned: t.pinned, discarded: t.discarded, autoDiscardable: t.autoDiscardable, status: t.status })) }),
+      (e) => reply({ error: "tabsinfo rejected: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
+  if (msg && msg.what === "pin") {
+    chrome.tabs.update(msg.id, { pinned: msg.pinned }).then((t) => reply({ id: t.id, pinned: t.pinned, index: t.index }), (e) => reply({ error: "pin rejected: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
+  if (msg && msg.what === "discard") {
+    chrome.tabs.discard(msg.id).then((t) => reply({ ok: !!t, id: t ? t.id : null, discarded: t ? t.discarded : null }), (e) => reply({ error: "discard rejected: " + ((e && e.message) || String(e)) }));
+    return true;
+  }
   if (msg && msg.what === "badge") {  // sets the badge for every tab: text and a #RRGGBB background
     Promise.all([chrome.action.setBadgeText({ text: msg.text }), chrome.action.setBadgeBackgroundColor({ color: msg.color })])
       .then(() => reply({ ok: true }), (e) => reply({ error: "badge rejected: " + ((e && e.message) || String(e)) }));

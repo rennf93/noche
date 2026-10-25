@@ -298,7 +298,7 @@ static void EnsureWindowVisible(std::function<void(bool)> cb);
 
 // Checks that need drawn frames and a window Chromium treats as visible: the latency checks, the popups, raf-visible.
 static bool NeedsVisibleWindow() {
-  return [g_check hasPrefix:@"switch-latency"] || [g_check hasPrefix:@"popup-"] || [g_check isEqualToString:@"raf-visible"];
+  return [g_check hasPrefix:@"switch-latency"] || [g_check hasPrefix:@"popup-"] || [g_check isEqualToString:@"raf-visible"] || [g_check hasPrefix:@"discard-"];
 }
 
 // Shared helper: the probe window is ordered in (alpha 0, click-through, never key or active; see WinDelegate), then
@@ -505,6 +505,11 @@ static SurfHost MakeSurfHost() {
   h.guardCalls = []() { return g_guard_calls; };
   h.activateBlocked = []() { return g_activate_blocked; };
   h.url = []() { return g_url; };
+  h.fallback = []() {
+    NSMutableArray* ids = [NSMutableArray array];
+    for (int i : g_before_close) [ids addObject:@(i)];
+    return [NSString stringWithFormat:@"first-tab client OnAfterCreated=%d (last id %d), OnBeforeClose seen for ids [%@]", g_first_created, g_first_last_id, [ids componentsJoinedByString:@","]];
+  };
   h.done = []() { return g_done; };
   return h;
 }
@@ -1183,7 +1188,7 @@ class WinDelegate : public CefWindowDelegate {
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
   // Own watchdog; the script has an outer one on top. rss-20 waits a minute between its two samples.
-  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : ([g_check isEqualToString:@"cmd-enabled"] || [g_check isEqualToString:@"bubbles"] || [g_check hasPrefix:@"download-"] || [g_check isEqualToString:@"ctx-ext-items"] || [g_check isEqualToString:@"zoom-scope"] || [g_check isEqualToString:@"chrome-pages"]) ? 90 : 40;
+  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : ([g_check isEqualToString:@"cmd-enabled"] || [g_check isEqualToString:@"bubbles"] || [g_check hasPrefix:@"download-"] || [g_check isEqualToString:@"ctx-ext-items"] || [g_check isEqualToString:@"zoom-scope"] || [g_check isEqualToString:@"chrome-pages"] || [g_check hasPrefix:@"discard-"]) ? 90 : 40;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, watchdog * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ Finish(false, @"timeout"); });
 }
 @end
@@ -1199,7 +1204,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
@@ -1213,7 +1218,11 @@ int main(int argc, const char* argv[]) {
     // NOCHE_PROBE_NO_AF=1 drops the three anti-throttling switches (u10 experiment 1).
     for (const char* f : {"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
                           "--disable-background-timer-throttling", "--mute-audio"})
-      if (!getenv("NOCHE_PROBE_NO_AF") || !strcmp(f, "--mute-audio")) av.push_back(f);
+      // discard-* checks measure the engine's own background treatment, so they run without the three anti-throttling switches (as the app does).
+      if ((!getenv("NOCHE_PROBE_NO_AF") && ![g_check hasPrefix:@"discard-"]) || !strcmp(f, "--mute-audio")) av.push_back(f);
+    // Patch 0009 research: P1, P2, P3 and discard-api run with the feature on; P1b (default flags) shows what the stock path does.
+    if ([g_check hasPrefix:@"discard-"] && ![g_check hasPrefix:@"discard-p1b"]) av.push_back("--enable-features=WebContentsDiscard");
+    if ([g_check isEqualToString:@"discard-p1b-off"]) av.push_back("--disable-features=WebContentsDiscard");  // the bridge merges its own disable-features value into this one
     // Engine patch 0008: keep a paused download through a clean quit. An engine without the feature ignores the name.
     if ([g_check hasPrefix:@"download-"]) av.push_back("--enable-features=KeepPausedDownloadsAtShutdown");
     av.push_back(nullptr);

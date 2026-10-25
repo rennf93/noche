@@ -20,6 +20,7 @@ struct SurfHost {
   std::function<int()> guardCalls;       // alpha guard hooked calls so far
   std::function<int()> activateBlocked;  // activation calls turned into no-ops so far
   std::function<NSString*()> url;        // the served page
+  std::function<NSString*()> fallback;   // the first tab client: OnAfterCreated count, last id, ids that reached OnBeforeClose
   std::function<bool()> done;
 };
 

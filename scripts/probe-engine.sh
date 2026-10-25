@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble)
+# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble, discard-p1, discard-p1b, discard-p1b-off, discard-p2, discard-p3, discard-api)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe (store checks: Noche Probe Store, emptied every run). Check names are [a-z0-9-]+.
@@ -14,6 +14,7 @@
 # download checks: NOCHE_PROBE_SLOW_URL, NOCHE_PROBE_MID_URL, NOCHE_PROBE_SLOW_LOG (one line per request with its Range header), downloads land in a
 # temp NOCHE_PROBE_DL_DIR that is deleted on exit. download-restart-crash-1 is killed with SIGKILL by this script (it prints ready-to-kill first).
 # Patch 0008 checks need the new engine API for SetDownloadHandler: NOCHE_DOWNLOAD_API=1 (without it they print the missing API as a failed assertion). Run with NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 like the tab checks.
+# Discard checks (patch 0009 research, note m1-6 5.3): discard-p1 (feature WebContentsDiscard on), discard-p1b (default flags), discard-p1b-off (explicit --disable-features=WebContentsDiscard), discard-p2 (pin immunity), discard-p3 (hidden tab treatment), discard-api (needs NOCHE_DISCARD_API=1 and the 0009 engine). They run without the anti-throttling switches.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
@@ -91,7 +92,7 @@ for CHECK in "$@"; do
   [[ "$CHECK" == download-control-rejected ]] && HIST_MAX0="$(hist_query 'select coalesce(max(id),0) from downloads' | tr -d ' ')"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
   [[ "$CHECK" == rss-20* || "$CHECK" == tabs-bare-wait ]] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
-  [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
+  [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble|discard-.*)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
   # Web Store checks (store-*, install-no-window) load a live page and wait for an install: 150 s probe watchdog.
   [[ "$CHECK" == store-* || "$CHECK" == install-no-window ]] && LIMIT=$((150 + ${NOCHE_PROBE_SLACK:-20}))
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
