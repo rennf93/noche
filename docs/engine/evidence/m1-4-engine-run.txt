@@ -746,3 +746,33 @@ scripts/smoke.sh build/Noche.app closed-port: rc=2 (expected)
 scripts/check-sandbox.sh build/Noche.app: "sandbox check ok: --seatbelt-client=66" rc=0
 plain build (env -u NOCHE_TESTHOOKS scripts/build-app.sh) rc=0: strings build/Noche.app/Contents/MacOS/Noche | grep -c NOCHE_TEST -> 0
 clean-room name grep (git grep -n -w -i, reference name) -> (no output)
+
+## RED (pre-patch engine 3659, rerun)
+Engine: vendor/cef = 156.0.14-noche.3659+g18b1359 (patches 0001 to 0006 only), fetched with CEF_DIST=<distrib 3659> scripts/fetch-cef.sh (vendor/CEF-VERSION.txt checked). Probe built at 9891e2d plus the surfaces.mm failure-path print, API switches off where the API is absent (NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 only), run by scripts/probe-engine.sh, raw PROBE lines below (no edits). Rewritten commit hashes: 0007 73be396, 0008 3d40c61, 0009 e6fc218, 0010 2a02fee, app 59ee574.
+Command: scripts/probe-engine.sh zoom-no-bubble (the bubble window sightings are the old behavior).
+PROBE zoom-no-bubble info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info IDC_ZOOM_PLUS NEW window class=NativeWidgetMacNSWindow frame={{854, 1272}, {266, 48}} alpha=1.00 visible=0 bubble-class=1
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info IDC_ZOOM_PLUS NEW window class=NativeWidgetMacNSWindow frame={{854, 1272}, {266, 48}} alpha=1.00 visible=0 bubble-class=1
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info IDC_ZOOM_MINUS NEW window class=NativeWidgetMacNSWindow frame={{854, 1272}, {266, 48}} alpha=1.00 visible=0 bubble-class=1
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info zoom levels initial=0.000 +=0.523 ++=1.224 -=0.523 moved-as-expected=1; new windows seen=3 bubble-class windows=106
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info alpha-guard hooked calls=10
+PROBE zoom-no-bubble info activate calls blocked=0
+PROBE zoom-no-bubble fail zoom bubble window appeared
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-no-bubble fail exit-rc=1 watchdog=0
+PROBE zoom-no-bubble info frontmost samples=19 probe-frontmost=0 unknown=0
+PROBE zoom-no-bubble info crash reports: none new

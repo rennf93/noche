@@ -580,7 +580,12 @@ void KeepComplete(H h) {
     if (!b) { Done(h, false, @"AddTab returned NULL"); return; }
     *id = b->GetIdentifier();
     WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().inprog && g_dl_events.back().recv > 1000000; }, [=](bool started) {
-      if (!started) { Done(h, false, @"download never started in the tab"); return; }
+      if (!started) {
+        PI(@"no in-progress event with bytes after 30 s; OnResourceLoadComplete for mid.bin: %@; tab %d listed: %d", RecFacts(rec->Recs("mid.bin")), *id, (int)(ById(h, *id) != nullptr));
+        rec->Clear();
+        Done(h, false, @"download never started in the tab");
+        return;
+      }
       PI(@"download started from tab %d: %s", *id, DlStr(g_dl_events.back()).c_str());
       if (auto t = ById(h, *id)) t->GetHost()->CloseBrowser(true);
       n();

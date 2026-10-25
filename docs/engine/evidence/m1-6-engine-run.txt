@@ -351,3 +351,61 @@ batch b6 load after: 6.39 6.98 7.85
 ## P5 memory (note m1-6 section 5.3 P5): 30 heavy tabs (30 MB touched each) plus the first tab, renderer RSS before and after DiscardTab on 20
 PROBE discard-p5 pass discarded=20 of 20, renderer RSS 7697.5 MB (33 procs) -> 2947.1 MB (13 procs), 4750.4 MB saved, 237.5 MB per tab
 (1-minute load at the launch was 6.27, under the 12 limit; the check is discard-p5 in scripts/probe-engine.sh, commit d3d06bc.)
+
+## RED (pre-patch engine 3659, rerun)
+Engine: vendor/cef = 156.0.14-noche.3659+g18b1359 (patches 0001 to 0006 only), fetched with CEF_DIST=<distrib 3659> scripts/fetch-cef.sh (vendor/CEF-VERSION.txt checked). Probe built at 9891e2d plus the surfaces.mm failure-path print, API switches off where the API is absent (NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 only), run by scripts/probe-engine.sh, raw PROBE lines below (no edits). Rewritten commit hashes: 0007 73be396, 0008 3d40c61, 0009 e6fc218, 0010 2a02fee, app 59ee574.
+API absence (0009 and the 0008/0010 API names), old distrib include/ against the new one:
+$ grep -rn -E "DiscardTab|OnTabDiscarded|ClearBrowsingData|SetDownloadHandler" <3659 distrib>/include | wc -l
+       0
+$ same on 3663 distrib (file:line, first lines)
+include/cef_download_handler.h:132:  /// CefRequestContext::SetDownloadHandler and the download has no live
+include/cef_display_handler.h:209:  /// CefBrowserHost::DiscardTab or by Chrome itself (Memory Saver, memory
+include/cef_display_handler.h:213:  /// CefBrowserHost::DiscardTab or close browsers from this method. Not called
+include/cef_display_handler.h:217:  virtual void OnTabDiscarded(CefRefPtr<CefBrowser> browser, bool discarded) {}
+include/cef_request_context.h:382:  virtual void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) = 0;
+include/cef_request_context.h:404:  virtual void ClearBrowsingData(int remove_mask, CefBaseTime since,
+include/cef_browser.h:1084:  /// CefDisplayHandler::OnTabDiscarded is called when the tab becomes
+include/cef_browser.h:1094:  virtual bool DiscardTab() = 0;
+include/capi/cef_display_handler_capi.h:215:  /// cef_browser_host_t::DiscardTab or by Chrome itself (Memory Saver, memory
+include/capi/cef_display_handler_capi.h:219:  /// cef_browser_host_t::DiscardTab or close browsers from this function. Not
+include/capi/cef_download_handler_capi.h:152:  /// cef_request_context_t::SetDownloadHandler and the download has no live
+include/capi/cef_browser_capi.h:1044:  /// cef_display_handler_t::OnTabDiscarded is called when the tab becomes
+count:       13
+
+Command: scripts/probe-engine.sh discard-p1b discard-api (built without NOCHE_DISCARD_API):
+PROBE discard-p1b info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info CefBrowserHost::DiscardTab is not in this engine build (NOCHE_DISCARD_API unset): nothing to call; needs patch 0009
+PROBE discard-p1b info alpha-guard hooked calls=7
+PROBE discard-p1b info activate calls blocked=0
+PROBE discard-p1b fail NOT RUN: engine patch 0009 API missing (build with NOCHE_DISCARD_API=1 against the 0009 engine)
+PROBE discard-p1b info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-p1b fail exit-rc=1 watchdog=0
+PROBE discard-p1b info frontmost samples=2 probe-frontmost=0 unknown=0
+PROBE discard-p1b info crash reports: none new
+PROBE discard-api info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE discard-api info guard orderFrontRegardless class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info CefBrowserHost::DiscardTab and CefDisplayHandler::OnTabDiscarded are not in this engine build (NOCHE_DISCARD_API unset): nothing to call; needs patch 0009
+PROBE discard-api info alpha-guard hooked calls=7
+PROBE discard-api info activate calls blocked=0
+PROBE discard-api fail NOT RUN: engine patch 0009 API missing (build with NOCHE_DISCARD_API=1 against the 0009 engine)
+PROBE discard-api info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE discard-api fail exit-rc=1 watchdog=0
+PROBE discard-api info frontmost samples=3 probe-frontmost=0 unknown=0
+PROBE discard-api info crash reports: none new

@@ -249,3 +249,42 @@ PROBE profile-upgrade pass profile-upgrade: every assertion held
 - profile-upgrade GREEN B (same, plus NOCHE_PROBE_UPGRADE_FEATURES=1, second fresh copy) rc=0 load=7.06
 PROBE profile-upgrade pass profile-upgrade: every assertion held
 (note) GREEN A was first logged by my runner under the label "RED" because I expected the env switch alone to decide it; the runner label was wrong, the run itself is as described here. The real RED is the reverted-MessagePump run above.
+
+## RED (pre-patch engine 3659, rerun)
+Engine: vendor/cef = 156.0.14-noche.3659+g18b1359 (patches 0001 to 0006 only), fetched with CEF_DIST=<distrib 3659> scripts/fetch-cef.sh (vendor/CEF-VERSION.txt checked). Probe built at 9891e2d plus the surfaces.mm failure-path print, API switches off where the API is absent (NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 only), run by scripts/probe-engine.sh, raw PROBE lines below (no edits). Rewritten commit hashes: 0007 73be396, 0008 3d40c61, 0009 e6fc218, 0010 2a02fee, app 59ee574.
+API absence (0010), old distrib include/ against the new one:
+$ grep -rn -E "DiscardTab|OnTabDiscarded|ClearBrowsingData|SetDownloadHandler" <3659 distrib>/include | wc -l
+       0
+$ same on 3663 distrib (file:line, first lines)
+include/cef_download_handler.h:132:  /// CefRequestContext::SetDownloadHandler and the download has no live
+include/cef_display_handler.h:209:  /// CefBrowserHost::DiscardTab or by Chrome itself (Memory Saver, memory
+include/cef_display_handler.h:213:  /// CefBrowserHost::DiscardTab or close browsers from this method. Not called
+include/cef_display_handler.h:217:  virtual void OnTabDiscarded(CefRefPtr<CefBrowser> browser, bool discarded) {}
+include/cef_request_context.h:382:  virtual void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) = 0;
+include/cef_request_context.h:404:  virtual void ClearBrowsingData(int remove_mask, CefBaseTime since,
+include/cef_browser.h:1084:  /// CefDisplayHandler::OnTabDiscarded is called when the tab becomes
+include/cef_browser.h:1094:  virtual bool DiscardTab() = 0;
+include/capi/cef_display_handler_capi.h:215:  /// cef_browser_host_t::DiscardTab or by Chrome itself (Memory Saver, memory
+include/capi/cef_display_handler_capi.h:219:  /// cef_browser_host_t::DiscardTab or close browsers from this function. Not
+include/capi/cef_download_handler_capi.h:152:  /// cef_request_context_t::SetDownloadHandler and the download has no live
+include/capi/cef_browser_capi.h:1044:  /// cef_display_handler_t::OnTabDiscarded is called when the tab becomes
+count:       13
+
+Command: scripts/probe-engine.sh profile-clear-callbacks (built without NOCHE_CLEAR_API):
+PROBE profile-clear-callbacks info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info CefRequestContext::ClearBrowsingData is not in this engine build (NOCHE_CLEAR_API unset); needs patch 0010
+PROBE profile-clear-callbacks info assert clear-api FAIL: NOT RUN: CefRequestContext::ClearBrowsingData (engine patch 0010) missing; build with NOCHE_CLEAR_API=1 against the 0010 engine
+PROBE profile-clear-callbacks info alpha-guard hooked calls=5
+PROBE profile-clear-callbacks info activate calls blocked=0
+PROBE profile-clear-callbacks fail profile-clear-callbacks: FAILED assertions clear-api
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear-callbacks fail exit-rc=1 watchdog=0
+PROBE profile-clear-callbacks info frontmost samples=3 probe-frontmost=0 unknown=0
+PROBE profile-clear-callbacks info crash reports: none new
