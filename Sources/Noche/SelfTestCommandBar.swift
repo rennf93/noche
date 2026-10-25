@@ -107,6 +107,13 @@ extension SelfTest {
         guard await until(2, { ctl.sidebarHidden && ctl.cardX == 6 }) else { return finish(false, "sidebar did not hide: \(bad)") }
         await settle { self.layoutOf("", overlay: true, rows: 6, hidden: true) == nil }
         if let m = layoutOf("overlay 6 rows, sidebar hidden", overlay: true, rows: 6, hidden: true) { bad.append(m) }
+        press(.escape)  // text and rows go: 0 rows, the bar stays open
+        guard await until(2, { rowValues.isEmpty && barOpen() }) else { return finish(false, "Escape left rows \(rowValues) (\(bad))") }
+        await settle { self.layoutOf("", overlay: true, rows: 0, hidden: true) == nil }
+        if let m = layoutOf("overlay 0 rows, sidebar hidden", overlay: true, rows: 0, hidden: true) { bad.append(m) }
+        barType("zzq")  // matches nothing: the literal query row only
+        guard await until(2, { rowValues.count == 1 }) else { return finish(false, "zzq gave \(rowValues.count) rows: \(rowValues) (\(bad))") }
+        if let m = layoutOf("overlay 1 row, sidebar hidden", overlay: true, rows: 1, hidden: true) { bad.append(m) }
         press(.escape); press(.escape)
         guard await until(2, { !barOpen() }) else { return finish(false, "the bar stayed open after two Escapes: \(bad)") }
         cmdS()
@@ -128,6 +135,13 @@ extension SelfTest {
         guard await until(2, { ctl.sidebarHidden && ctl.cardX == 6 }) else { return finish(false, "sidebar did not hide on the card: \(bad)") }
         await settle { self.layoutOf("", overlay: false, rows: 6, hidden: true) == nil }
         if let m = layoutOf("card 6 rows, sidebar hidden", overlay: false, rows: 6, hidden: true) { bad.append(m) }
+        press(.escape)  // empty again: the 3 starter rows (a card never has 0 rows)
+        guard await until(2, { rowValues.count == 3 }) else { return finish(false, "card Escape left \(rowValues) (\(bad))") }
+        await settle { self.layoutOf("", overlay: false, rows: 3, hidden: true) == nil }
+        if let m = layoutOf("card 3 starter rows, sidebar hidden", overlay: false, rows: 3, hidden: true) { bad.append(m) }
+        barType("zzq")
+        guard await until(2, { rowValues.count == 1 }) else { return finish(false, "card: zzq gave \(rowValues.count) rows (\(bad))") }
+        if let m = layoutOf("card 1 row, sidebar hidden", overlay: false, rows: 1, hidden: true) { bad.append(m) }
         finish(bad.isEmpty && violations.isEmpty, "bar frames within 1 pt of notes tables 1a and 1c at \(Int(ctl.overlay.bounds.width))x\(Int(ctl.overlay.bounds.height)) (overlay empty and 6 rows, card empty and 6 rows, sidebar shown and hidden), fill, border and selected row pixels within 3 per channel \(bad) \(violations)")
     }
 
@@ -146,9 +160,18 @@ extension SelfTest {
         press(.escape); press(.escape)
         guard await until(5, { !barOpen() && inPage() }) else { return finish(false, "Escape twice did not close the bar and give the page typing back (open=\(barOpen()) in page \(inPage()))") }
         // The Chrome command Cmd+L would raise when the page view has focus is answered by Noche and opens the bar.
+        // The engine's focus-location command, delivered to Noche's delegate exactly as the bridge's OnChromeCommand does: Noche must answer YES and open the bar.
+        guard ChromeCommand.focusLocation >= 0 else { return finish(false, "IDC_FOCUS_LOCATION did not resolve in the engine") }
+        guard ctl.window(win, shouldHandleChromeCommand: ChromeCommand.focusLocation) else { return finish(false, "IDC_FOCUS_LOCATION was not answered YES by Noche (the engine would handle it itself)") }
+        guard await until(5, { barOpen() && barEditor != nil }) else { return finish(false, "IDC_FOCUS_LOCATION was answered YES but opened no bar") }
+        closeBarNow()
+        // Whether the engine itself runs the command on a tab is its own enablement (CanExecuteChromeCommand); when it does, it must reach the bar too.
         if let tab = win.activeTab, tab.testExecuteChromeCommandNamed("IDC_FOCUS_LOCATION") {
-            guard await until(5, { barOpen() && barEditor != nil }) else { return finish(false, "IDC_FOCUS_LOCATION opened no bar") }
+            guard await until(5, { barOpen() && barEditor != nil }) else { return finish(false, "the engine ran IDC_FOCUS_LOCATION and no bar opened") }
             closeBarNow()
+            line("info", "engine CanExecuteChromeCommand(IDC_FOCUS_LOCATION)=yes, reached the bar")
+        } else {
+            line("info", "engine CanExecuteChromeCommand(IDC_FOCUS_LOCATION)=no (hidden runs cannot raise it through the engine; the accelerator is an owner check)")
         }
         // A New Tab: the card, not an overlay; its field is focused; the page surface is hidden and stays hidden.
         cmdT()
@@ -343,6 +366,11 @@ extension SelfTest {
         press(.escape)
         barType("Weather")
         guard barText == "Weather" + rem else { return finish(false, "case: \(state()), want 'Weather' + the lowercase remainder") }
+        // A delete that changes nothing (empty field) must not leave "just deleted" armed for the next character.
+        press(.escape)
+        press(.backspace)
+        barType("w")
+        guard await until(2, { barText == full }) else { return finish(false, "after a Backspace on an empty field the next character did not complete: \(state())") }
         press(.escape)
         barType("weather forecast")
         guard barText == "weather forecast" else { return finish(false, "a space completed: \(state())") }
@@ -453,6 +481,22 @@ extension SelfTest {
         guard serverSuggestRequests() == s1, RemoteSuggest.requests.count == a1 else { return finish(false, "with the setting 0 the server saw \(serverSuggestRequests() - s1) requests") }
         _ = ctl
         finish(violations.isEmpty, "setting 1: 7 keystrokes in one turn sent \(first) request, 14 spaced keystrokes sent \(all.count) (server saw \(sent), gaps >= 100 ms), all to 127.0.0.1 with no foreign host; URL-like and 1-character text sent none; rows show the answer; setting 0 sent none \(violations)")
+    }
+
+    /// No `suggestRemote` setting at all (the default): typing sends nothing, though an endpoint is configured.
+    func cbNonetDefault() async {
+        guard await ready(), let store = app.writer?.store else { return }
+        guard await fixtureTitleReady() else { return finish(false, "no fixture title") }
+        guard ((try? store.setting("suggestRemote")) ?? nil) == nil else { return finish(false, "a suggestRemote setting exists in a fresh profile") }
+        guard CommandLine.arguments.contains("--selftest-suggest-url") else { return finish(false, "no suggest endpoint configured: the check would prove nothing") }
+        let s0 = serverSuggestRequests(), a0 = RemoteSuggest.requests.count
+        guard s0 >= 0, await openBar() else { return finish(false, "no bar or no server log") }
+        barType("weather")
+        try? await Task.sleep(for: .milliseconds(700))
+        press(.escape); barType("forecast")
+        try? await Task.sleep(for: .milliseconds(700))
+        finish(RemoteSuggest.requests.count == a0 && serverSuggestRequests() == s0 && RemoteSuggest.foreign == 0 && violations.isEmpty,
+               "no suggestRemote setting: typing 15 characters sent \(RemoteSuggest.requests.count - a0) requests (server saw \(serverSuggestRequests() - s0)), none \(violations)")
     }
 
     // MARK: cb-history (two-phase)

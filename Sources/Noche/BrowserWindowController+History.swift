@@ -11,7 +11,7 @@ extension BrowserWindowController {
     }
 
     func recordVisit(_ tab: NCTab, status: Int) {
-        let typed = typedLoads.remove(tab.identifier) != nil
+        let typed = typedLoads.removeValue(forKey: tab.identifier) != nil
         guard (200..<400).contains(status), isWeb(tab.url), let store = app.writer?.store else { return }
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_RECORD"] == "1" { return }  // negative control: nothing is recorded

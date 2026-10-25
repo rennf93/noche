@@ -72,7 +72,7 @@ extension BrowserWindowController {
         }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
-        typedLoads.remove(tab.identifier)
+        typedLoads[tab.identifier] = nil
         recordedTitle[tab.identifier] = nil
         failed[tab.identifier] = nil
         closing[tab.identifier] = nil
@@ -114,8 +114,17 @@ extension BrowserWindowController {
     }
 
     func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int, url: String) {
+        // Every terminal outcome ends a typed load. An abort ends it only when it is the abort of the typed address itself (a typed load replaced
+        // by a later typed one must not lose the later mark); an error always does.
+        func bare(_ s: String) -> String { s.hasSuffix("/") ? String(s.dropLast()) : s }
+        if code != -3 || typedLoads[tab.identifier].map({ bare($0) == bare(url) }) == true {
+#if NOCHE_TESTHOOKS
+            if !(code == -3 && ProcessInfo.processInfo.environment["NOCHE_TEST_TYPED_STICKY"] == "1") { typedLoads[tab.identifier] = nil }  // negative control: an abort leaves the mark
+#else
+            typedLoads[tab.identifier] = nil
+#endif
+        }
         guard code != -3 else { return }  // ERR_ABORTED: a navigation replaced by another, not a failure
-        typedLoads.remove(tab.identifier)
         failed[tab.identifier] = (url, tab.url)
         if let id = ids[tab.identifier] { list.update(id, url: url, title: tab.title, isLoading: false) }
         refresh()
@@ -143,7 +152,9 @@ extension BrowserWindowController {
         case ChromeCommand.forward: goForward()
         case ChromeCommand.reload: reload()
         case ChromeCommand.reloadBypassingCache, ChromeCommand.reloadClearingCache: forceReload()
-        case ChromeCommand.focusLocation: focusAddress()
+        case ChromeCommand.focusLocation:
+            if BarHook.on("BAR_NOFOCUSLOC") { return false }  // negative control: the engine's focus-location command is not answered
+            focusAddress()
         case ChromeCommand.zoomPlus: zoom(0.5)
         case ChromeCommand.zoomMinus: zoom(-0.5)
         case ChromeCommand.zoomNormal: zoom(nil)
@@ -159,7 +170,7 @@ extension BrowserWindowController {
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()
-        commandBar.teardown()
+        madeCommandBar?.teardown()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         app.controllerClosed(self)

@@ -24,7 +24,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var closeNext: [Int: NCTab] = [:]
     static let closeStale: TimeInterval = 10
     /// Tabs (engine ids) whose next load came from the address entry: that visit is a typed one. Cleared when the load ends or fails.
-    var typedLoads = Set<Int>()
+    var typedLoads: [Int: String] = [:]   // engine id to the address a typed load was asked for
     var recordedTitle: [Int: String] = [:]
 
     let backdrop = BackdropView(frame: .zero)
@@ -33,7 +33,14 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let sidebar = SidebarView(frame: .zero)
     let toolbar = ToolbarView(frame: .zero)
     var installed = false
-    lazy var commandBar = CommandBarController(owner: self)
+    /// Built on first use, so a window that never used the bar never builds its view (and its teardown skips it).
+    var madeCommandBar: CommandBarController?
+    var commandBar: CommandBarController {
+        if let c = madeCommandBar { return c }
+        let c = CommandBarController(owner: self)
+        madeCommandBar = c
+        return c
+    }
     var newTabShown = false
     var newTabTabID: TabID?
     var reportedActive: TabID?   // the tab the bridge last announced as active (or the window's first)

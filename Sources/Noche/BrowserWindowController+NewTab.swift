@@ -59,12 +59,12 @@ extension BrowserWindowController {
     func navigate(_ url: URL, newTab: Bool) {
         if newTab {
             closeNext.removeAll()
-            if let tab = window.addTab(withURL: url.absoluteString, activate: true) { typedLoads.insert(tab.identifier); intendedActive = tab }
+            if let tab = window.addTab(withURL: url.absoluteString, activate: true) { typedLoads[tab.identifier] = url.absoluteString; intendedActive = tab }
             return
         }
         guard let tab = activeTab else { return }
         failed[tab.identifier] = nil
-        typedLoads.insert(tab.identifier)
+        typedLoads[tab.identifier] = url.absoluteString
         tab.loadURL(url.absoluteString)
     }
 

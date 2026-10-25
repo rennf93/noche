@@ -40,6 +40,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     private var inline: (text: String, selectedRange: NSRange)?
     private var pendingDelete = false
+    private let remote = RemoteSuggest()   // one pending request and one in-flight task per bar
     private var animatedHeight: CGFloat?
     private var timer: Timer?
     private var monitor: Any?
@@ -154,7 +155,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         owner.toolbar.address.isHidden = false
         if editing, let ns = owner.nsWindow { ns.makeFirstResponder(ns.contentView) }
         if restoreFocus { owner.window.focusActiveContent() }
-        RemoteSuggest.request("", searchTemplate: owner.app.searchTemplate, enabled: false) { _ in }
+        remote.request("", searchTemplate: owner.app.searchTemplate, enabled: false) { _ in }
         state = CommandBarState()
         inline = nil
     }
@@ -278,7 +279,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         }
         render()
         let enabled = ((try? owner.app.writer?.store.setting("suggestRemote")) ?? nil) == "1"
-        RemoteSuggest.request(typed, searchTemplate: owner.app.searchTemplate, enabled: enabled) { [weak self] rows in self?.remoteArrived(rows, for: typed) }
+        remote.request(typed, searchTemplate: owner.app.searchTemplate, enabled: enabled || BarHook.on("REMOTE_IGNORE_OFF")) { [weak self] rows in self?.remoteArrived(rows, for: typed) }
     }
 
     /// Remote rows join after the literal query, only while the selection is still on the first row and the text is the one they answer.
@@ -306,7 +307,11 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
             tab()
         case #selector(NSResponder.deleteBackward(_:)), #selector(NSResponder.deleteForward(_:)), #selector(NSResponder.deleteWordBackward(_:)),
              #selector(NSResponder.deleteToBeginningOfLine(_:)):
-            pendingDelete = true
+            // Only a delete that will change text arms the "just deleted" flag: on an empty field or at the end of the text it would
+            // otherwise stay set (no change notification clears it) and skip the next completion.
+            let r = textView.selectedRange, n = (textView.string as NSString).length
+            let forward = selector == #selector(NSResponder.deleteForward(_:))
+            if r.length > 0 || (forward ? r.location < n : r.location > 0) || BarHook.on("BAR_STALEDELETE") { pendingDelete = true }
             return false
         default:
             return false
@@ -320,7 +325,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
             state = CommandBarState()
             inline = nil
             setText("")
-            RemoteSuggest.request("", searchTemplate: owner.app.searchTemplate, enabled: false) { _ in }
+            remote.request("", searchTemplate: owner.app.searchTemplate, enabled: false) { _ in }
             render()
         } else if placement == .overlay {
             close()

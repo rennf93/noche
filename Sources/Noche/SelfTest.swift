@@ -162,6 +162,7 @@ final class SelfTest {
             case "cb-switch-tab": await cbSwitchTab()
             case "cb-outside": await cbOutside()
             case "cb-nonet": await cbNonet()
+            case "cb-nonet-default": await cbNonetDefault()
             case "cb-history": await cbHistory()
             default: finish(false, "unknown check")
             }
