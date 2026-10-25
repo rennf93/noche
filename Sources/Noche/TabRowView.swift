@@ -8,6 +8,7 @@ final class TabRowView: NSView {
     private(set) var showsPlaceholder = true
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
+    var onContextMenu: ((NSPoint) -> Void)?   // the click in window coordinates
     var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
     let fade = CAGradientLayer()
@@ -80,6 +81,7 @@ final class TabRowView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) { onSelect?() }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click
+    override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }
 
 /// The "New Tab" row below the (future) pinned grid.

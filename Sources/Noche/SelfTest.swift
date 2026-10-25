@@ -166,6 +166,9 @@ final class SelfTest {
             case "cb-nonet": await cbNonet()
             case "cb-nonet-default": await cbNonetDefault()
             case "cb-history": await cbHistory()
+            case "ctx-page": await ctxPage()
+            case "ctx-tab": await ctxTab()
+            case "ctx-sidebar": await ctxSidebar()
             default: finish(false, "unknown check")
             }
         }

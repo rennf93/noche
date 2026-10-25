@@ -257,6 +257,15 @@ enum MenuTable {
         ], role: .help),
     ]
 
+    /// The row with this shortcut id (the context menus reuse its title, key, enable rule and checkmark).
+    static func entry(id: String) -> MenuEntry? {
+        func find(_ entries: [MenuEntry]) -> MenuEntry? {
+            for e in entries { if e.id == id { return e }; if let f = find(e.submenu ?? []) { return f } }
+            return nil
+        }
+        return find(bar)
+    }
+
     /// Key commands the reference menu has no item for (M1.2's Cmd+1 to Cmd+9 and the tab moves): they keep working through `ShortcutMenu`.
     static let commands: [MenuCommand] = (1...8).map { n in
         MenuCommand(title: "Select Tab \(n)", id: "tabs.selectTab.\(n)") { $0.active?.selectTab(at: n - 1) }

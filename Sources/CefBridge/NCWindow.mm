@@ -6,6 +6,8 @@
 #include <set>
 #include "include/cef_client.h"
 #include "include/cef_command_handler.h"
+#include "include/cef_context_menu_handler.h"
+#include "include/cef_menu_model.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
@@ -34,10 +36,24 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
+- (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
 - (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser;
+@end
+
+@interface NCMenuItem ()
+- (instancetype)initPrivate;
+@property(nonatomic, readwrite) NSInteger commandId;
+@property(nonatomic, readwrite, copy) NSString* label;
+@property(nonatomic, readwrite) NCMenuItemType type;
+@property(nonatomic, readwrite) BOOL enabled, visible, checked;
+@property(nonatomic, readwrite, nullable) NSArray<NCMenuItem*>* submenu;
+@end
+
+@implementation NCMenuItem
+- (instancetype)initPrivate { return [super init]; }
 @end
 
 namespace {
@@ -49,6 +65,44 @@ std::set<int> g_devtools_loaded_ids;
 #ifdef NOCHE_TESTHOOKS
 NSInteger g_unload_answer = 0, g_unload_dialogs = 0;
 #endif
+
+// "&Save As..." is Chromium's mnemonic marker: "&&" is a literal ampersand, a single "&" is dropped.
+NSString* NCStripMnemonics(const std::string& label) {
+  std::string out;  // '&' is ASCII, so a byte walk is safe on UTF-8
+  for (size_t i = 0; i < label.size(); i++) {
+    if (label[i] == '&') {
+      if (i + 1 < label.size() && label[i + 1] == '&') { out += '&'; i++; }
+      continue;
+    }
+    out += label[i];
+  }
+  return @(out.c_str());
+}
+
+// A copy of |m| as NCMenuItems; everything is read now because the model is gone once RunContextMenu returns.
+NSArray<NCMenuItem*>* NCCopyMenu(CefRefPtr<CefMenuModel> m) {
+  NSMutableArray<NCMenuItem*>* out = [NSMutableArray array];
+  for (size_t i = 0; i < m->GetCount(); i++) {
+    NCMenuItem* item = [[NCMenuItem alloc] initPrivate];
+    item.commandId = m->GetCommandIdAt(i);
+    item.label = NCStripMnemonics(m->GetLabelAt(i).ToString());
+    item.enabled = m->IsEnabledAt(i);
+    item.visible = m->IsVisibleAt(i);
+    item.checked = m->IsCheckedAt(i);
+    switch (m->GetTypeAt(i)) {
+      case MENUITEMTYPE_CHECK: item.type = NCMenuItemTypeCheck; break;
+      case MENUITEMTYPE_RADIO: item.type = NCMenuItemTypeRadio; break;
+      case MENUITEMTYPE_SEPARATOR: item.type = NCMenuItemTypeSeparator; break;
+      case MENUITEMTYPE_SUBMENU:
+        item.type = NCMenuItemTypeSubmenu;
+        if (CefRefPtr<CefMenuModel> sub = m->GetSubMenuAt(i)) item.submenu = NCCopyMenu(sub);
+        break;
+      default: item.type = NCMenuItemTypeCommand; break;
+    }
+    [out addObject:item];
+  }
+  return out;
+}
 
 // New tabs start on the card fill (live-ui.md section 2) so a tab never flashes white.
 CefBrowserSettings TabSettings() {
@@ -64,6 +118,7 @@ class NCClient : public CefClient,
                  public CefLoadHandler,
                  public CefDisplayHandler,
                  public CefCommandHandler,
+                 public CefContextMenuHandler,
                  public CefJSDialogHandler {
  public:
   explicit NCClient(NCWindow* w) : w_(w) {}
@@ -73,6 +128,14 @@ class NCClient : public CefClient,
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+  // The page menu is Noche's: the model is copied inside this call (it must not outlive it) and the host shows an NSMenu.
+  bool RunContextMenu(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams> p, CefRefPtr<CefMenuModel> m,
+                      CefRefPtr<CefRunContextMenuCallback> callback) override {
+    NC_CEF_CALLBACK;
+    return [w_ browser:b contextMenu:m x:p->GetXCoord() y:p->GetYCoord() callback:callback];
+  }
 
   // Chrome shows its own "Leave site?" dialog (return false). The bridge only learns how it ended: a tab that is still there
   // after the dialog closed was told to stay. Test builds can answer the dialog themselves.
@@ -262,6 +325,29 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (id<NCWindowDelegate> d = self->_delegate) block(d);
   });
+}
+
+// RunContextMenu: x and y are DIPs from the page view's top-left. Returns NO (Chromium shows its own menu) when the tab or host is gone.
+- (BOOL)browser:(CefRefPtr<CefBrowser>)b contextMenu:(CefRefPtr<CefMenuModel>)m x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback {
+  NCTab* tab = [self tabFor:b create:NO];
+  if (!tab || !_delegate || !_nsWindow) return NO;
+  NSArray<NCMenuItem*>* items = NCCopyMenu(m);
+  NSPoint point;
+  if (NSView* page = self.webView) {
+    point = [page convertPoint:NSMakePoint(x, page.isFlipped ? y : page.bounds.size.height - y) toView:nil];
+  } else {
+    NSView* content = _nsWindow.contentView;
+    point = NSMakePoint(_webInsets.left + x, content.bounds.size.height - _webInsets.top - y);
+  }
+  __block BOOL answered = NO;
+  [self post:^(id<NCWindowDelegate> d) {
+    [d window:self tab:tab showContextMenu:items atWindowPoint:point completion:^(NSInteger commandId) {
+      if (answered) return;
+      answered = YES;
+      if (commandId < 0) callback->Cancel(); else callback->Continue((int)commandId, EVENTFLAG_NONE);
+    }];
+  }];
+  return YES;
 }
 
 - (NCTab*)tabFor:(CefRefPtr<CefBrowser>)b create:(BOOL)create {

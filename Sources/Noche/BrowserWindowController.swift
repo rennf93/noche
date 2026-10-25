@@ -174,6 +174,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.newTabRow.onClick = { [weak self] in self?.newTab() }
         sidebar.onSelect = { [weak self] i in self?.selectRow(i) }
         sidebar.onClose = { [weak self] i in self?.closeRow(i) }
+        sidebar.onTabMenu = { [weak self] i, p in self?.showTabMenu(row: i, at: p) }
+        sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
         toolbar.toggle.onClick = { [weak self] in self?.toggleSidebar() }
         toolbar.back.onClick = { [weak self] in self?.goBack() }
         toolbar.forward.onClick = { [weak self] in self?.goForward() }
@@ -296,9 +298,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         note("devTools")
         activeTab?.showDevTools()
     }
-    func copyURL() {
+    func copyURL(of tab: NCTab? = nil) {
         note("copyURL")
-        guard let url = activeTab?.url else { return }
+        guard let url = (tab ?? activeTab)?.url else { return }
         let board = pasteboard
         board.clearContents()
         board.setString(url, forType: .string)
@@ -311,7 +313,12 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     }
 
     func closeRow(_ i: Int) {
-        guard i < list.items.count, let tab = tabs[list.items[i].engineID], !isClosing(tab) else { return }
+        guard i < list.items.count, let tab = tabs[list.items[i].engineID] else { return }
+        closeTab(tab)
+    }
+
+    func closeTab(_ tab: NCTab) {
+        guard !isClosing(tab) else { return }
         if tab === activeTab { closeActiveTab() } else { closing[tab.identifier] = ProcessInfo.processInfo.systemUptime; tab.close() }
     }
 

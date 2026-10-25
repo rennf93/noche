@@ -11,12 +11,13 @@ extension BrowserWindowController {
         intendedActive = window.addTab(withURL: url, activate: true)
     }
 
-    func duplicateTab() {
+    /// Tabs > Duplicate on the active tab; a tab's context menu passes its own.
+    func duplicateTab(of target: NCTab? = nil) {
         note("duplicateTab")
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_DUPLICATE"] == "1" { return }  // negative control
 #endif
-        guard let tab = activeTab else { return }
+        guard let tab = target ?? activeTab else { return }
         closeNext.removeAll()
         intendedActive = window.addTab(withURL: shownURL(tab), activate: true)
     }

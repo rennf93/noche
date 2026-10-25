@@ -8,6 +8,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class NCWindow, NCTab;
 
+typedef NS_ENUM(NSInteger, NCMenuItemType) { NCMenuItemTypeCommand, NCMenuItemTypeCheck, NCMenuItemTypeRadio, NCMenuItemTypeSeparator, NCMenuItemTypeSubmenu };
+
+/// One row of Chromium's context menu model, copied while the engine's model is alive (it must not be kept). Labels are Chromium's own,
+/// with the `&` mnemonic markers removed.
+NC_EXPORT
+@interface NCMenuItem : NSObject
+- (instancetype)init NS_UNAVAILABLE;
+@property(nonatomic, readonly) NSInteger commandId;
+@property(nonatomic, readonly, copy) NSString *label;
+@property(nonatomic, readonly) NCMenuItemType type;
+@property(nonatomic, readonly) BOOL enabled, visible, checked;
+@property(nonatomic, readonly, nullable) NSArray<NCMenuItem *> *submenu;   // type Submenu only
+@end
+
 typedef NS_ENUM(NSInteger, NCWindowMode) { NCWindowModeNormal, NCWindowModeHidden };
 
 /// Every callback arrives on the main thread, from a task posted after the CEF callback that caused it.
@@ -27,6 +41,9 @@ NS_SWIFT_UI_ACTOR
 /// A key the engine would take as its own accelerator, which Noche owns instead. The page never sees it: the monitor takes it ahead of the window and the renderer.
 /// Delivered on a later main-queue turn; the bridge has already told the engine the key is handled.
 - (void)window:(NCWindow *)window handlePreemptedKey:(NSEvent *)event;
+/// The page's context menu: |items| is a copy of Chromium's model, |point| the click in window base coordinates. The host shows its own
+/// menu and calls |completion| exactly once, on the main queue, with the chosen command id (Chromium runs it) or -1 (the menu was dismissed).
+- (void)window:(NCWindow *)window tab:(NCTab *)tab showContextMenu:(NSArray<NCMenuItem *> *)items atWindowPoint:(NSPoint)point completion:(void (^)(NSInteger commandId))completion;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR
@@ -115,6 +132,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (BOOL)testExecuteChromeCommandNamed:(NSString *)name;
 #endif
 - (void)close;
+#ifdef NOCHE_TESTHOOKS
+/// Test support: a right click at (x, y) of the page (CSS pixels) through DevTools input, the way a person's click reaches the renderer.
+- (void)testRightClickX:(double)x y:(double)y;
+#endif
 /// CDP Runtime.evaluate (awaitPromise, returnByValue). |json| is the JSON of the result value, |error| the exception or CDP error.
 - (void)evaluateJavaScript:(NSString *)script completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;
 @end

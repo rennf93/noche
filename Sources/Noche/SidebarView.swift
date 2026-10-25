@@ -31,6 +31,8 @@ final class SidebarView: DragView {
     private var lastSelected: Int?
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    var onTabMenu: ((Int, NSPoint) -> Void)?      // row index, click in window coordinates
+    var onEmptyMenu: ((NSPoint) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -70,6 +72,9 @@ final class SidebarView: DragView {
         document.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(content, scroll.bounds.height))
     }
 
+    /// A right click on no row (the rows take their own): the sidebar's menu.
+    override func rightMouseDown(with event: NSEvent) { onEmptyMenu?(event.locationInWindow) }
+
     func setTrafficLightsHidden(_ hidden: Bool) { lights.forEach { $0.isHidden = hidden } }
 
     /// One row per entry, in order; rows are reused. A changed selection is scrolled into view.
@@ -79,6 +84,7 @@ final class SidebarView: DragView {
             let row = TabRowView(frame: .zero)
             row.onSelect = { [weak self, weak row] in if let self, let row, let i = self.rows.firstIndex(of: row) { self.onSelect?(i) } }
             row.onClose = { [weak self, weak row] in if let self, let row, let i = self.rows.firstIndex(of: row) { self.onClose?(i) } }
+            row.onContextMenu = { [weak self, weak row] p in if let self, let row, let i = self.rows.firstIndex(of: row) { self.onTabMenu?(i, p) } }
             document.addSubview(row)
             rows.append(row)
         }

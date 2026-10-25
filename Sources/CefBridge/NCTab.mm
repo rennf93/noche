@@ -133,6 +133,24 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 - (BOOL)testExecuteChromeCommandNamed:(NSString*)name { return [self executeChromeCommandNamed:name]; }
 #endif
 
+#ifdef NOCHE_TESTHOOKS
+- (void)testRightClickX:(double)x y:(double)y {
+  for (NSString* type in @[ @"mouseMoved", @"mousePressed", @"mouseReleased" ]) {
+    const BOOL moved = [type isEqualToString:@"mouseMoved"];
+    NSDictionary* msg = @{
+      @"id" : @(++_nextId),
+      @"method" : @"Input.dispatchMouseEvent",
+      @"params" : @{@"type" : type, @"x" : @(x), @"y" : @(y), @"button" : moved ? @"none" : @"right",
+                    @"buttons" : [type isEqualToString:@"mousePressed"] ? @2 : @0, @"clickCount" : moved ? @0 : @1}
+    };
+    NSData* data = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (self->_browser) self->_browser->GetHost()->SendDevToolsMessage(data.bytes, data.length);
+    });
+  }
+}
+#endif
+
 - (void)close {
   if (!_browser) return;
   _closeRequested = YES;
