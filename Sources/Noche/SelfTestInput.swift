@@ -85,14 +85,17 @@ extension SelfTest {
     /// check send the key it is about.
     func pageTakesKeys(_ tab: NCTab, _ page: NSView, _ label: String) async -> Bool {
         guard let ns = ctl?.nsWindow, let z = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                                              windowNumber: ns.windowNumber, context: nil, characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6) else { return false }
-        _ = await evaluate(tab, #"window.__probe = 0; document.addEventListener("keydown", (e) => { if (e.key === "z") window.__probe++; }); 1"#)
+                                                              windowNumber: ns.windowNumber, context: nil, characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6) else { finish(false, "\(label): could not build the probe key"); return false }
+        guard await evaluate(tab, #"window.__probe = 0; document.addEventListener("keydown", (e) => { if (e.key === "z") window.__probe++; }); 1"#) == "1" else {
+            finish(false, "\(label): the probe listener did not install"); return false
+        }
         let start = Date()
         for _ in 0..<60 {
+            // The hold drops keys, it does not queue them, so the probe is resent until one lands.
             ns.makeFirstResponder(page)
             ns.firstResponder?.keyDown(with: z)
             try? await Task.sleep(for: .milliseconds(250))
-            if await evaluate(tab, "window.__probe") != "0" {
+            if let n = Int(await evaluate(tab, "window.__probe") ?? ""), n > 0 {
                 line("info", "\(label) page takes keys after \(Int(Date().timeIntervalSince(start) * 1000)) ms (hasFocus \(await evaluate(tab, "document.hasFocus()") ?? "nil"), key window \(ns.isKeyWindow))")
                 return true
             }

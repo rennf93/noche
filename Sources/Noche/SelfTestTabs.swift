@@ -325,6 +325,7 @@ extension SelfTest {
         // Cmd+C is not claimed: the page sees the keydown, and no Noche action runs.
         if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8) {
+            guard await pageTakesKeys(tab, page, "shortcuts-once Cmd+C") else { return finish(false, "the page took no key in 15 s, so Cmd+C cannot be judged") }
             // The listener goes onto the live document now (Back and Forward load other documents); window.__keys may predate it.
             _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
             ns.makeFirstResponder(page); reset()
