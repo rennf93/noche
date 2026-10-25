@@ -193,8 +193,16 @@ extension SelfTest {
         let blocked0 = NCWindow.activationsBlocked(), alpha0 = NCWindow.alphaAttemptsOnOwnWindows()
         win.focusActiveContent()
         let backAgain = await until(5, { inPage() && field.currentEditor() == nil })
+        // Ambiguous page views (a docked DevTools would make 2): the responder must stay on the field and the line must be logged once.
+        setenv("NOCHE_TEST_PAGE_VIEWS", "2", 1)
+        guard ns.makeFirstResponder(field), field.currentEditor() != nil else { return finish(false, "the field did not take first responder for the ambiguity case") }
+        let logs0 = win.testAmbiguousFocusLogs
+        win.focusActiveContent()
+        try? await Task.sleep(for: .milliseconds(500))
+        let stayed = field.currentEditor() != nil && !inPage() && win.testAmbiguousFocusLogs == logs0 + 1
+        unsetenv("NOCHE_TEST_PAGE_VIEWS")
         let guards = NCWindow.activationsBlocked() == blocked0 && NCWindow.alphaAttemptsOnOwnWindows() == alpha0 && violations.isEmpty
-        finish(back && backAgain && guards && win.devToolsCount == 1, "field editor first responder, then focusActiveContent: page view first responder=\(back), again with DevTools open (devToolsCount=\(win.devToolsCount))=\(backAgain), activation guards quiet during the call=\(guards) responder=\(String(describing: ns.firstResponder))")
+        finish(back && backAgain && guards && stayed && win.devToolsCount == 1, "field editor first responder, then focusActiveContent: page view first responder=\(back), again with DevTools open (devToolsCount=\(win.devToolsCount))=\(backAgain), activation guards quiet during the call=\(guards), 2 page views: responder stayed and one ambiguous line logged=\(stayed) responder=\(String(describing: ns.firstResponder))")
     }
 
     /// webContentHidden hides the page view and keeps the tab alive; NO restores the view, its insets and the corner mask.

@@ -73,7 +73,7 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)alphaAttemptsOnOwnWindows;
 + (NSInteger)alphaAttemptsOnOtherWindows;
 
-/// The view that shows the page (WebContentsViewCocoa), nil until it exists.
+/// The view that shows the page (WebContentsViewCocoa): nil until it exists, while hidden, and when more than one is visible (not guessable).
 @property(nonatomic, readonly, nullable) NSView *webView;
 /// Test support for the corner mask: YES when a mask exists; whether a point (window base coordinates, origin bottom-left) is inside it.
 @property(nonatomic, readonly) BOOL webMaskExists;
@@ -81,6 +81,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 #ifdef NOCHE_TESTHOOKS
 /// Test support: how many times the window layout was rebuilt and the corner mask path recomputed.
 @property(nonatomic, readonly) NSInteger testLayoutPasses, testMaskPasses;
+/// Test support: focusActiveContent calls that found more than one page view and left the responder alone (NOCHE_TEST_PAGE_VIEWS=N makes the count read N).
+@property(nonatomic, readonly) NSInteger testAmbiguousFocusLogs;
 #endif
 @end
 

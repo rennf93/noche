@@ -16,6 +16,7 @@
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
 - (void)applyMask;
+- (NSArray<NSView*>*)visiblePageViews;
 - (void)showWebContent;
 - (void)devToolsGone:(CefRefPtr<CefBrowser>)browser;
 - (void)devToolsAbout:(CefRefPtr<CefBrowser>)browser;
@@ -212,7 +213,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   BOOL _layoutBuilt;
   NSRect _maskKey;
   CGFloat _maskRadius;
-  NSInteger _layoutPasses, _maskPasses;
+  NSInteger _layoutPasses, _maskPasses, _ambiguousFocusLogs;
 }
 
 @synthesize nsWindow = _nsWindow;
@@ -220,6 +221,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 #ifdef NOCHE_TESTHOOKS
 - (NSInteger)testLayoutPasses { return _layoutPasses; }
 - (NSInteger)testMaskPasses { return _maskPasses; }
+- (NSInteger)testAmbiguousFocusLogs { return _ambiguousFocusLogs; }
 #endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
@@ -383,9 +385,21 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (CefRefPtr<CefBrowser> b = _view->GetActiveTab()) b->GetHost()->SetFocus(true);
   // Views records the focus but leaves AppKit's first responder alone while the window is not key (hidden runs, a window
   // behind another): then the page's own responder takes it, as content would on a key window.
-  // DevTools opens as its own window here (focus-return opens one and still lands in this window's page), so the only
-  // WebContentsViewCocoa under the chrome host is the active tab's; CefBrowserHost::GetWindowHandle returns the window's
-  // content view, not the page's. nil (a crashed or loading renderer): Views focus still applies, the responder stays.
+  // Guard: with more than one visible WebContentsViewCocoa (a docked DevTools; nothing forces DevTools into its own window,
+  // it did open as one in focus-return) the active tab's view cannot be identified reliably, and CefBrowserHost::GetWindowHandle
+  // returns the window's content view, not the page's. Then the responder stays and one line says so; the Views focus above
+  // still applies. One candidate missing (a crashed or loading renderer) also leaves the responder: Views focus still applies.
+  NSUInteger count = [self visiblePageViews].count;
+#ifdef NOCHE_TESTHOOKS
+  if (const int forced = NCTestInt("NOCHE_TEST_PAGE_VIEWS")) count = (NSUInteger)forced;  // makes the candidate count read N
+#endif
+  if (count > 1 && !NC_TEST_FLAG("NOCHE_TEST_NO_AMBIGUOUS_GUARD")) {  // the flag is a negative control: no guard
+    fprintf(stderr, "NOCHE focus ambiguous: %lu page views\n", (unsigned long)count);
+#ifdef NOCHE_TESTHOOKS
+    _ambiguousFocusLogs++;
+#endif
+    return;
+  }
   NSView* page = self.webView;
   NSResponder* r = _nsWindow.firstResponder;
   if (page && !([r isKindOfClass:NSView.class] && [(NSView*)r isDescendantOf:page])) {
@@ -489,18 +503,22 @@ static NSView* FindByClass(NSView* v, NSString* cls) {
   return [_mask convertPoint:v fromLayer:csv.layer];
 }
 
-static NSView* FindVisible(NSView* v, NSString* cls) {
-  if ([NSStringFromClass(v.class) isEqualToString:cls] && !v.isHiddenOrHasHiddenAncestor) return v;
-  for (NSView* s in v.subviews)
-    if (NSView* r = FindVisible(s, cls)) return r;
-  return nil;
+static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* out) {
+  if ([NSStringFromClass(v.class) isEqualToString:cls] && !v.isHiddenOrHasHiddenAncestor) [out addObject:v];
+  for (NSView* s in v.subviews) CollectVisible(s, cls, out);
 }
 
-// The view that shows the page: WebContentsViewCocoa, the visible one when several tabs exist.
+- (NSArray<NSView*>*)visiblePageViews {
+  NSMutableArray<NSView*>* out = [NSMutableArray array];
+  if (NSView* host = self.chromeHost) CollectVisible(host, @"WebContentsViewCocoa", out);
+  return out;
+}
+
+// The view that shows the page: WebContentsViewCocoa. Fail safe: with more than one visible (a docked DevTools next to the
+// page) the active tab's own view cannot be told apart reliably, so nil rather than a guess.
 - (NSView*)webView {
-  NSView* host = self.chromeHost;
-  if (!host) return nil;
-  return FindVisible(host, @"WebContentsViewCocoa");
+  NSArray<NSView*>* all = [self visiblePageViews];
+  return all.count == 1 ? all.firstObject : nil;
 }
 
 - (BOOL)webMaskExists {
