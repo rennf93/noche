@@ -1211,6 +1211,7 @@ CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return g_perm_on ? Cef
 void SurfOnLoadEnd(int id, int status) { g_load[id] = status; }
 
 bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
+  if (RunProfilesCheck(check, host)) return true;
   static NSDictionary* table = @{
     @"cmd-enabled" : @0, @"bubbles" : @1, @"download-restart-1" : @2, @"download-restart-2" : @3, @"download-tab-close" : @4,
     @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,

@@ -46,6 +46,8 @@ static std::set<int> g_loaded_ids;                 // browsers whose main frame 
 static int g_cdp_id = 0;
 static bool g_done = false, g_started = false;
 static bool g_window_gone = false;                 // WinDelegate::OnWindowDestroyed ran
+static std::vector<CefRefPtr<CefRegistration>> g_regs;  // DevTools observers of every tab (declared here: Finish clears them before CefShutdown)
+static bool g_hold_exit = false;                   // profile-close: the main window may close without the run ending (Finish shuts down itself)
 static int g_tab_closed = 0, g_closed_id = -1;     // OnTabClosed count and the last |tab| id (ids, never references)
 static int g_first_created = 0, g_first_last_id = -1;  // OnAfterCreated seen by the first tab's client (Client)
 static int g_client_created[2] = {0, 0}, g_client_id[2] = {-1, -1};  // per-tab-client: OnAfterCreated per TabClient
@@ -249,6 +251,7 @@ static void Finish(bool ok, NSString* detail) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (g_window) g_window->Close();
     else if (!g_window_gone) exit(g_ok ? 0 : 1);  // else OnWindowDestroyed shuts down
+    else if (g_hold_exit) { g_regs.clear(); [NCEngine shutdown]; exit(g_ok ? 0 : 1); }  // profile-close: the main window closed on purpose, nobody else shuts down
   });
 }
 
@@ -286,8 +289,7 @@ static void EvalOn(CefRefPtr<CefBrowser> b, NSString* expr, bool await, std::fun
 }
 static void Eval(NSString* expr, std::function<void(NSString*)> cb) { EvalOn(g_browser, expr, false, cb); }
 
-// Every tab gets a DevTools observer so EvalOn() works on any tab; the registrations live until shutdown.
-static std::vector<CefRefPtr<CefRegistration>> g_regs;
+// Every tab gets a DevTools observer so EvalOn() works on any tab; the registrations live until shutdown (g_regs, declared above).
 static void CheckTabs(NSString* s);
 static void RunTabsCheck();
 static void RunRafHidden();
@@ -511,6 +513,10 @@ static SurfHost MakeSurfHost() {
     return [NSString stringWithFormat:@"first-tab client OnAfterCreated=%d (last id %d), OnBeforeClose seen for ids [%@]", g_first_created, g_first_last_id, [ids componentsJoinedByString:@","]];
   };
   h.done = []() { return g_done; };
+  h.observe = [](CefRefPtr<CefBrowser> b) { g_regs.push_back(b->GetHost()->AddDevToolsMessageObserver(new Obs())); };
+  h.closeMain = []() { g_hold_exit = true; if (g_window) g_window->Close(); };
+  h.mainGone = []() { return g_window_gone; };
+  h.beforeClose = []() { return g_before_close; };
   return h;
 }
 static ActionsHost MakeActionsHost() {
@@ -1134,6 +1140,7 @@ class WinDelegate : public CefWindowDelegate {
     g_window_gone = true;
     // close-last: pending OnTabClosed callbacks may still arrive, so report a second later and shut down after that.
     const bool deferred = ([g_check isEqualToString:@"close-last"] || [g_check isEqualToString:@"popup-close-last"] || [g_check isEqualToString:@"close-callbacks"]) && !g_done;
+    if (g_hold_exit) { g_browser = nullptr; g_view = nullptr; g_window = nullptr; return; }  // profile-close: other profile windows stay open (their DevTools observers too); the check ends the run through Finish
     g_regs.clear(); g_alloy.clear(); g_browser = nullptr; g_view = nullptr; g_window = nullptr;
     if (deferred)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -1169,6 +1176,7 @@ class WinDelegate : public CefWindowDelegate {
   // An install left in the shared profile once added uBlock Origin Lite's processes to rss-20 (m05-probe-run.txt).
   if (IsStoreCheck(g_check)) [NSFileManager.defaultManager removeItemAtPath:[cache stringByAppendingPathComponent:@"Default"] error:nil];
   NSError* err = nil;
+  ProfilesPreEngine(g_check, cache);
   if (![NCEngine startWithCachePath:cache error:&err]) { Finish(false, [NSString stringWithFormat:@"engine start failed: %@", err]); return; }
   if (getenv("NOCHE_PROBE_TRACE") && getenv("NOCHE_PROBE_TRACE_EARLY")) CefBeginTracing("viz,cc,content,views,ui,toplevel,latency", nullptr);
   InstallCrashHandlers();  // after CefInitialize, so Chromium's own handlers do not replace them
@@ -1188,7 +1196,7 @@ class WinDelegate : public CefWindowDelegate {
       g_alloy.push_back(CefBrowserView::CreateBrowserView(new Client(), url.UTF8String, CefBrowserSettings(), nullptr, nullptr, new BVDelegate(true)));
   CefWindow::CreateTopLevelWindow(new WinDelegate());
   // Own watchdog; the script has an outer one on top. rss-20 waits a minute between its two samples.
-  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : ([g_check isEqualToString:@"cmd-enabled"] || [g_check isEqualToString:@"bubbles"] || [g_check hasPrefix:@"download-"] || [g_check isEqualToString:@"ctx-ext-items"] || [g_check isEqualToString:@"zoom-scope"] || [g_check isEqualToString:@"chrome-pages"] || [g_check hasPrefix:@"discard-"]) ? 90 : 40;
+  const int watchdog = ([g_check hasPrefix:@"rss-20"] || [g_check isEqualToString:@"tabs-bare-wait"] || IsStoreCheck(g_check)) ? 150 : ([g_check isEqualToString:@"cmd-enabled"] || [g_check isEqualToString:@"bubbles"] || [g_check hasPrefix:@"download-"] || [g_check isEqualToString:@"ctx-ext-items"] || [g_check isEqualToString:@"zoom-scope"] || [g_check isEqualToString:@"chrome-pages"] || [g_check hasPrefix:@"discard-"] || [g_check hasPrefix:@"profile-"]) ? 90 : 40;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, watchdog * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ Finish(false, @"timeout"); });
 }
 @end
@@ -1204,7 +1212,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"profile-dirs", @"profile-cookie", @"profile-cookie-2", @"profile-storage", @"profile-ext", @"profile-close", @"profile-incognito", @"profile-incognito-2", @"profile-clear", @"profile-delete", @"profile-delete-2" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble, discard-p1, discard-p1b, discard-p1b-off, discard-p2, discard-p3, discard-api)
+# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble, discard-p1, discard-p1b, discard-p1b-off, discard-p2, discard-p3, discard-api, profile-dirs, profile-cookie, profile-cookie-2, profile-storage, profile-ext, profile-close, profile-incognito, profile-incognito-2, profile-clear, profile-delete, profile-delete-2)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe (store checks: Noche Probe Store, emptied every run). Check names are [a-z0-9-]+.
@@ -15,6 +15,9 @@
 # temp NOCHE_PROBE_DL_DIR that is deleted on exit. download-restart-crash-1 is killed with SIGKILL by this script (it prints ready-to-kill first).
 # Patch 0008 checks need the new engine API for SetDownloadHandler: NOCHE_DOWNLOAD_API=1 (without it they print the missing API as a failed assertion). Run with NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 like the tab checks.
 # Discard checks (patch 0009 research, note m1-6 5.3): discard-p1 (feature WebContentsDiscard on), discard-p1b (default flags), discard-p1b-off (explicit --disable-features=WebContentsDiscard), discard-p2 (pin immunity), discard-p3 (hidden tab treatment), discard-api (needs NOCHE_DISCARD_API=1 and the 0009 engine). They run without the anti-throttling switches.
+# Multi-profile checks (patch 0010 research, note m1-7 section 5): the root is the probe profile root, with Default (the main window) and Profile 1 / Profile 2 beside it. A check without a -2 suffix
+# starts by deleting Profile 1 and Profile 2 before CefInitialize. profile-cookie-2, profile-incognito-2 and profile-delete-2 continue their first launch after a relaunch (run them after it).
+# profile-clear compiles its time-range part only with NOCHE_CLEAR_API=1 (needs CefRequestContext::ClearBrowsingData, patch 0010); without it that part is a failed "clear-api" assertion.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
@@ -33,7 +36,7 @@ SITE="$(mktemp -d)"
 echo '<!doctype html><title>probe</title><p>probe page' > "$SITE/index.html"
 # u10: NOCHE_PROBE_MEASURE=pagestatic puts the in-page visibility/rAF recorder in the page (same script as kPageJS in main.mm).
 [ "${NOCHE_PROBE_MEASURE:-}" = pagestatic ] && echo "<script>(()=>{window.__sw=[];document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const v=performance.timeOrigin+performance.now();requestAnimationFrame(()=>{window.__sw.push([v,performance.timeOrigin+performance.now()])});});})()</script>" >> "$SITE/index.html"
-cp "$ROOT"/Probes/fixtures/pages/*.html "$SITE/"
+cp "$ROOT"/Probes/fixtures/pages/*.html "$ROOT"/Probes/fixtures/pages/*.js "$SITE/"
 DL_DIR="$(mktemp -d)"
 SLOW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 SLOW_LOG="$(mktemp)"
@@ -92,7 +95,7 @@ for CHECK in "$@"; do
   [[ "$CHECK" == download-control-rejected ]] && HIST_MAX0="$(hist_query 'select coalesce(max(id),0) from downloads' | tr -d ' ')"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
   [[ "$CHECK" == rss-20* || "$CHECK" == tabs-bare-wait ]] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
-  [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble|discard-.*)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
+  [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble|discard-.*|profile-.*)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
   # Web Store checks (store-*, install-no-window) load a live page and wait for an install: 150 s probe watchdog.
   [[ "$CHECK" == store-* || "$CHECK" == install-no-window ]] && LIMIT=$((150 + ${NOCHE_PROBE_SLACK:-20}))
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).

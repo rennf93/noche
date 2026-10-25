@@ -3,6 +3,7 @@
 #pragma once
 #import <AppKit/AppKit.h>
 #include <functional>
+#include <set>
 #include "include/cef_browser.h"
 #include "include/cef_context_menu_handler.h"
 #include "include/cef_download_handler.h"
@@ -22,6 +23,12 @@ struct SurfHost {
   std::function<NSString*()> url;        // the served page
   std::function<NSString*()> fallback;   // the first tab client: OnAfterCreated count, last id, ids that reached OnBeforeClose
   std::function<bool()> done;
+  // Multi-profile checks (profiles.mm): a DevTools observer for a browser of another window (so eval works there), and the main
+  // window (profile Default) closed without ending the run: Finish then shuts the engine down itself.
+  std::function<void(CefRefPtr<CefBrowser>)> observe;
+  std::function<void()> closeMain;
+  std::function<bool()> mainGone;
+  std::function<std::set<int>()> beforeClose;  // ids whose OnBeforeClose ran in the main window's client
 };
 
 // Before the engine starts: enables the handlers the check needs (they answer NULL otherwise).
@@ -31,5 +38,10 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler();
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler();
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler();
 void SurfOnLoadEnd(int browserId, int status);
+// Multi-profile checks (engine patch 0010 research): profile-dirs, profile-cookie(-2), profile-storage, profile-ext, profile-close,
+// profile-incognito(-2), profile-clear, profile-delete(-2). Same contract as RunSurfacesCheck.
+bool RunProfilesCheck(NSString* check, const SurfHost& host);
+// Before CefInitialize: removes the profile directories a fresh check must start without, and sweeps tombstoned ones (profile-delete-2).
+void ProfilesPreEngine(NSString* check, NSString* root);
 // True if |check| is one of the surfaces checks (it then owns the run and ends it through host.finish).
 bool RunSurfacesCheck(NSString* check, const SurfHost& host);

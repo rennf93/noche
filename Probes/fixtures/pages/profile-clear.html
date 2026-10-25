@@ -1,0 +1,14 @@
+<!doctype html><title>profile-clear</title><p>profile clear fixture
+<script>
+// ls(k, v) writes/reads one localStorage key; hit(u) fetches u twice (the second with force-cache) and reports the transferSize
+// of the last resource timing entry for u: 0 means the HTTP cache served it.
+window.noche = {
+  ls(k, v) { if (v !== undefined) localStorage.setItem(k, v); return String(localStorage.getItem(k)); },
+  async prime(u) { await (await fetch(u)).text(); return this.hit(u); },
+  async hit(u) {
+    await (await fetch(u, { cache: 'force-cache' })).text();
+    const es = performance.getEntriesByName(new URL(u, location.href).href);
+    return String(es.length ? es[es.length - 1].transferSize : -1);
+  },
+};
+</script>
