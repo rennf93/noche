@@ -733,7 +733,7 @@ static NSInteger g_preempted = 0;
 // compares the rest of the modifiers exactly). A chord is claimed only when Noche's MenuTable binds it and the engine's table maps it to a different command:
 //   Cmd+Shift+C      engine IDC_DEV_TOOLS_INSPECT, Noche Edit > Copy URL
 //   Opt+Shift+Cmd+C  no row of its own, but an event with a lowercase "c" and Shift clears to the Cmd+Opt+C row (IDC_DEV_TOOLS_INSPECT); Noche Copy URL as Markdown
-// A claimed chord never reaches the page: the monitor takes it ahead of the window and the renderer, so page JavaScript does not see it (shortcuts-once asserts this).
+// A claimed chord never reaches the page: the monitor takes it ahead of the window and the renderer, so page JavaScript does not see it (not assertable in a hidden run, owner check 11; shortcuts-once asserts the claim counter).
 // Everything else in the engine's table is either the same command as Noche's binding (Cmd+Opt+C Inspect, Cmd+Shift+[ and ], Cmd+1..9, Ctrl+Shift+PageDown and Up)
 // or a chord Noche does not bind (left to the engine, listed in docs/app/README.md). Chrome's main-menu shortcuts are not engine accelerators here: Noche has its own menu.
 - (BOOL)preemptKey:(NSEvent*)event {

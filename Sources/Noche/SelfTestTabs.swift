@@ -280,8 +280,8 @@ extension SelfTest {
         reset(); key("0", code: 29); await settle(); verify("Cmd+0 (Actual Size)", "zoom")
         if tab.zoomLevel != 0 { bad.append("Zoom Out and Actual Size left the zoom at \(tab.zoomLevel)") }
         // Shift+Cmd+C is Inspect in the engine's own table (global_keyboard_shortcuts_mac.mm) and Copy URL here: the bridge claims it, so it runs once with no DevTools window.
-        // The page must never see a claimed chord (the monitor takes it before the window and the renderer): a keydown listener records what reaches it.
-        _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
+        // Proved here: the claim counter (one claim, one Noche action, no DevTools window). Not proved hidden: that the page gets no keydown. Both chords have menu items, so even
+        // without the claim the menu takes them before the page in a hidden run (NO_PREEMPT shows copyURL running twice, no page keydown), so a page listener could not fail. Owner check 11 covers it.
         let claimsAtCopy = NCWindow.testPreemptedKeys(), devToolsAtCopy = NCWindow.devToolsCreated()
         reset(); sendKey("c", code: 8, [.command, .shift], chars: "C"); await settle(); verify("Shift+Cmd+C", "copyURL")
         if NCWindow.testPreemptedKeys() - claimsAtCopy != 1 || NCWindow.devToolsCreated() != devToolsAtCopy { bad.append("Shift+Cmd+C: claims \(NCWindow.testPreemptedKeys() - claimsAtCopy) (want 1), DevTools created \(NCWindow.devToolsCreated() - devToolsAtCopy) (want 0)") }
@@ -324,9 +324,8 @@ extension SelfTest {
         // Cmd+C is not claimed: the page sees the keydown, and no Noche action runs.
         if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8) {
-            let seenByClaimed = await evaluate(tab, "JSON.stringify(window.__keys || [])") ?? ""
-            if seenByClaimed != "\"[]\"" { bad.append("a claimed chord reached the page: \(seenByClaimed)") } else { passed.append("Shift+Cmd+C and Opt+Shift+Cmd+C never reached the page") }
-            _ = await evaluate(tab, "window.__keys = []; 1")
+            // The listener goes onto the live document now (Back and Forward load other documents); window.__keys may predate it.
+            _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
             ns.makeFirstResponder(page); reset()
             NSApp.sendEvent(ev)  // not claimed by Noche: no action runs
             let claimed = BrowserWindowController.actionCounts
