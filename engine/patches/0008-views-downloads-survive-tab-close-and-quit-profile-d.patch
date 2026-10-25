@@ -1,4 +1,4 @@
-From b97d509a7fe6b99d2c1af4f805a1fcb4bb89db8e Mon Sep 17 00:00:00 2001
+From 15041729079fb3d88707714c8ac97a56111ff5bc Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 02:52:12 +0200
 Subject: [PATCH] views: downloads survive tab close and quit, profile download
@@ -7,18 +7,18 @@ Subject: [PATCH] views: downloads survive tab close and quit, profile download
 ---
  include/cef_download_handler.h                |   6 +-
  include/cef_request_context.h                 |  16 ++
- include/cef_resource_request_handler.h        |   6 +
+ include/cef_resource_request_handler.h        |   7 +
  libcef/browser/browser_context.cc             |  22 ++
  libcef/browser/browser_context.h              |  11 +
- .../browser/download_manager_delegate_impl.cc | 142 ++++++++++++-
- .../browser/download_manager_delegate_impl.h  |  13 ++
- .../resource_request_handler_wrapper.cc       | 201 ++++++++++++++++--
+ .../browser/download_manager_delegate_impl.cc | 142 ++++++++++-
+ .../browser/download_manager_delegate_impl.h  |  13 +
+ .../resource_request_handler_wrapper.cc       | 229 ++++++++++++++++--
  libcef/browser/request_context_impl.cc        |  18 ++
  libcef/browser/request_context_impl.h         |   5 +
- patch/patch.cfg                               |  12 ++
- ..._browser_ui_tab_group_feedback_guard.patch |  26 +++
- .../content_download_keep_paused.patch        |  89 ++++++++
- 13 files changed, 538 insertions(+), 29 deletions(-)
+ patch/patch.cfg                               |  12 +
+ ..._browser_ui_tab_group_feedback_guard.patch |  26 ++
+ .../content_download_keep_paused.patch        |  89 +++++++
+ 13 files changed, 567 insertions(+), 29 deletions(-)
  create mode 100644 patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
  create mode 100644 patch/patches/content_download_keep_paused.patch
 
@@ -75,10 +75,10 @@ index 77a1c02..e60fae3 100644
  
  #endif  // CEF_INCLUDE_CEF_REQUEST_CONTEXT_H_
 diff --git a/include/cef_resource_request_handler.h b/include/cef_resource_request_handler.h
-index 572065b..7a1c31d 100644
+index 572065b..a9ba688 100644
 --- a/include/cef_resource_request_handler.h
 +++ b/include/cef_resource_request_handler.h
-@@ -181,6 +181,12 @@ class CefResourceRequestHandler : public virtual CefBaseRefCounted {
+@@ -181,6 +181,13 @@ class CefResourceRequestHandler : public virtual CefBaseRefCounted {
    /// methods that modify state (like LoadURL, SendProcessMessage, etc.) if the
    /// frame is invalid.
    ///
@@ -86,7 +86,8 @@ index 572065b..7a1c31d 100644
 +  /// is not reported as aborted. Its single completion arrives later with the
 +  /// original |browser| and |frame| (IsValid() is false by then). A kept
 +  /// request that is cancelled because its request context is destroyed gets
-+  /// no completion.
++  /// no completion. A kept request that completes after the CEF context was
++  /// destroyed reports a NULL |browser| and |frame|.
 +  ///
    /*--cef(optional_param=browser,optional_param=frame)--*/
    virtual void OnResourceLoadComplete(CefRefPtr<CefBrowser> browser,
@@ -455,7 +456,7 @@ index 5843c0d..c68f0df 100644
  
    raw_ptr<content::DownloadManager> manager_;
 diff --git a/libcef/browser/net_service/resource_request_handler_wrapper.cc b/libcef/browser/net_service/resource_request_handler_wrapper.cc
-index efabfd2..d5f19bc 100644
+index efabfd2..e89a8d8 100644
 --- a/libcef/browser/net_service/resource_request_handler_wrapper.cc
 +++ b/libcef/browser/net_service/resource_request_handler_wrapper.cc
 @@ -7,6 +7,8 @@
@@ -484,7 +485,7 @@ index efabfd2..d5f19bc 100644
      bool accept_language_added_ = false;
      CancelRequestCallback cancel_callback_;
    };
-@@ -156,12 +161,67 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -156,12 +161,90 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      CancelRequestCallback cancel_callback_;
    };
  
@@ -494,7 +495,12 @@ index efabfd2..d5f19bc 100644
 +  // torn down: the UI thread drops them synchronously at context destruction
 +  // (DestructionObserver::OnContextDestroyed), without a hop through the IO
 +  // thread that may not run in time. Thread safe; Release() may be called from
-+  // any thread and refuses later Set() calls.
++  // any thread and refuses later Set() calls. CefBrowserHostBase is plainly
++  // reference counted (browser_host_base.h IMPLEMENT_REFCOUNTING), so the last
++  // reference must never drop on the IO thread: DropOnUIThread() posts it.
++  // A kept request that completes after Release() reports a NULL browser and
++  // frame, which OnResourceLoadComplete allows (optional_param=browser,
++  // optional_param=frame in include/cef_resource_request_handler.h).
 +  class KeptRefs : public base::RefCountedThreadSafe<KeptRefs> {
 +   public:
 +    KeptRefs() = default;
@@ -527,7 +533,25 @@ index efabfd2..d5f19bc 100644
 +        browser.swap(browser_);
 +        frame.swap(frame_);
 +      }
-+      // The references are dropped here, outside the lock.
++      // Dropped outside the lock, on the UI thread.
++      DropOnUIThread(std::move(browser), std::move(frame));
++    }
++
++    // Drops the references on the UI thread: inline when already there, else
++    // through a task posted with CEF_POST_TASK (cef/libcef/browser/
++    // thread_util.h:53) to CEF_UIT (:17); CEF_CURRENTLY_ON_UIT is :21. Callers
++    // on the IO thread must pass their local copies here too.
++    static void DropOnUIThread(CefRefPtr<CefBrowser> browser,
++                               CefRefPtr<CefFrame> frame) {
++      if (!browser && !frame) {
++        return;
++      }
++      if (CEF_CURRENTLY_ON_UIT()) {
++        return;  // |browser| and |frame| go out of scope here.
++      }
++      CEF_POST_TASK(CEF_UIT, base::BindOnce(
++                                 [](CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>) {},
++                                 std::move(browser), std::move(frame)));
 +    }
 +
 +   private:
@@ -554,7 +578,7 @@ index efabfd2..d5f19bc 100644
        if (browser) {
          browser_info_ = browser->browser_info();
          browser->AddObserver(this);
-@@ -201,31 +261,45 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -201,31 +284,46 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      void OnBrowserDestroyed(CefBrowserHostBase* browser) override {
        CEF_REQUIRE_UIT();
        browser->RemoveObserver(this);
@@ -563,10 +587,11 @@ index efabfd2..d5f19bc 100644
 -      NotifyOnDestroyed();
 +      // Noche: stay registered for the destruction of the CEF context. A
 +      // request kept alive past its browser holds the CefBrowser, and with it
-+      // the browser's request context; only CancelKeptRequests (run from
-+      // OnContextDestroyed, or when the proxies shut down) releases them, so
-+      // without this a kept download pins the context past CefShutdown. The
-+      // wrapper deletes this observer right away when nothing is kept.
++      // the browser's request context; OnContextDestroyed drops those
++      // references on the UI thread (KeptRefs::Release), so without this a kept
++      // download pins the context past CefShutdown. CancelKeptRequests is a
++      // separate path, run when the proxies shut down. The wrapper deletes
++      // this observer right away when nothing is kept.
 +      if (CefContext::Get()) {
 +        CefContext::Get()->AddObserver(this);
 +      } else {
@@ -605,7 +630,7 @@ index efabfd2..d5f19bc 100644
  
      base::WeakPtr<InterceptedRequestHandlerWrapper> wrapper_;
    };
-@@ -272,7 +346,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -272,7 +370,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
        // requests in a timely manner (e.g. before we start asserting about
        // leaked objects during CEF shutdown).
        destruction_observer_ =
@@ -614,7 +639,7 @@ index efabfd2..d5f19bc 100644
  
        if (browser) {
          // These references will be released in OnDestroyed().
-@@ -312,6 +386,9 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -312,6 +410,9 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      static void DeleteDestructionObserverOnUIThread(
          std::unique_ptr<DestructionObserver> observer) {}
  
@@ -624,7 +649,7 @@ index efabfd2..d5f19bc 100644
      // Only accessed on the UI thread.
      CefBrowserContext::Getter browser_context_getter_;
  
-@@ -408,6 +485,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -408,6 +509,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
      // There should be no in-progress requests during destruction.
      DCHECK(request_map_.empty());
@@ -635,7 +660,7 @@ index efabfd2..d5f19bc 100644
  
      // Don't continue with initialization if we get deleted before
      // SetInitialized is called asynchronously.
-@@ -426,11 +507,11 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -426,11 +531,11 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      // we won't get an OnDestroyed callback from DestructionObserver.
      if (init_state_->browser_) {
        if (!init_state_->browser_->browser_info()->browser()) {
@@ -649,7 +674,7 @@ index efabfd2..d5f19bc 100644
        return;
      }
  
-@@ -520,6 +601,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -520,6 +625,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      CEF_REQUIRE_IOT();
  
      if (shutting_down_) {
@@ -657,7 +682,7 @@ index efabfd2..d5f19bc 100644
        return;
      }
  
-@@ -532,7 +614,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -532,7 +638,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
        return;
      }
  
@@ -666,7 +691,7 @@ index efabfd2..d5f19bc 100644
    }
  
    void OnBeforeRequest(int32_t request_id,
-@@ -900,6 +982,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -900,6 +1006,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
        return;
      }
  
@@ -677,7 +702,7 @@ index efabfd2..d5f19bc 100644
      if (state->cookie_filter_) {
        // Remove the flags that were added in ContinueWithLoadedCookies.
        request->load_flags &= ~kLoadNoCookiesFlags;
-@@ -1124,6 +1210,23 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1124,6 +1234,25 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
                           bool& handled_externally) override {
      CEF_REQUIRE_IOT();
  
@@ -689,19 +714,21 @@ index efabfd2..d5f19bc 100644
 +      kept_request_map_.erase(kept);
 +      CefRefPtr<CefBrowser> browser;
 +      CefRefPtr<CefFrame> frame;
-+      init_state_->kept_refs_->Get(&browser, &frame);
++      init_state_->kept_refs_->Get(&browser, &frame);  // NULL after Release()
 +      CallHandlerOnComplete(state.get(), status, browser, frame);
 +      if (kept_request_map_.empty()) {
 +        // Nothing is kept any more: let go of the browser and its context.
 +        init_state_->kept_refs_->Release();
 +      }
++      // These copies may hold the last references: drop them on the UI thread.
++      KeptRefs::DropOnUIThread(std::move(browser), std::move(frame));
 +      return;
 +    }
 +
      RequestState* state = GetState(request_id);
      if (!state) {
        // The request may have been aborted during initialization or canceled
-@@ -1177,6 +1280,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1177,6 +1306,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
   private:
    void CallHandlerOnComplete(RequestState* state,
                               const network::URLLoaderCompletionStatus& status) {
@@ -716,7 +743,7 @@ index efabfd2..d5f19bc 100644
      if (!state->handler_ || !state->pending_request_) {
        return;
      }
-@@ -1198,8 +1309,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1198,8 +1335,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      state->pending_response_->SetReadOnly(true);
  
      state->handler_->OnResourceLoadComplete(
@@ -727,7 +754,7 @@ index efabfd2..d5f19bc 100644
          status.error_code == 0 ? UR_SUCCESS : UR_FAILED,
          status.encoded_body_length.InBytes());
    }
-@@ -1285,16 +1396,42 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1285,16 +1422,42 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
    }
  
    // Stop accepting new requests and cancel pending/in-flight requests when the
@@ -773,7 +800,7 @@ index efabfd2..d5f19bc 100644
  
      // Stop accepting new requests.
      shutting_down_ = true;
-@@ -1310,8 +1447,13 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1310,8 +1473,13 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      RequestMap request_map;
      request_map.swap(request_map_);
  
@@ -788,7 +815,7 @@ index efabfd2..d5f19bc 100644
        CallHandlerOnComplete(
            value.get(), network::URLLoaderCompletionStatus(net::ERR_ABORTED));
      }
-@@ -1330,6 +1472,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1330,6 +1498,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
      for (auto& [key, value] : request_map) {
        auto state = std::move(value);
@@ -803,13 +830,15 @@ index efabfd2..d5f19bc 100644
        if (state->cancel_callback_) {
          // The cancel callback may trigger a call to OnRequestComplete followed
          // by destruction of the InterceptedRequest that owns the
-@@ -1342,6 +1492,22 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1342,6 +1518,24 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      }
    }
  
-+  // Context destruction after a browser destruction: cancel what was kept. The
-+  // states, and the CefBrowser references they hold, are released when |kept|
-+  // goes out of scope.
++  // Proxy shutdown (InterceptedRequestHandlerWrapper::Shutdown, or OnDestroyed
++  // when not from a browser) after a browser destruction: cancel what was kept
++  // and release the kept browser. Context destruction itself does not come here
++  // (OnContextDestroyed drops the kept references and the requests then finish
++  // with a NULL browser and frame, or are cancelled with their proxies).
 +  void CancelKeptRequests() {
 +    RequestMap kept;
 +    kept.swap(kept_request_map_);
@@ -826,7 +855,7 @@ index efabfd2..d5f19bc 100644
    static CefRefPtr<CefRequestImpl> MakeRequest(
        const network::ResourceRequest* request,
        int64_t request_id,
-@@ -1368,6 +1534,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1368,6 +1562,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
    using RequestMap = std::map<int32_t, std::unique_ptr<RequestState>>;
    RequestMap request_map_;

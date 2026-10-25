@@ -117,3 +117,5 @@ rc=0
 ### switch-latency load=6.81 7.25 7.79
 PROBE switch-latency pass median=10.0ms p90=13.8ms range=8.9..14.0ms (30 timed after 3 warm-up, fixed cycle order) limits median<=16.7ms p90<=33.3ms (Ruling 14); no recent hybrid control (info only); old reference 11.6ms (S1 harness) is met
 rc=0
+
+Run counts: every claim above rests on the quoted output of one run per variant (the gate block), except profile-upgrade (one run per variant, quoted).
