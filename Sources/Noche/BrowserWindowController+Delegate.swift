@@ -75,6 +75,7 @@ extension BrowserWindowController {
         typedLoads[tab.identifier] = nil
         recordedTitle[tab.identifier] = nil
         failed[tab.identifier] = nil
+        finds[tab.identifier] = nil
         closing[tab.identifier] = nil
         if intendedActive === tab { intendedActive = nil }
         // The close is confirmed: the selection moves to the tab chosen when it was asked for.
@@ -161,6 +162,9 @@ extension BrowserWindowController {
         case ChromeCommand.zoomMinus: zoom(-0.5)
         case ChromeCommand.zoomNormal: zoom(nil)
         case ChromeCommand.devTools: showDevTools()
+        case ChromeCommand.find: openFind()
+        case ChromeCommand.findNext: findStep(forward: true)
+        case ChromeCommand.findPrevious: findStep(forward: false)
         default: return false
         }
         return true

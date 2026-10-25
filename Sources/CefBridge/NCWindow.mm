@@ -6,6 +6,7 @@
 #include <set>
 #include "include/cef_client.h"
 #include "include/cef_command_handler.h"
+#include "include/cef_find_handler.h"
 #include "include/cef_context_menu_handler.h"
 #include "include/cef_menu_model.h"
 #include "include/cef_jsdialog_handler.h"
@@ -36,6 +37,7 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
+- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
@@ -122,6 +124,7 @@ class NCClient : public CefClient,
                  public CefDisplayHandler,
                  public CefCommandHandler,
                  public CefContextMenuHandler,
+                 public CefFindHandler,
                  public CefJSDialogHandler {
  public:
   explicit NCClient(NCWindow* w) : w_(w) {}
@@ -132,6 +135,12 @@ class NCClient : public CefClient,
   CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+
+  void OnFindResult(CefRefPtr<CefBrowser> b, int, int count, const CefRect&, int ordinal, bool final) override {
+    NC_CEF_CALLBACK;
+    [w_ browser:b foundMatches:count active:ordinal final:final];
+  }
 
   // The page menu is Noche's: the model is copied inside this call (it must not outlive it) and the host shows an NSMenu.
   bool RunContextMenu(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams> p, CefRefPtr<CefMenuModel> m,
@@ -777,6 +786,11 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   }
   if (tab) tab.clearFaviconAtLoadEnd = NO;
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFinishLoadWithStatus:status]; }];
+}
+
+- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final {
+  NCTab* tab = [self tabFor:browser create:NO];
+  if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFindMatches:count active:ordinal final:final]; }];
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url {

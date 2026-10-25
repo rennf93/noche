@@ -114,6 +114,13 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   if (_browser) _browser->GetHost()->Print();
 }
 
+- (void)find:(NSString*)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)next {
+  if (_browser) _browser->GetHost()->Find(text.UTF8String, forward, matchCase, next);
+}
+- (void)stopFinding:(BOOL)clearSelection {
+  if (_browser) _browser->GetHost()->StopFinding(clearSelection);
+}
+
 // Runs the Chrome command with this IDC name on the tab when the engine says it can (Inspect Elements, JavaScript Console).
 - (BOOL)executeChromeCommandNamed:(NSString*)name {
   if (!_browser) return NO;

@@ -52,6 +52,7 @@ final class ToolbarView: DragView {
         return field
     }()
     let divider = DividerView()
+    let zoom = ZoomPillView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -75,6 +76,7 @@ final class ToolbarView: DragView {
         address.setAccessibilityIdentifier("toolbar.address")
         address.setAccessibilityLabel("Address")
         addSubview(address)
+        addSubview(zoom)
         divider.setAccessibilityIdentifier("toolbar.divider")
         addSubview(divider)
     }
@@ -82,8 +84,12 @@ final class ToolbarView: DragView {
 
     override func layout() {
         super.layout()
+        // The zoom pill sits at the right edge and takes its room from the address text while it shows.
+        let zoomRoom = zoom.isHidden ? 0 : ChromeStyle.zoomWidth + 8
         address.frame = NSRect(x: ChromeStyle.addressInset, y: ChromeStyle.addressY - ChromeStyle.inset,
-                               width: max(0, bounds.width - ChromeStyle.addressInset - 12), height: ChromeStyle.addressHeight)
+                               width: max(0, bounds.width - ChromeStyle.addressInset - 12 - zoomRoom), height: ChromeStyle.addressHeight)
+        zoom.frame = NSRect(x: bounds.width - ChromeStyle.zoomRight - ChromeStyle.zoomWidth, y: (ChromeStyle.toolbarHeight - ChromeStyle.zoomHeight) / 2 - 1,
+                            width: ChromeStyle.zoomWidth, height: ChromeStyle.zoomHeight)
         divider.frame = NSRect(x: 0, y: ChromeStyle.dividerY - ChromeStyle.inset, width: bounds.width, height: 1)
     }
 }

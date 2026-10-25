@@ -100,6 +100,12 @@ enum ChromeStyle {
     static let barInputFontOverlay = NSFont.systemFont(ofSize: 13)
     static let barRowFont = NSFont.systemFont(ofSize: 13)
     static let barMotionDuration: TimeInterval = 0.107
+
+    // M1.4 find pill and zoom pill: builder calls (no capture exists; docs/app/README.md "Builder calls and rulings"), colors from the command bar's.
+    static let findWidth: CGFloat = 308, findHeight: CGFloat = 36
+    static let findTop: CGFloat = 8, findRight: CGFloat = 12     // inside the card, below the divider, from the card's right edge
+    static let zoomWidth: CGFloat = 56, zoomHeight: CGFloat = 26
+    static let zoomRight: CGFloat = 12                           // from the toolbar's right edge (the extension area will sit right of it)
 }
 
 /// Where everything sits for a window size and a card left edge (6 hidden, 197 shown, up to 199 mid-show).
@@ -116,6 +122,11 @@ struct ChromeLayout {
     var sidebar: CGRect {
         let s = (cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset)
         return CGRect(x: -ChromeStyle.sidebarWidth + ChromeStyle.sidebarWidth * s, y: 0, width: ChromeStyle.sidebarWidth, height: size.height)
+    }
+    /// The find pill: top right of the card, below the toolbar's divider.
+    var findBar: CGRect {
+        CGRect(x: card.maxX - ChromeStyle.findRight - ChromeStyle.findWidth, y: ChromeStyle.webTop + ChromeStyle.findTop,
+               width: ChromeStyle.findWidth, height: ChromeStyle.findHeight)
     }
     /// The web view sits 1 pt inside the card border, below the divider.
     var webInsets: NSEdgeInsets {

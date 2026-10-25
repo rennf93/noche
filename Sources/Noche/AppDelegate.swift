@@ -196,6 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func zoomActual(_ s: Any?) { active?.zoom(nil) }
     @objc func zoomIn(_ s: Any?) { active?.zoom(0.5) }
     @objc func zoomOut(_ s: Any?) { active?.zoom(-0.5) }
+    @objc func find(_ s: Any?) { active?.openFind() }
+    @objc func findNext(_ s: Any?) { active?.findStep(forward: true) }
+    @objc func findPrevious(_ s: Any?) { active?.findStep(forward: false) }
+    @objc func useSelectionForFind(_ s: Any?) { active?.useSelectionForFind() }
     @objc func developerTools(_ s: Any?) { active?.showDevTools() }
     @objc func goBack(_ s: Any?) { active?.goBack() }
     @objc func goForward(_ s: Any?) { active?.goForward() }

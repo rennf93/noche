@@ -365,6 +365,11 @@ extension SelfTest {
             resolves("Shift+Cmd+[ folded", "[", "{", cs, "Previous Tab")
         } else { bad.append("no ShortcutMenu or window for the shifted punctuation rows") }
         reset(); key("p", code: 35); await settle(); verify("Cmd+P", "print")
+        // Find (M1.4 task 4): each chord is one Noche action, with the pill (not Chromium's find bar) answering. Nothing is typed, so Cmd+G and Shift+Cmd+G only step.
+        reset(); key("f", code: 3); await settle(); verify("Cmd+F", "find")
+        reset(); key("g", code: 5); await settle(); verify("Cmd+G", "findNext")
+        reset(); key("g", code: 5, [.command, .shift], chars: "G"); await settle(); verify("Shift+Cmd+G", "findPrevious")
+        ctl.closeFind()
         reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
         for (name, ch, code, mods, chars, scheme, action) in [("Cmd+Y", "y", UInt16(16), NSEvent.ModifierFlags.command, "y", "chrome://history", "showHistory"),
                                                              ("Shift+Cmd+J", "j", UInt16(38), [.command, .shift], "J", "chrome://downloads", "showDownloads")] as [(String, String, UInt16, NSEvent.ModifierFlags, String, String, String)] {

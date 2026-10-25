@@ -169,6 +169,9 @@ final class SelfTest {
             case "ctx-page": await ctxPage()
             case "ctx-tab": await ctxTab()
             case "ctx-sidebar": await ctxSidebar()
+            case "find": await find()
+            case "zoom": await zoom()
+            case "find-selection": await findSelection()
             default: finish(false, "unknown check")
             }
         }

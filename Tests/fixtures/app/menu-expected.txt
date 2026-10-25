@@ -62,10 +62,10 @@ Edit|Delete|||r
 Edit|Select All|a|cmd|r
 Edit|---|||-
 Edit|Find|||1
-Edit/Find|Find...|f|cmd|0
-Edit/Find|Find Next|g|cmd|0
-Edit/Find|Find Previous|g|shift+cmd|0
-Edit/Find|Use Selection for Find|||0
+Edit/Find|Find...|f|cmd|1
+Edit/Find|Find Next|g|cmd|1
+Edit/Find|Find Previous|g|shift+cmd|1
+Edit/Find|Use Selection for Find|||1
 Edit|---|||-
 Edit|Spelling and Grammar|||1
 Edit/Spelling and Grammar|Show Spelling and Grammar|:|cmd|r

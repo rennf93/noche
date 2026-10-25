@@ -44,6 +44,8 @@ NS_SWIFT_UI_ACTOR
 /// The page's context menu: |items| is a copy of Chromium's model, |point| the click in window base coordinates. The host shows its own
 /// menu and calls |completion| exactly once, on the main queue, with the chosen command id (Chromium runs it) or -1 (the menu was dismissed).
 - (void)window:(NCWindow *)window tab:(NCTab *)tab showContextMenu:(NSArray<NCMenuItem *> *)items atWindowPoint:(NSPoint)point completion:(void (^)(NSInteger commandId))completion;
+/// Find in page results for |tab| (CefFindHandler::OnFindResult): |count| matches so far, |ordinal| the active one (1 based, 0 for none), |final| when the search is done.
+- (void)window:(NCWindow *)window tab:(NCTab *)tab didFindMatches:(NSInteger)count active:(NSInteger)ordinal final:(BOOL)final;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR
@@ -126,6 +128,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
 - (void)showDevTools;
 - (void)printPage;
+/// Find in page through the engine's search (no Chromium find bar). |next| continues the current search in |forward| direction; the search restarts when the text or case changes.
+/// Results arrive on the delegate's didFindMatches. An empty |text| stops the search.
+- (void)find:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)next;
+- (void)stopFinding:(BOOL)clearSelection;
 /// Runs the Chrome command with this IDC name on the tab when the engine can execute it; NO when it cannot.
 - (BOOL)executeChromeCommandNamed:(NSString *)name;
 /// Whether the engine says it can execute the Chrome command with this IDC name on the tab right now.

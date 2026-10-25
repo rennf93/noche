@@ -131,10 +131,10 @@ enum MenuTable {
             std("Select All", #selector(NSText.selectAll(_:)), "edit.selectAll"),
             sep,
             menu("Find", [
-                later("Find...", "edit.find", "M1.4 task 4"),
-                later("Find Next", "edit.findNext", "M1.4 task 4"),
-                later("Find Previous", "edit.findPrevious", "M1.4 task 4"),
-                later("Use Selection for Find", "M1.4 task 4"),
+                app("Find...", "edit.find", #selector(AppDelegate.find(_:))),
+                app("Find Next", "edit.findNext", #selector(AppDelegate.findNext(_:))),
+                app("Find Previous", "edit.findPrevious", #selector(AppDelegate.findPrevious(_:))),
+                app("Use Selection for Find", nil, #selector(AppDelegate.useSelectionForFind(_:))),
             ]),
             sep,
             menu("Spelling and Grammar", [

@@ -33,6 +33,10 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let sidebar = SidebarView(frame: .zero)
     let toolbar = ToolbarView(frame: .zero)
     var installed = false
+    let findBar = FindBarView(frame: .zero)
+    /// Find state per tab (engine id): the pill's text and the last count and active match the engine reported. A tab with no entry is not searching.
+    var finds: [Int: FindState] = [:]
+    var findShownFor: Int?   // the tab whose state the pill shows now; nil with the pill hidden
     /// Built on first use, so a window that never used the bar never builds its view (and its teardown skips it).
     var madeCommandBar: CommandBarController?
     var commandBar: CommandBarController {
@@ -88,6 +92,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var pasteboard = NSPasteboard.general
     /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
     static var suppressChrome = false
+    static var strayWindows: [NSWindow] = []
     /// The last sharing picker File > Share... made and the items it was given.
     static var lastShare: (picker: NSSharingServicePicker, items: [Any])?
     var toggleStart: TimeInterval = 0, toggleEnd: TimeInterval = 0
@@ -166,7 +171,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         border.autoresizingMask = [.width, .height]
         overlay.addSubview(sidebar)
         overlay.addSubview(toolbar)
+        findBar.isHidden = true
+        overlay.addSubview(findBar)
         overlay.addSubview(border)
+        setUpFind()
+        toolbar.zoom.onClick = { [weak self] in self?.zoom(nil) }
 
         sidebar.lights[0].onClick = { [weak self] in self?.close() }
         sidebar.lights[1].onClick = { [weak self] in self?.nsWindow?.miniaturize(nil) }
@@ -194,6 +203,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX)
         backdrop.card.frame = layout.card
         toolbar.frame = layout.toolbar
+        findBar.frame = layout.findBar
         sidebar.frame = layout.sidebar
         window.webInsets = layout.webInsets
         updateNewTabFrame()
@@ -214,6 +224,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         toolbar.forward.isEnabled = tab?.canGoForward ?? false
         toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : (app.showFullURL ? shownURL($0) : AddressInput.displayHost(shownURL($0))) } ?? ""
         toolbar.address.isHidden = commandBar.isOpen && commandBar.placement == .overlay
+        syncFind()
+        syncZoom()
     }
 
     // MARK: sidebar motion (live-ui.md section 8)
@@ -292,7 +304,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     func zoom(_ delta: Double?) {
         note("zoom")
         guard let tab = activeTab else { return }
+#if NOCHE_TESTHOOKS
+        if BarHook.on("ZOOM_WINDOW") {  // negative control: a window appears on zoom, as the engine's bubble would
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 266), styleMask: .titled, backing: .buffered, defer: false)
+            Self.strayWindows.append(w)
+            w.orderFront(nil)
+        }
+#endif
         tab.zoomLevel = delta.map { min(5, max(-5, tab.zoomLevel + $0)) } ?? 0
+        syncZoom()
+        // The engine applies the level on its own turn in some paths: read it again once it did.
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.syncZoom() } }
     }
     func showDevTools() {
         note("devTools")
@@ -347,6 +369,7 @@ enum ChromeCommand {
     static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
     static var restoreTab = -1, selectTab0 = -1, selectLastTab = -1, moveTabNext = -1, moveTabPrevious = -1
     static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
+    static var find = -1, findNext = -1, findPrevious = -1
 
     static func resolve() {
         func id(_ name: String) -> Int {
@@ -363,5 +386,6 @@ enum ChromeCommand {
         selectTab0 = id("IDC_SELECT_TAB_0")  // IDC_SELECT_TAB_1 to _7 follow it (34018 to 34025 in cef_command_ids.h)
         zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
         focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")
+        find = id("IDC_FIND"); findNext = id("IDC_FIND_NEXT"); findPrevious = id("IDC_FIND_PREVIOUS")  // Noche's own find pill answers all three: Chromium's find bar never shows
     }
 }
