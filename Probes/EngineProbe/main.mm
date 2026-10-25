@@ -335,7 +335,8 @@ static int g_polls = 0;
 static void Poll() {
   if (g_done) return;
   Eval(@"document.documentElement.dataset.nocheTabs || ''", ^(NSString* s) {
-    if (s.length) { CheckTabs(s); return; }
+    // {"error":...} is the content script's answer while the service worker is still starting (a slow machine): keep polling until it answers or 30 s pass.
+    if (s.length && ![s hasPrefix:@"{\"error\""]) { CheckTabs(s); return; }
     if (++g_polls == 12 && g_browser) g_browser->ReloadIgnoreCache();
     if (g_polls > 60) { Finish(false, @"no answer from the service worker in 30s"); return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ Poll(); });
