@@ -1,0 +1,874 @@
+From f5ee8b0ca9d271757b96b62dba1ccd98ee357f8c Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 02:52:12 +0200
+Subject: [PATCH] views: downloads survive tab close and quit, profile download
+ handler
+
+---
+ include/cef_download_handler.h                |   6 +-
+ include/cef_request_context.h                 |  16 +++
+ include/cef_resource_request_handler.h        |   6 +
+ libcef/browser/browser_context.cc             |  22 ++++
+ libcef/browser/browser_context.h              |  11 ++
+ .../browser/download_manager_delegate_impl.cc | 121 ++++++++++++++++--
+ .../browser/download_manager_delegate_impl.h  |  13 ++
+ .../resource_request_handler_wrapper.cc       |  90 +++++++++++--
+ libcef/browser/request_context_impl.cc        |  18 +++
+ libcef/browser/request_context_impl.h         |   5 +
+ patch/patch.cfg                               |  12 ++
+ ..._browser_ui_tab_group_feedback_guard.patch |  26 ++++
+ .../content_download_keep_paused.patch        |  89 +++++++++++++
+ 13 files changed, 411 insertions(+), 24 deletions(-)
+ create mode 100644 patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
+ create mode 100644 patch/patches/content_download_keep_paused.patch
+
+diff --git a/include/cef_download_handler.h b/include/cef_download_handler.h
+index 069fcd4db..008376df9 100644
+--- a/include/cef_download_handler.h
++++ b/include/cef_download_handler.h
+@@ -129,9 +129,11 @@ class CefDownloadHandler : public virtual CefBaseRefCounted {
+   /// This may be called multiple times before and after OnBeforeDownload().
+   /// Execute |callback| either asynchronously or in this method to cancel the
+   /// download if desired. Do not keep a reference to |download_item| outside of
+-  /// this method.
++  /// this method. |browser| is NULL when this handler was set with
++  /// CefRequestContext::SetDownloadHandler and the download has no live
++  /// browser.
+   ///
+-  /*--cef()--*/
++  /*--cef(optional_param=browser)--*/
+   virtual void OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
+                                  CefRefPtr<CefDownloadItem> download_item,
+                                  CefRefPtr<CefDownloadItemCallback> callback) {}
+diff --git a/include/cef_request_context.h b/include/cef_request_context.h
+index 77a1c0249..e60fae3de 100644
+--- a/include/cef_request_context.h
++++ b/include/cef_request_context.h
+@@ -47,6 +47,7 @@
+ #include "include/cef_registration.h"
+ #include "include/cef_values.h"
+ 
++class CefDownloadHandler;
+ class CefRequestContextHandler;
+ class CefSchemeHandlerFactory;
+ 
+@@ -365,6 +366,21 @@ class CefRequestContext : public CefPreferenceManager {
+   ///
+   /*--cef(default_retval=CEF_COLOR_VARIANT_SYSTEM)--*/
+   virtual cef_color_variant_t GetChromeColorSchemeVariant() = 0;
++
++#if CEF_API_ADDED(CEF_EXPERIMENTAL)
++  ///
++  /// Sets the download handler for all browsers that share this request
++  /// context's profile, for downloads that have no live browser: a download
++  /// whose tab was closed, and downloads restored from history at startup. For
++  /// those, CefDownloadHandler::OnDownloadUpdated is called with a NULL
++  /// browser. Items that exist when this method is called are announced
++  /// immediately through OnDownloadUpdated. Downloads that have a live browser
++  /// keep going to that browser's client. Pass NULL to remove the handler. Must
++  /// be called on the browser process UI thread.
++  ///
++  /*--cef(added=experimental,optional_param=handler)--*/
++  virtual void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) = 0;
++#endif
+ };
+ 
+ #endif  // CEF_INCLUDE_CEF_REQUEST_CONTEXT_H_
+diff --git a/include/cef_resource_request_handler.h b/include/cef_resource_request_handler.h
+index 572065b77..7a1c31d1a 100644
+--- a/include/cef_resource_request_handler.h
++++ b/include/cef_resource_request_handler.h
+@@ -181,6 +181,12 @@ class CefResourceRequestHandler : public virtual CefBaseRefCounted {
+   /// methods that modify state (like LoadURL, SendProcessMessage, etc.) if the
+   /// frame is invalid.
+   ///
++  /// A request that was kept alive as a download after its browser was closed
++  /// is not reported as aborted. Its single completion arrives later with the
++  /// original |browser| and |frame| (IsValid() is false by then). A kept
++  /// request that is cancelled because its request context is destroyed gets
++  /// no completion.
++  ///
+   /*--cef(optional_param=browser,optional_param=frame)--*/
+   virtual void OnResourceLoadComplete(CefRefPtr<CefBrowser> browser,
+                                       CefRefPtr<CefFrame> frame,
+diff --git a/libcef/browser/browser_context.cc b/libcef/browser/browser_context.cc
+index 456c6c2d4..efcc616b2 100644
+--- a/libcef/browser/browser_context.cc
++++ b/libcef/browser/browser_context.cc
+@@ -15,6 +15,7 @@
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "cef/libcef/browser/context.h"
++#include "cef/libcef/browser/download_manager_delegate_impl.h"
+ #include "cef/libcef/browser/media_router/media_router_manager.h"
+ #include "cef/libcef/browser/request_context_impl.h"
+ #include "cef/libcef/browser/thread_util.h"
+@@ -223,6 +224,9 @@ void CefBrowserContext::Shutdown() {
+   // Unregister the context first to avoid re-entrancy during shutdown.
+   g_manager.Get().RemoveImpl(this, cache_path_);
+ 
++  // Release the client's download handler before the profile goes away.
++  download_handler_ = nullptr;
++
+   // Destroy objects that may hold references to the MediaRouter.
+   media_router_manager_.reset();
+ 
+@@ -230,6 +234,24 @@ void CefBrowserContext::Shutdown() {
+   weak_ptr_factory_.InvalidateWeakPtrs();
+ }
+ 
++void CefBrowserContext::SetDownloadHandler(
++    CefRefPtr<CefDownloadHandler> handler) {
++  CEF_REQUIRE_UIT();
++#if DCHECK_IS_ON()
++  DCHECK(!is_shutdown_);
++#endif
++  download_handler_ = handler;
++  if (!handler) {
++    return;
++  }
++
++  // Make sure the download manager exists so that downloads restored from
++  // history reach the handler without waiting for a new download.
++  AsBrowserContext()->GetDownloadManager();
++  CefDownloadManagerDelegateImpl::AnnounceItemsWithoutBrowser(
++      AsBrowserContext());
++}
++
+ void CefBrowserContext::AddCefRequestContext(CefRequestContextImpl* context) {
+   CEF_REQUIRE_UIT();
+   request_context_set_.insert(context);
+diff --git a/libcef/browser/browser_context.h b/libcef/browser/browser_context.h
+index 4565128ee..543076d15 100644
+--- a/libcef/browser/browser_context.h
++++ b/libcef/browser/browser_context.h
+@@ -14,6 +14,7 @@
+ #include "base/functional/callback.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/task/sequenced_task_runner_helpers.h"
++#include "cef/include/cef_download_handler.h"
+ #include "cef/include/cef_request_context_handler.h"
+ #include "cef/libcef/browser/iothread_state.h"
+ #include "cef/libcef/browser/request_context_handler_map.h"
+@@ -192,6 +193,14 @@ class CefBrowserContext {
+   using Getter = base::RepeatingCallback<CefBrowserContext*()>;
+   Getter getter() const { return getter_; }
+ 
++  // Download handler for items without a live browser (see
++  // CefRequestContext::SetDownloadHandler). UI thread only. Setting a handler
++  // announces the existing download items to it.
++  CefRefPtr<CefDownloadHandler> download_handler() const {
++    return download_handler_;
++  }
++  void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler);
++
+  protected:
+   explicit CefBrowserContext(const CefRequestContextSettings& settings);
+   virtual ~CefBrowserContext();
+@@ -225,6 +234,8 @@ class CefBrowserContext {
+   // Map IDs to CefRequestContextHandler objects.
+   CefRequestContextHandlerMap handler_map_;
+ 
++  CefRefPtr<CefDownloadHandler> download_handler_;
++
+   // Set of global IDs associated with this context.
+   using RenderIdSet = std::set<content::GlobalRenderFrameHostId>;
+   RenderIdSet render_id_set_;
+diff --git a/libcef/browser/download_manager_delegate_impl.cc b/libcef/browser/download_manager_delegate_impl.cc
+index e5363cc46..45f319de0 100644
+--- a/libcef/browser/download_manager_delegate_impl.cc
++++ b/libcef/browser/download_manager_delegate_impl.cc
+@@ -4,15 +4,19 @@
+ 
+ #include "cef/libcef/browser/download_manager_delegate_impl.h"
+ 
++#include <set>
+ #include <tuple>
++#include <vector>
+ 
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
++#include "base/no_destructor.h"
+ #include "base/path_service.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "cef/include/cef_download_handler.h"
++#include "cef/libcef/browser/browser_context.h"
+ #include "cef/libcef/browser/browser_host_base.h"
+ #include "cef/libcef/browser/context.h"
+ #include "cef/libcef/browser/download_item_impl.h"
+@@ -43,6 +47,23 @@ CefRefPtr<CefDownloadHandler> GetDownloadHandler(
+   return nullptr;
+ }
+ 
++// Noche: the download handler of the item's profile, used for items without a
++// live browser.
++CefRefPtr<CefDownloadHandler> GetProfileDownloadHandler(DownloadItem* item) {
++  auto* context = content::DownloadItemUtils::GetBrowserContext(item);
++  auto* cef_context =
++      context ? CefBrowserContext::FromBrowserContext(context) : nullptr;
++  return cef_context ? cef_context->download_handler() : nullptr;
++}
++
++// Live delegates, so that CefBrowserContext::SetDownloadHandler can reach the
++// one that belongs to its profile. UI thread only.
++std::set<CefDownloadManagerDelegateImpl*>& Instances() {
++  static base::NoDestructor<std::set<CefDownloadManagerDelegateImpl*>>
++      instances;
++  return *instances;
++}
++
+ void RunDownloadTargetCallback(download::DownloadTargetCallback callback,
+                                const base::FilePath& path) {
+   download::DownloadTargetInfo target_info;
+@@ -268,10 +289,14 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+         // IN_PROGRESS_INTERNAL state (not TARGET_PENDING_INTERNAL which also
+         // maps to external IN_PROGRESS state).
+         if (item->GetFullPath().empty()) {
+-          // Still in TARGET_PENDING_INTERNAL, retry later.
+-          CEF_POST_TASK(
+-              CEF_UIT,
+-              base::BindOnce(&CefDownloadItemCallbackImpl::DoPause, this));
++          // Still in TARGET_PENDING_INTERNAL, retry later. Noche: bounded, so
++          // an item that never gets a path cannot spin forever.
++          if (++retries_ <= kMaxRetries) {
++            CEF_POST_DELAYED_TASK(
++                CEF_UIT,
++                base::BindOnce(&CefDownloadItemCallbackImpl::DoPause, this),
++                kRetryDelayMs);
++          }
+           return;
+         }
+         item->Pause();
+@@ -290,10 +315,14 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+         // Verify the download has a full path if it's in IN_PROGRESS state.
+         if (item->GetState() == DownloadItem::IN_PROGRESS &&
+             item->GetFullPath().empty()) {
+-          // Still in TARGET_PENDING_INTERNAL, retry later.
+-          CEF_POST_TASK(
+-              CEF_UIT,
+-              base::BindOnce(&CefDownloadItemCallbackImpl::DoResume, this));
++          // Still in TARGET_PENDING_INTERNAL, retry later (bounded, see
++          // DoPause).
++          if (++retries_ <= kMaxRetries) {
++            CEF_POST_DELAYED_TASK(
++                CEF_UIT,
++                base::BindOnce(&CefDownloadItemCallbackImpl::DoResume, this),
++                kRetryDelayMs);
++          }
+           return;
+         }
+         item->Resume(true);
+@@ -301,8 +330,12 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+     }
+   }
+ 
++  static constexpr int kMaxRetries = 50;
++  static constexpr int kRetryDelayMs = 100;
++
+   base::WeakPtr<DownloadManager> manager_;
+   uint32_t download_id_;
++  int retries_ = 0;
+ 
+   IMPLEMENT_REFCOUNTING(CefDownloadItemCallbackImpl);
+ };
+@@ -313,6 +346,7 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
+     DownloadManager* manager)
+     : manager_(manager), manager_ptr_factory_(manager) {
+   DCHECK(manager);
++  Instances().insert(this);
+   manager->AddObserver(this);
+ 
+   DownloadManager::DownloadVector items;
+@@ -323,14 +357,40 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
+ }
+ 
+ CefDownloadManagerDelegateImpl::~CefDownloadManagerDelegateImpl() {
++  Instances().erase(this);
+   ResetManager();
+ }
+ 
++// static
++void CefDownloadManagerDelegateImpl::AnnounceItemsWithoutBrowser(
++    content::BrowserContext* context) {
++  CEF_REQUIRE_UIT();
++  for (auto* delegate : Instances()) {
++    if (!delegate->manager_ ||
++        delegate->manager_->GetBrowserContext() != context) {
++      continue;
++    }
++    // Copy first: a handler may trigger changes to the map.
++    std::vector<raw_ptr<DownloadItem>> items;
++    for (const auto& [item, browser] : delegate->item_browser_map_) {
++      if (!browser) {
++        items.push_back(item);
++      }
++    }
++    for (DownloadItem* item : items) {
++      delegate->NotifyProfileHandler(item);
++    }
++  }
++}
++
+ void CefDownloadManagerDelegateImpl::OnDownloadUpdated(DownloadItem* download) {
+   CefRefPtr<CefBrowserHostBase> browser = GetBrowser(download);
+   CefRefPtr<CefDownloadHandler> handler;
+   if (browser.get()) {
+     handler = GetDownloadHandler(browser);
++  } else {
++    // Noche: no live browser (tab closed, or restored from history).
++    handler = GetProfileDownloadHandler(download);
+   }
+ 
+   if (handler.get()) {
+@@ -345,6 +405,22 @@ void CefDownloadManagerDelegateImpl::OnDownloadUpdated(DownloadItem* download) {
+   }
+ }
+ 
++void CefDownloadManagerDelegateImpl::NotifyProfileHandler(DownloadItem* item) {
++  if (!GetBrowser(item)) {
++    OnDownloadUpdated(item);
++  }
++}
++
++void CefDownloadManagerDelegateImpl::AssociateWithoutBrowser(
++    DownloadItem* item) {
++  if (item_browser_map_.find(item) != item_browser_map_.end()) {
++    return;
++  }
++  // OnDownloadDestroyed expects every observed item to be in the map.
++  item->AddObserver(this);
++  item_browser_map_.insert(std::make_pair(item, nullptr));
++}
++
+ void CefDownloadManagerDelegateImpl::OnDownloadDestroyed(DownloadItem* item) {
+   item->RemoveObserver(this);
+ 
+@@ -379,6 +455,15 @@ void CefDownloadManagerDelegateImpl::OnDownloadCreated(DownloadManager* manager,
+   // This callback may arrive after DetermineDownloadTarget, so we allow
+   // association from either method.
+   CefRefPtr<CefBrowserHostBase> browser = GetOrAssociateBrowser(item);
++  if (!browser && item->GetDownloadCreationType() ==
++                      DownloadItem::TYPE_HISTORY_IMPORT) {
++    // Noche: an item restored from history has no WebContents and is not a
++    // rejected download. Cancelling it would destroy the partial file of an
++    // interrupted download, so keep it and announce it to the profile handler.
++    AssociateWithoutBrowser(item);
++    NotifyProfileHandler(item);
++    return;
++  }
+   if (!browser) {
+     // If the download is rejected (e.g. ALT+click on an invalid protocol link)
+     // then an "interrupted" download will be started via DownloadManagerImpl::
+@@ -407,6 +492,21 @@ bool CefDownloadManagerDelegateImpl::DetermineDownloadTarget(
+   // from either method.
+   CefRefPtr<CefBrowserHostBase> browser = GetOrAssociateBrowser(item);
+   if (!browser) {
++    // Noche: an item restored from history (or whose tab is gone) that already
++    // has a target keeps it. Returning false here made Chrome's target
++    // determiner re-pick the default Downloads directory on resume.
++    if (!item->GetTargetFilePath().empty()) {
++      download::DownloadTargetInfo target_info;
++      target_info.target_path = item->GetTargetFilePath();
++      target_info.intermediate_path = item->GetFullPath().empty()
++                                          ? item->GetTargetFilePath()
++                                          : item->GetFullPath();
++      target_info.danger_type = item->GetDangerType();
++      target_info.target_disposition = item->GetTargetDisposition();
++      target_info.insecure_download_status = item->GetInsecureDownloadStatus();
++      std::move(*callback).Run(std::move(target_info));
++      return true;
++    }
+     return false;
+   }
+ 
+@@ -473,8 +573,9 @@ void CefDownloadManagerDelegateImpl::OnBrowserDestroyed(
+   for (auto& [item, item_browser] : item_browser_map_) {
+     if (item_browser == browser) {
+       // Don't call back into browsers that have been destroyed. We're not
+-      // canceling the download so it will continue silently until it completes
+-      // or until the associated browser context is destroyed.
++      // canceling the download so it will continue until it completes or until
++      // the associated browser context is destroyed. Updates now go to the
++      // profile download handler, if one is set.
+       item_browser = nullptr;
+     }
+   }
+diff --git a/libcef/browser/download_manager_delegate_impl.h b/libcef/browser/download_manager_delegate_impl.h
+index 5843c0d8e..c68f0df01 100644
+--- a/libcef/browser/download_manager_delegate_impl.h
++++ b/libcef/browser/download_manager_delegate_impl.h
+@@ -6,6 +6,7 @@
+ #define CEF_LIBCEF_BROWSER_DOWNLOAD_MANAGER_DELEGATE_IMPL_H_
+ #pragma once
+ 
++#include <map>
+ #include <set>
+ 
+ #include "base/memory/raw_ptr.h"
+@@ -33,6 +34,10 @@ class CefDownloadManagerDelegateImpl
+ 
+   ~CefDownloadManagerDelegateImpl() override;
+ 
++  // Announces every item of |context| that has no live browser to the
++  // context's profile download handler (CefBrowserContext::download_handler).
++  static void AnnounceItemsWithoutBrowser(content::BrowserContext* context);
++
+  private:
+   // DownloadItem::Observer methods.
+   void OnDownloadUpdated(download::DownloadItem* item) override;
+@@ -55,6 +60,14 @@ class CefDownloadManagerDelegateImpl
+       download::DownloadItem* item);
+   CefRefPtr<CefBrowserHostBase> GetBrowser(download::DownloadItem* item);
+ 
++  // Observes |item| without an associated browser (a download restored from
++  // history, which has no WebContents).
++  void AssociateWithoutBrowser(download::DownloadItem* item);
++
++  // Calls the profile download handler, if any, for an item that has no live
++  // browser.
++  void NotifyProfileHandler(download::DownloadItem* item);
++
+   void ResetManager();
+ 
+   raw_ptr<content::DownloadManager> manager_;
+diff --git a/libcef/browser/net_service/resource_request_handler_wrapper.cc b/libcef/browser/net_service/resource_request_handler_wrapper.cc
+index efabfd257..281d51090 100644
+--- a/libcef/browser/net_service/resource_request_handler_wrapper.cc
++++ b/libcef/browser/net_service/resource_request_handler_wrapper.cc
+@@ -110,6 +110,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+       request_ = request;
+       request_was_redirected_ = request_was_redirected;
+       was_custom_handled_ = false;
++      response_received_ = false;
+       cancel_callback_ = std::move(cancel_callback);
+     }
+ 
+@@ -121,6 +122,12 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     raw_ptr<network::ResourceRequest> request_;
+     bool request_was_redirected_ = false;
+     bool was_custom_handled_ = false;
++    // Noche: a final (non-redirect) response was received from the network.
++    bool response_received_ = false;
++    // Noche: set when the browser is destroyed while the request is kept alive
++    // (see OnDestroyed). Held so the one real completion can still be reported.
++    CefRefPtr<CefBrowser> kept_browser_;
++    CefRefPtr<CefFrame> kept_frame_;
+     bool accept_language_added_ = false;
+     CancelRequestCallback cancel_callback_;
+   };
+@@ -203,24 +210,24 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+       browser->RemoveObserver(this);
+       registered_ = false;
+       browser_info_ = nullptr;
+-      NotifyOnDestroyed();
++      NotifyOnDestroyed(/*from_browser=*/true);
+     }
+ 
+     void OnContextDestroyed() override {
+       CEF_REQUIRE_UIT();
+       CefContext::Get()->RemoveObserver(this);
+       registered_ = false;
+-      NotifyOnDestroyed();
++      NotifyOnDestroyed(/*from_browser=*/false);
+     }
+ 
+    private:
+-    void NotifyOnDestroyed() {
++    void NotifyOnDestroyed(bool from_browser) {
+       if (wrapper_.MaybeValid()) {
+         // This will be a no-op if the WeakPtr is invalid.
+         CEF_POST_TASK(
+             CEF_IOT,
+             base::BindOnce(&InterceptedRequestHandlerWrapper::OnDestroyed,
+-                           wrapper_));
++                           wrapper_, from_browser));
+       }
+     }
+ 
+@@ -408,6 +415,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+ 
+     // There should be no in-progress requests during destruction.
+     DCHECK(request_map_.empty());
++    kept_request_map_.clear();
+ 
+     // Don't continue with initialization if we get deleted before
+     // SetInitialized is called asynchronously.
+@@ -426,11 +434,11 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     // we won't get an OnDestroyed callback from DestructionObserver.
+     if (init_state_->browser_) {
+       if (!init_state_->browser_->browser_info()->browser()) {
+-        OnDestroyed();
++        OnDestroyed(/*from_browser=*/false);
+         return;
+       }
+     } else if (!CONTEXT_STATE_VALID()) {
+-      OnDestroyed();
++      OnDestroyed(/*from_browser=*/false);
+       return;
+     }
+ 
+@@ -520,6 +528,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     CEF_REQUIRE_IOT();
+ 
+     if (shutting_down_) {
++      CancelKeptRequests();
+       return;
+     }
+ 
+@@ -532,7 +541,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+       return;
+     }
+ 
+-    OnDestroyed();
++    OnDestroyed(/*from_browser=*/false);
+   }
+ 
+   void OnBeforeRequest(int32_t request_id,
+@@ -900,6 +909,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+       return;
+     }
+ 
++    if (!redirect_info.has_value()) {
++      state->response_received_ = true;
++    }
++
+     if (state->cookie_filter_) {
+       // Remove the flags that were added in ContinueWithLoadedCookies.
+       request->load_flags &= ~kLoadNoCookiesFlags;
+@@ -1124,6 +1137,17 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+                          bool& handled_externally) override {
+     CEF_REQUIRE_IOT();
+ 
++    // Noche: a request kept alive past its browser reports its one real
++    // completion here.
++    if (auto kept = kept_request_map_.find(request_id);
++        kept != kept_request_map_.end()) {
++      auto state = std::move(kept->second);
++      kept_request_map_.erase(kept);
++      CallHandlerOnComplete(state.get(), status, state->kept_browser_,
++                            state->kept_frame_);
++      return;
++    }
++
+     RequestState* state = GetState(request_id);
+     if (!state) {
+       // The request may have been aborted during initialization or canceled
+@@ -1177,6 +1201,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+  private:
+   void CallHandlerOnComplete(RequestState* state,
+                              const network::URLLoaderCompletionStatus& status) {
++    CallHandlerOnComplete(state, status, init_state_->browser_,
++                          init_state_->GetFrame());
++  }
++
++  void CallHandlerOnComplete(RequestState* state,
++                             const network::URLLoaderCompletionStatus& status,
++                             CefRefPtr<CefBrowser> browser,
++                             CefRefPtr<CefFrame> frame) {
+     if (!state->handler_ || !state->pending_request_) {
+       return;
+     }
+@@ -1198,8 +1230,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     state->pending_response_->SetReadOnly(true);
+ 
+     state->handler_->OnResourceLoadComplete(
+-        init_state_->browser_, init_state_->GetFrame(),
+-        state->pending_request_.get(), state->pending_response_.get(),
++        browser, frame, state->pending_request_.get(),
++        state->pending_response_.get(),
+         status.error_code == 0 ? UR_SUCCESS : UR_FAILED,
+         status.encoded_body_length.InBytes());
+   }
+@@ -1285,12 +1317,19 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+   }
+ 
+   // Stop accepting new requests and cancel pending/in-flight requests when the
+-  // CEF context or associated browser is destroyed.
+-  void OnDestroyed() {
++  // CEF context or associated browser is destroyed. Noche: when only the
++  // browser is destroyed (|from_browser|), an in-flight request whose network
++  // response has already arrived is not canceled. Such a request may have been
++  // taken over by a download, which must outlive the tab; any other request is
++  // still torn down by its client pipe closing.
++  void OnDestroyed(bool from_browser) {
+     CEF_REQUIRE_IOT();
+     DCHECK(init_state_);
+ 
+     if (shutting_down_) {
++      if (!from_browser) {
++        CancelKeptRequests();
++      }
+       return;
+     }
+ 
+@@ -1310,8 +1349,15 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     RequestMap request_map;
+     request_map.swap(request_map_);
+ 
+-    // Notify handlers for in-progress requests.
++    // Notify handlers for in-progress requests. A request that is kept alive
++    // is not reported as aborted: it reports its real completion later.
+     for (const auto& [key, value] : request_map) {
++      if (from_browser && value->response_received_ &&
++          !value->was_custom_handled_) {
++        value->kept_browser_ = init_state_->browser_;
++        value->kept_frame_ = init_state_->GetFrame();
++        continue;
++      }
+       CallHandlerOnComplete(
+           value.get(), network::URLLoaderCompletionStatus(net::ERR_ABORTED));
+     }
+@@ -1330,6 +1376,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+ 
+     for (auto& [key, value] : request_map) {
+       auto state = std::move(value);
++      if (from_browser && state->response_received_ &&
++          !state->was_custom_handled_) {
++        // Keep the request alive and remember it, so that OnRequestComplete
++        // reports its real completion once.
++        state->request_ = nullptr;
++        kept_request_map_.emplace(key, std::move(state));
++        continue;
++      }
+       if (state->cancel_callback_) {
+         // The cancel callback may trigger a call to OnRequestComplete followed
+         // by destruction of the InterceptedRequest that owns the
+@@ -1342,6 +1396,17 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     }
+   }
+ 
++  // Context destruction after a browser destruction: cancel what was kept.
++  void CancelKeptRequests() {
++    RequestMap kept;
++    kept.swap(kept_request_map_);
++    for (auto& [key, state] : kept) {
++      if (state->cancel_callback_) {
++        std::move(state->cancel_callback_).Run(net::ERR_ABORTED);
++      }
++    }
++  }
++
+   static CefRefPtr<CefRequestImpl> MakeRequest(
+       const network::ResourceRequest* request,
+       int64_t request_id,
+@@ -1368,6 +1433,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+ 
+   using RequestMap = std::map<int32_t, std::unique_ptr<RequestState>>;
+   RequestMap request_map_;
++  RequestMap kept_request_map_;
+ 
+   using PendingRequests = std::vector<std::unique_ptr<PendingRequest>>;
+   PendingRequests pending_requests_;
+diff --git a/libcef/browser/request_context_impl.cc b/libcef/browser/request_context_impl.cc
+index 40dc0900a..ae85f6b56 100644
+--- a/libcef/browser/request_context_impl.cc
++++ b/libcef/browser/request_context_impl.cc
+@@ -644,6 +644,15 @@ void CefRequestContextImpl::SetChromeColorScheme(cef_color_variant_t variant,
+                      variant, user_color));
+ }
+ 
++void CefRequestContextImpl::SetDownloadHandler(
++    CefRefPtr<CefDownloadHandler> handler) {
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  GetBrowserContext(
++      content::GetUIThreadTaskRunner({}),
++      base::BindOnce(&CefRequestContextImpl::SetDownloadHandlerInternal, this,
++                     handler));
++}
++
+ cef_color_variant_t CefRequestContextImpl::GetChromeColorSchemeMode() {
+   if (!VerifyBrowserContext()) {
+     return CEF_COLOR_VARIANT_SYSTEM;
+@@ -989,6 +998,15 @@ void CefRequestContextImpl::SetContentSettingInternal(
+   }
+ }
+ 
++void CefRequestContextImpl::SetDownloadHandlerInternal(
++    CefRefPtr<CefDownloadHandler> handler,
++    CefBrowserContext::Getter browser_context_getter) {
++  auto* browser_context = browser_context_getter.Run();
++  if (browser_context) {
++    browser_context->SetDownloadHandler(handler);
++  }
++}
++
+ void CefRequestContextImpl::SetChromeColorSchemeInternal(
+     cef_color_variant_t variant,
+     cef_color_t user_color,
+diff --git a/libcef/browser/request_context_impl.h b/libcef/browser/request_context_impl.h
+index 7a61f4a5f..f493d9729 100644
+--- a/libcef/browser/request_context_impl.h
++++ b/libcef/browser/request_context_impl.h
+@@ -147,6 +147,7 @@ class CefRequestContextImpl : public CefRequestContext {
+   cef_color_variant_t GetChromeColorSchemeMode() override;
+   cef_color_t GetChromeColorSchemeColor() override;
+   cef_color_variant_t GetChromeColorSchemeVariant() override;
++  void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) override;
+ 
+   const CefRequestContextSettings& settings() const { return config_.settings; }
+ 
+@@ -224,6 +225,10 @@ class CefRequestContextImpl : public CefRequestContext {
+       cef_color_t user_color,
+       CefBrowserContext::Getter browser_context_getter);
+ 
++  void SetDownloadHandlerInternal(
++      CefRefPtr<CefDownloadHandler> handler,
++      CefBrowserContext::Getter browser_context_getter);
++
+   void InitializeCookieManagerInternal(
+       CefRefPtr<CefCookieManagerImpl> cookie_manager,
+       CefRefPtr<CefCompletionCallback> callback);
+diff --git a/patch/patch.cfg b/patch/patch.cfg
+index 75f5886c6..9c04a2bc6 100644
+--- a/patch/patch.cfg
++++ b/patch/patch.cfg
+@@ -942,5 +942,17 @@ patches = [
+   {
+     # Noche: no zoom bubble for CEF Views-hosted Browsers (zoom still works).
+     'name': 'chrome_browser_ui_zoom_bubble',
++  },
++  {
++    # Noche: keep a paused download through a clean quit (interrupted with the
++    # partial file kept, like crash recovery) behind
++    # download::features::kKeepPausedDownloadsAtShutdown.
++    'name': 'content_download_keep_paused',
++  },
++  {
++    # Noche: SharedTabGroupFeedbackController stops observing the tab group
++    # sync service before it clears its Browser (crash in
++    # MaybeShowFeedbackActionInToolbar during an early quit).
++    'name': 'chrome_browser_ui_tab_group_feedback_guard',
+   }
+ ]
+diff --git a/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch b/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
+new file mode 100644
+index 000000000..cd1a23858
+--- /dev/null
++++ b/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
+@@ -0,0 +1,26 @@
++diff --git chrome/browser/ui/tabs/saved_tab_groups/shared_tab_group_feedback_controller.cc chrome/browser/ui/tabs/saved_tab_groups/shared_tab_group_feedback_controller.cc
++index 9ffd504a9c4fb807886c0e7ad65a37458d001a73..700c85cc9f305547aa031d04d21d5ee9b965fd2b 100644
++--- chrome/browser/ui/tabs/saved_tab_groups/shared_tab_group_feedback_controller.cc
+++++ chrome/browser/ui/tabs/saved_tab_groups/shared_tab_group_feedback_controller.cc
++@@ -59,6 +59,9 @@ void SharedTabGroupFeedbackController::Init() {
++ 
++ void SharedTabGroupFeedbackController::TearDown() {
++   browser_->GetTabStripModel()->RemoveObserver(this);
+++  // Noche: stop sync service notifications (OnInitialized can arrive during an
+++  // early quit) before |browser_| is cleared.
+++  tab_group_sync_observer_.Reset();
++   browser_ = nullptr;
++ }
++ 
++@@ -85,6 +88,11 @@ void SharedTabGroupFeedbackController::UpdateFeedbackButtonVisibility(
++ }
++ 
++ void SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar() {
+++  if (!browser_) {
+++    // Torn down already.
+++    return;
+++  }
+++
++   // Show the feedback button if there are any shared tab groups open.
++   bool should_show_button = false;
++   std::vector<TabGroupId> local_group_ids =
+diff --git a/patch/patches/content_download_keep_paused.patch b/patch/patches/content_download_keep_paused.patch
+new file mode 100644
+index 000000000..248eca108
+--- /dev/null
++++ b/patch/patches/content_download_keep_paused.patch
+@@ -0,0 +1,89 @@
++diff --git components/download/internal/common/download_item_impl.cc components/download/internal/common/download_item_impl.cc
++index 48b41ef91ab2c3c70a0b0bccb12dd6a7319f5416..65de53a33daafba314d26b22378e58f549d2dec4 100644
++--- components/download/internal/common/download_item_impl.cc
+++++ components/download/internal/common/download_item_impl.cc
++@@ -750,6 +750,19 @@ void DownloadItemImpl::Cancel(bool user_cancel) {
++   UpdateObservers();
++ }
++ 
+++void DownloadItemImpl::InterruptForShutdownKeepPartial() {
+++  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+++  if (state_ != IN_PROGRESS_INTERNAL || !IsPaused()) {
+++    Cancel(false);
+++    return;
+++  }
+++  // CRASH resumes as USER_CONTINUE, which keeps the partial file. The hash
+++  // state is dropped, so a resume re-hashes the partial file.
+++  InterruptWithPartialState(GetReceivedBytes(), std::nullopt,
+++                            DOWNLOAD_INTERRUPT_REASON_CRASH);
+++  UpdateObservers();
+++}
+++
++ void DownloadItemImpl::Remove() {
++   DVLOG(20) << __func__ << "() download = " << DebugString(true);
++   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++diff --git components/download/public/common/download_features.cc components/download/public/common/download_features.cc
++index c3d158eab25d52be1ebb21d3533e9d9779b470f5..54465a29364e94e4c7c8d7781da464050fdd84b5 100644
++--- components/download/public/common/download_features.cc
+++++ components/download/public/common/download_features.cc
++@@ -101,6 +101,9 @@ BASE_FEATURE(kRetrieveDisplayNamesForHistoryDownloads,
++ 
++ BASE_FEATURE(kDeferredDownloadHistoryLoading,
++              base::FEATURE_DISABLED_BY_DEFAULT);
+++
+++BASE_FEATURE(kKeepPausedDownloadsAtShutdown,
+++             base::FEATURE_DISABLED_BY_DEFAULT);
++ }  // namespace features
++ 
++ }  // namespace download
++diff --git components/download/public/common/download_features.h components/download/public/common/download_features.h
++index 1523fb89e5fec509c5b4b062b9749831a3df45b2..bb221cc49b79cecbf9b32aa6dbc62633109117b6 100644
++--- components/download/public/common/download_features.h
+++++ components/download/public/common/download_features.h
++@@ -104,6 +104,12 @@ COMPONENTS_DOWNLOAD_EXPORT BASE_DECLARE_FEATURE(
++ // Whether to defer download history loading until first use.
++ COMPONENTS_DOWNLOAD_EXPORT BASE_DECLARE_FEATURE(
++     kDeferredDownloadHistoryLoading);
+++
+++// Noche: whether a paused download is interrupted (and its partial file kept
+++// for a later resume) instead of canceled when the download manager shuts
+++// down.
+++COMPONENTS_DOWNLOAD_EXPORT BASE_DECLARE_FEATURE(
+++    kKeepPausedDownloadsAtShutdown);
++ }  // namespace features
++ 
++ }  // namespace download
++diff --git components/download/public/common/download_item_impl.h components/download/public/common/download_item_impl.h
++index 2563d5ba32dc215ed023d5bcf79d7dec2c436090..7875464c834e4533357e1d399c972cc8279560fa 100644
++--- components/download/public/common/download_item_impl.h
+++++ components/download/public/common/download_item_impl.h
++@@ -267,6 +267,11 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
++   void Pause() override;
++   void Resume(bool user_resume) override;
++   void Cancel(bool user_cancel) override;
+++  // Noche: for download manager shutdown. A paused in-progress item becomes
+++  // interrupted with its partial file kept, so that it can be resumed after
+++  // the restart (the shape Chromium restores after a crash). Any other item is
+++  // canceled as by Cancel(false).
+++  void InterruptForShutdownKeepPartial();
++   void Remove() override;
++   void OpenDownload() override;
++   void ShowDownloadInShell() override;
++diff --git content/browser/download/download_manager_impl.cc content/browser/download/download_manager_impl.cc
++index 26a84ddd62426531581cdf99a234bf137465d59d..a7893a315fdfaaf5a245e6a108d34c8cbc7e071c 100644
++--- content/browser/download/download_manager_impl.cc
+++++ content/browser/download/download_manager_impl.cc
++@@ -739,6 +739,13 @@ void DownloadManagerImpl::Shutdown() {
++   for (const auto& it : downloads_by_guid_) {
++     download::DownloadItemImpl* download = it.second;
++     if (download->GetState() == download::DownloadItem::IN_PROGRESS) {
+++      if (base::FeatureList::IsEnabled(
+++              download::features::kKeepPausedDownloadsAtShutdown) &&
+++          download->IsPaused()) {
+++        // Noche: keep a paused download for a resume after the restart.
+++        download->InterruptForShutdownKeepPartial();
+++        continue;
+++      }
++       download->Cancel(false);
++       if (delegate_) {
++         delegate_->OnDownloadCanceledAtShutdown(download);
+-- 
+2.56.0
+
