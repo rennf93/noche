@@ -186,7 +186,7 @@ void End(H h, NSString* what) {
   NSMutableString* d = [NSMutableString stringWithFormat:@"%@: ", what];
   if (ok) [d appendString:@"every assertion held"];
   else { [d appendString:@"FAILED assertions"]; for (auto& f : g_c.failed) [d appendFormat:@" %s", f.c_str()]; }
-  CloseAll(h, [=] { h->finish(ok, d); });
+  CloseAll(h, [=] { SurfRelease(); h->finish(ok, d); });
 }
 
 // ---- cookies ----
@@ -1134,25 +1134,32 @@ unsigned long long DirBytesOf(NSString* dir) {
   for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil]) t += [NSFileManager.defaultManager attributesOfItemAtPath:[dir stringByAppendingPathComponent:n] error:nil].fileSize;
   return t;
 }
-void CheckKeepQuit(H h) {
+// download-keep-quit-control: the same flow with the download finished (small.bin, 4 KB) before the window closes, so no request is kept. It must pass (rc 0)
+// on every engine, which isolates the kept request as the pin in download-keep-quit.
+void CheckKeepQuit(H h, int mode) {  // 0 kept download, 1 finished download, 2 no download
+  const bool control = mode != 0;
   const char* mid = getenv("NOCHE_PROBE_MID_URL");
   const char* dl = getenv("NOCHE_PROBE_DL_DIR");
   if (!mid || !dl) { h->finish(false, @"NOCHE_PROBE_MID_URL / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)"); return; }
-  NSString* midUrl = @(mid);
+  NSString* midUrl = mode == 1 ? [@(mid) stringByReplacingOccurrencesOfString:@"mid.bin" withString:@"small.bin"] : mode == 2 ? Localhost(Page(h, @"index.html?side=B&n=2")) : @(mid);
   NSString* dir = @(dl);
+  const unsigned long long want = mode == 1 ? 4096 : mode == 2 ? 0 : 1000000;
   auto cB = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 1")));
   auto wB = std::make_shared<WP>(Open(*cB, Localhost(Page(h, @"index.html?side=B"))));
   WaitFor(h, 20000, [=] { return Loaded(*wB, (*wB)->first()); }, [=](bool loaded) {
     g_c.Ok("window-loaded", loaded, @"B first tab loaded");
     TabOf((*wB)->view, (*wB)->first())->GetMainFrame()->LoadURL(midUrl.UTF8String);  // becomes the download
-    WaitFor(h, 30000, [=] { return DirBytesOf(dir) > 1000000; }, [=](bool started) {
+    auto t0 = std::make_shared<CFAbsoluteTime>(CFAbsoluteTimeGetCurrent());
+    WaitFor(h, 30000, [=] { return DirBytesOf(dir) >= want && (!control || CFAbsoluteTimeGetCurrent() - *t0 > 2.5); }, [=](bool started) {  // control: the 4 KB download has had time to finish
       g_c.Ok("download-started", started, [NSString stringWithFormat:@"download dir holds %llu bytes", DirBytesOf(dir)]);
       (*wB)->window->Close();
       WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
         const unsigned long long b0 = DirBytesOf(dir);
         Later(2.5, [=] {
           const unsigned long long b1 = DirBytesOf(dir);
-          g_c.Ok("window-closed-download-kept", destroyed && b1 > b0 + 500000, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes over 2.5 s with no window (want growth)", (int)destroyed, b0, b1]);
+          if (mode == 2) g_c.Ok("window-closed-no-download", destroyed, @"window destroyed, no download in this flow");
+          else if (mode == 1) g_c.Ok("download-finished-before-close", destroyed && b0 == 4096 && b1 == 4096, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes (want 4096 both: finished, nothing kept)", (int)destroyed, b0, b1]);
+          else g_c.Ok("window-closed-download-kept", destroyed && b1 > b0 + 500000, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes over 2.5 s with no window (want growth)", (int)destroyed, b0, b1]);
           g_wins.clear(); *wB = nullptr; *cB = nullptr;  // every reference of the probe is released; the download still runs when the engine shuts down
           Later(0.5, [=] { End(h, @"download-keep-quit"); });
         });
@@ -1213,7 +1220,7 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
 
 bool RunProfilesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{ @"profile-dirs" : @0, @"profile-cookie" : @1, @"profile-cookie-2" : @2, @"profile-storage" : @3, @"profile-ext" : @4, @"profile-close" : @5,
-                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12, @"download-keep-quit" : @13 };
+                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12, @"download-keep-quit" : @13, @"download-keep-quit-control" : @14, @"download-keep-quit-none" : @15 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1232,7 +1239,9 @@ bool RunProfilesCheck(NSString* check, const SurfHost& host) {
     case 9: CheckDelete(h); break;
     case 11: CheckUpgrade(h); break;
     case 12: CheckClearCallbacks(h); break;
-    case 13: CheckKeepQuit(h); break;
+    case 13: CheckKeepQuit(h, 0); break;
+    case 14: CheckKeepQuit(h, 1); break;
+    case 15: CheckKeepQuit(h, 2); break;
     default: CheckDelete2(h); break;
   }
   return true;

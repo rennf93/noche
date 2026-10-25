@@ -1,0 +1,119 @@
+Fix round 3 evidence (probe built from the tree of the round 3 commit; engine vendor 156.0.18-noche.3663+g50b4e3d, unchanged)
+
+## download-keep-quit with controls (re-review 2 item 5)
+Same flow in three variants: Profile 1 window navigates, is closed, the probe releases every reference of its own and finishes, the engine quits.
+- download-keep-quit-none (no download) and download-keep-quit-control (small.bin finished before the window closes): PASS, rc 0 on g50b4e3d.
+- download-keep-quit (mid.bin still running, request kept): EXPECTED RED until the engine is rebuilt with the amended 0008 patch: rc 134, probe.log FATAL "DCHECK failed: all_.empty()" at cef/libcef/browser/browser_context.cc:45.
+Output (scripts/probe-engine.sh through the shared lock, one group per call):
+### download-keep-quit-none
+PROBE download-keep-quit-none pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit-control
+PROBE download-keep-quit-control pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit
+PROBE download-keep-quit pass download-keep-quit: every assertion held
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE download-keep-quit fail exit-rc=134 watchdog=0
+rc=1
+probe.log of the red run: [..:FATAL:cef/libcef/browser/browser_context.cc:45] DCHECK failed: all_.empty().
+
+Finding while building the controls: before this round the "none" variant also aborted, with "Object reference incorrectly held at CefShutdown" (shutdown_checker.cc:30). The holder was the probe, not the engine: surfaces.mm kept CefDownloadItemCallback references in the static g_dl_cbs (filled when the global profile handler replayed old downloads for a download-* check), and profiles.mm End() never ran the release that surfaces.mm Done() runs. End() now calls SurfRelease(). So the round 1 and 2 aborts of the keep-context flow were partly this probe leak; the all_.empty() abort remains only for the kept request, which is what the controls show.
+
+## "tab still listed" value on 3663 (KeepComplete)
+PROBE download-keep-complete info tab 2 still listed when the probe closes it: 0 (0 means the engine already closed it when the navigation became a download)
+So the engine closes the tab by itself when the navigation becomes a download; the explicit CloseBrowser in KeepComplete is a no-op there and the contract that is tested is "tab gone". download-keep-stream closes its tab explicitly (the closed line appears 212 ms after CloseBrowser).
+
+## profile-upgrade with return codes (rc captured on the line after the command)
+## GREEN plain build rc=0
+PROBE profile-upgrade info assert page-loaded PASS: document.title of the first tab: 'probe'
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+## GREEN hook build, env unset rc=0
+PROBE profile-upgrade info assert page-loaded PASS: document.title of the first tab: 'probe'
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+## RED hook build, NOCHE_TEST_NO_UPGRADE_FEATURES=1 rc=1
+PROBE profile-upgrade fail exit-rc=134 watchdog=0
+probe strings NOCHE_TEST after plain rebuild: 0
+(rc=1 is probe-engine.sh's own code for the RED run; the probe itself exited 134, the line "fail exit-rc=134".)
+
+## Group results after the probe changes (Fix round 3 gate, g50b4e3d, every call under the shared lock)
+### download-keep-complete load=8.53 9.21 8.02
+PROBE download-keep-complete pass kept-request contract, kept download: every assertion held
+rc=0
+### download-keep-stream load=7.71 8.87 7.98
+PROBE download-keep-stream pass kept-request contract, non-download stream: every assertion held
+rc=0
+### download-keep-quit-none load=14.10 10.42 8.63
+PROBE download-keep-quit-none pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit-control load=5.49 8.06 7.96
+PROBE download-keep-quit-control pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit load=7.23 7.94 7.91
+PROBE download-keep-quit pass download-keep-quit: every assertion held
+PROBE download-keep-quit fail exit-rc=134 watchdog=0
+rc=1
+### download-tab-close load=8.02 7.94 7.91
+PROBE download-tab-close pass tab-close download (navigation variant): every assertion held
+rc=0
+### download-tab-close-start load=9.24 8.24 8.02
+PROBE download-tab-close-start pass tab-close download (StartDownload variant): every assertion held
+rc=0
+### download-restart-1 download-restart-2 load=5.99 7.48 7.75
+PROBE download-restart-1 pass launch 1: paused download recorded (id=117 recv=3014656), quitting with it paused; every assertion held
+PROBE download-restart-2 pass launch 2 (after clean quit): every assertion held
+rc=0
+### download-restart-crash-1 download-restart-crash-2 load=6.81 7.60 7.78
+PROBE download-restart-crash-1 pass killed with SIGKILL by the harness after ready-to-kill
+PROBE download-restart-crash-2 pass launch 2 (after kill -9): every assertion held
+rc=0
+### download-control-cancel-1 download-control-cancel-2 load=5.49 6.92 7.49
+PROBE download-control-cancel-1 pass launch 1: client-cancelled download id=119 recorded (canceled=1)
+PROBE download-control-cancel-2 pass control client-cancelled: every assertion held
+rc=0
+### download-control-rejected load=6.95 6.96 7.45
+PROBE download-control-rejected pass control rejected download: every assertion held
+rc=0
+### download-control-noprofile load=10.23 7.69 7.67
+PROBE download-control-noprofile pass control no profile handler: every assertion held
+rc=0
+### profile-dirs load=10.21 7.81 7.71
+PROBE profile-dirs pass profile-dirs: every assertion held
+rc=0
+### profile-cookie profile-cookie-2 load=8.83 7.83 7.72
+PROBE profile-cookie pass profile-cookie (relaunch half: profile-cookie-2): every assertion held
+PROBE profile-cookie-2 pass profile-cookie-2: every assertion held
+rc=0
+### profile-storage load=12.81 8.97 8.14
+PROBE profile-storage pass profile-storage: every assertion held
+rc=0
+### profile-ext load=5.81 8.41 8.40
+PROBE profile-ext pass profile-ext: every assertion held
+rc=0
+### profile-close load=6.59 8.16 8.31
+PROBE profile-close pass profile-close: every assertion held
+rc=0
+### profile-incognito profile-incognito-2 load=7.00 7.90 8.19
+PROBE profile-incognito pass profile-incognito (relaunch half: profile-incognito-2): every assertion held
+PROBE profile-incognito-2 pass profile-incognito-2: every assertion held
+rc=0
+### profile-clear load=9.25 8.40 8.35
+PROBE profile-clear pass profile-clear: every assertion held
+rc=0
+### profile-delete profile-delete-2 load=7.22 8.13 8.26
+PROBE profile-delete pass profile-delete (relaunch half: profile-delete-2): every assertion held
+PROBE profile-delete-2 pass profile-delete-2: every assertion held
+rc=0
+### profile-upgrade load=6.09 7.55 8.03
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+rc=0
+### profile-clear-callbacks load=5.67 7.15 7.84
+PROBE profile-clear-callbacks pass profile-clear-callbacks: every assertion held
+rc=0
+### ext-loaded load=7.69 7.39 7.87
+PROBE ext-loaded pass service worker answered {"sw":"1.3","count":1,"ids":[1055841134],"activeId":1055841134}
+rc=0
+### switch-latency load=6.81 7.25 7.79
+PROBE switch-latency pass median=10.0ms p90=13.8ms range=8.9..14.0ms (30 timed after 3 warm-up, fixed cycle order) limits median<=16.7ms p90<=33.3ms (Ruling 14); no recent hybrid control (info only); old reference 11.6ms (S1 harness) is met
+rc=0

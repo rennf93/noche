@@ -2,7 +2,7 @@ Fix round 2 evidence (probe binary built from the tree at 49dcb99 for the probe 
 
 ## download-keep-quit: EXPECTED RED UNTIL BUILD
 Probe: Profile 1 window navigates to mid.bin, is closed mid-download (download dir keeps growing with no window), the probe releases every reference of its own and finishes, the engine quits with the kept download running.
-Current engine g50b4e3d: the check's own assertions pass, then the engine aborts at quit (rc 134, DCHECK all_.empty() at cef/libcef/browser/browser_context.cc:45). Run 2 times, same result.
+Current engine g50b4e3d: the check's own assertions pass, then the engine aborts at quit (rc 134, DCHECK all_.empty() at cef/libcef/browser/browser_context.cc:45). Run 4 times in that round (3 solo, once in the gate), same result each time.
 PROBE download-keep-quit info assert window-loaded PASS: B first tab loaded
 PROBE download-keep-quit info assert download-started PASS: download dir holds 1048576 bytes
 PROBE download-keep-quit info assert window-closed-download-kept PASS: window destroyed=1; download dir 1245184 -> 6422528 bytes over 2.5 s with no window (want growth)
@@ -89,7 +89,7 @@ rc=
 ## RED hook build, NOCHE_TEST_NO_UPGRADE_FEATURES=1
 PROBE profile-upgrade fail exit-rc=134 watchdog=0
 rc=
-Plain build strings | grep -c NOCHE_TEST: 0 (see the report gate).
+Plain build strings | grep -c NOCHE_TEST: 0 (see the report gate); the rc= fields of that block were blank (the loop did not capture them); the rc values are in fix-round-3.txt.
 
 ## One-off failing lines for the assertions changed in round 2
 ### ONE-OFF keep-stream-exactly-once | edit in Probes/EngineProbe/surfaces.mm : recs.size() == 1, => recs.size() == 2,

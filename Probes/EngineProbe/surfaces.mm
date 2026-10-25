@@ -21,8 +21,9 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler() { return nullptr; }
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
+void SurfRelease() {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-keep-quit-control", @"download-keep-quit-none", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -1424,6 +1425,7 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler() { return g_ctx_on ? Ce
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return g_dl_on ? CefRefPtr<CefDownloadHandler>(g_dl) : nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return g_perm_on ? CefRefPtr<CefPermissionHandler>(g_perm) : nullptr; }
 void SurfOnLoadEnd(int id, int status) { g_load[id] = status; }
+void SurfRelease() { g_dl_hook = nullptr; g_ctx_hook = nullptr; g_dl_cbs.clear(); }
 
 bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
   if (RunProfilesCheck(check, host)) return true;
