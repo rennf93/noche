@@ -127,7 +127,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, copy) NSString *url;
 @property(nonatomic, readonly, copy) NSString *title;
 @property(nonatomic, readonly) BOOL isLoading, canGoBack, canGoForward;
-/// The page is in HTML fullscreen (CefDisplayHandler::OnFullscreenModeChange).
+/// The page is in HTML fullscreen, asked of the engine per call (CefBrowserHost::IsFullscreen). The CefDisplayHandler::OnFullscreenModeChange
+/// callback is raised only by the Alloy runtime, never by this engine's Chrome-style browsers.
 @property(nonatomic, readonly) BOOL isHTMLFullscreen;
 @property(nonatomic, readonly, nullable) NSImage *favicon;
 /// The address of the icon Chrome reported for the page (the first of its list), nil when the page has none.

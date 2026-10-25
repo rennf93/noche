@@ -428,15 +428,15 @@ extension SelfTest {
         // Another view has focus (not the page, not the pill's field): not the page's Escape.
         ns.makeFirstResponder(nil)
         if let m = unclaimed("while the window itself was the first responder") { return finish(false, m) }
-        // HTML fullscreen: Escape leaves it. A hidden run may not be allowed to enter it.
+        // HTML fullscreen: Escape leaves it. A hidden run may not be allowed to enter it (tab.isHTMLFullscreen asks the engine, CefBrowserHost::IsFullscreen).
         ns.makeFirstResponder(page)
         _ = await evaluate(tab, "document.documentElement.requestFullscreen().catch(() => {}); 1")
         let fsState = await evaluate(tab, "JSON.stringify([document.fullscreenEnabled, document.fullscreenElement === null])") ?? "nil"
-        var note = "HTML fullscreen could not be entered in the hidden run (owner check 14; [fullscreenEnabled, no element] = \(fsState))"
+        var note = "the HTML fullscreen row DID NOT RUN, the page could not enter fullscreen in the hidden run (owner check 14; [fullscreenEnabled, no element] = \(fsState))"
         if await until(5, { tab.isHTMLFullscreen }) {
             if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
             _ = await evaluate(tab, "document.exitFullscreen(); 1")
-            note = "an HTML fullscreen page too"
+            note = "an HTML fullscreen page (entered, IsFullscreen true)"
         }
         // The claim itself still works once the guards are clear.
         ns.makeFirstResponder(page)

@@ -38,7 +38,6 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
 - (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier;
-- (void)browser:(CefRefPtr<CefBrowser>)browser fullscreen:(BOOL)fullscreen;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
@@ -206,10 +205,6 @@ class NCClient : public CefClient,
     if (!f->IsMain()) return;
     NSString* s = @(url.ToString().c_str());
     [w_ browser:b update:^(NCTab* t) { t.url = s; }];
-  }
-  void OnFullscreenModeChange(CefRefPtr<CefBrowser> b, bool fullscreen) override {
-    NC_CEF_CALLBACK;
-    [w_ browser:b fullscreen:fullscreen];
   }
   void OnFaviconURLChange(CefRefPtr<CefBrowser> b, const std::vector<CefString>& urls) override {
     NC_CEF_CALLBACK;
@@ -797,10 +792,6 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
 - (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier {
   NCTab* tab = [self tabFor:browser create:NO];
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFindMatches:count active:ordinal final:final identifier:identifier]; }];
-}
-
-- (void)browser:(CefRefPtr<CefBrowser>)browser fullscreen:(BOOL)fullscreen {
-  if (NCTab* tab = [self tabFor:browser create:NO]) tab.isHTMLFullscreen = fullscreen;
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url {

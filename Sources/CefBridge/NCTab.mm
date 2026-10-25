@@ -74,6 +74,10 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 @synthesize browser = _browser, closeRequested = _closeRequested;
 @synthesize faviconListSeen = _faviconListSeen, clearFaviconAtLoadEnd = _clearFaviconAtLoadEnd, lastLoadURL = _lastLoadURL;
 
+- (BOOL)isHTMLFullscreen {
+  return _browser && _browser->GetHost()->IsFullscreen();
+}
+
 + (instancetype)tabWithBrowser:(CefRefPtr<CefBrowser>)browser {
   NCTab* tab = [[NCTab alloc] initPrivate];
   tab->_browser = browser;
