@@ -29,6 +29,13 @@ def pattern(offset, n):
 
 
 class H(BaseHTTPRequestHandler):
+    # HTTP/1.1: net's HasStrongValidators ignores the ETag of an HTTP/1.0 response, and a download without stored validators restarts from byte 0.
+    protocol_version = "HTTP/1.1"
+
+    def end_headers(self):
+        self.send_header("Connection", "close")  # no keep-alive: bodies are length-less or held open
+        super().end_headers()
+
     def log_message(self, *a): pass
 
     def do_GET(self):
