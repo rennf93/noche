@@ -69,6 +69,8 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("ETag", f'"noche-probe-{name}"')
         self.send_header("Last-Modified", "Sat, 01 Jan 2022 00:00:00 GMT")
+        # Validators alone make the body heuristically fresh, and a later check would get it from the HTTP cache at full speed.
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(size - start))
         if start: self.send_header("Content-Range", f"bytes {start}-{size - 1}/{size}")
         self.end_headers()
