@@ -425,7 +425,7 @@ void DownloadTabClose(H h, bool viaStartDownload) {
   S->push_back([=](Next n) {
     if (viaStartDownload) ById(h, *t2)->GetHost()->StartDownload(MidUrl());
     else Eval(h, *t2, [NSString stringWithFormat:@"location.href = '%s'; 'go'", MidUrl()], false, [](NSString*) {});
-    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().recv > 1000000; }, [=](bool started) {
+    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().inprog && g_dl_events.back().recv > 1000000; }, [=](bool started) {  // inprog: a profile with older downloads replays them first
       if (!started) { Done(h, false, @"download never started in tab 2"); return; }
       *id = g_dl_events.back().id;
       PI(@"download started (%s): %s", viaStartDownload ? "StartDownload" : "navigation", DlStr(g_dl_events.back()).c_str());
