@@ -102,6 +102,13 @@ std::string DlStr(const DlEv& e) {
   snprintf(b, sizeof b, "id=%u browser=%d inProgress=%d paused=%d complete=%d canceled=%d interrupted=%d reason=%d pct=%d recv=%lld total=%lld path=%s t=%.1fs", e.id, e.hasBrowser, e.inprog, e.paused, e.complete, e.canceled, e.interrupted, e.reason, e.pct, (long long)e.recv, (long long)e.total, e.path.c_str(), e.t / 1000);
   return b;
 }
+// A download whose file lands outside NOCHE_PROBE_DL_DIR is cancelled at once (the engine then deletes its partial) and fails the check in Done().
+std::string g_dl_escape;
+NSString* RealPath(const std::string& p) { return [@(p.c_str()) stringByResolvingSymlinksInPath]; }
+bool InsideDlDir(const std::string& path) {
+  if (DlDir().empty() || path.empty()) return true;
+  return [RealPath(path) hasPrefix:[RealPath(DlDir()) stringByAppendingString:@"/"]];
+}
 class DlHandler : public CefDownloadHandler {
  public:
   bool OnBeforeDownload(CefRefPtr<CefBrowser> b, CefRefPtr<CefDownloadItem> item, const CefString& name, CefRefPtr<CefBeforeDownloadCallback> cb) override {
@@ -115,6 +122,11 @@ class DlHandler : public CefDownloadHandler {
     DlEv e{item->GetId(), item->IsInProgress(), item->IsComplete(), item->IsCanceled(), item->IsInterrupted(), item->IsPaused(), b != nullptr, (int)item->GetInterruptReason(), item->GetPercentComplete(), item->GetReceivedBytes(), item->GetTotalBytes(), item->GetFullPath().ToString(), NowMs() - g_t0};
     bool log = g_dl_events.empty();
     if (!log) { auto& l = g_dl_events.back(); log = l.id != e.id || l.inprog != e.inprog || l.paused != e.paused || l.complete != e.complete || l.canceled != e.canceled || l.interrupted != e.interrupted || l.hasBrowser != e.hasBrowser || l.pct / 10 != e.pct / 10; }
+    // Only live items: finished or cancelled rows replayed from History keep the temp dir of an earlier run.
+    if (!e.complete && !e.canceled && !InsideDlDir(e.path)) {
+      if (g_dl_escape.empty()) g_dl_escape = "download id " + std::to_string(e.id) + " targeted " + e.path + " outside NOCHE_PROBE_DL_DIR " + DlDir() + ", cancelled by the probe";
+      if (cb) cb->Cancel();
+    }
     g_dl_events.push_back(e);
     if (cb) g_dl_cbs[e.id] = cb;
     if (log) { printf("PROBE %s info OnDownloadUpdated %s (events so far %zu)\n", g_name.UTF8String, DlStr(e).c_str(), g_dl_events.size()); fflush(stdout); }
@@ -168,6 +180,7 @@ CefRefPtr<CtxHandler> g_ctx;
 // Releases every reference this file keeps, then ends the run.
 void Done(const H& h, bool ok, NSString* d) {
   g_dl_hook = nullptr; g_ctx_hook = nullptr; g_dl_cbs.clear();
+  if (!g_dl_escape.empty()) { ok = false; d = [NSString stringWithFormat:@"%s; %@", g_dl_escape.c_str(), d]; }
   h->finish(ok, d);
 }
 
@@ -289,7 +302,7 @@ constexpr bool kProfileApi = false;  // engine without CefRequestContext::SetDow
 constexpr unsigned long long kMid = 24ull * 1024 * 1024;
 size_t g_log0 = 0;  // length of the server's request log when this launch started
 
-NSString* StateFile() { return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe/download-restart.state"]; }
+NSString* StateFile() { return [(getenv("NOCHE_PROBE_ROOT") ? @(getenv("NOCHE_PROBE_ROOT")) : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"]) stringByAppendingPathComponent:@"download-restart.state"]; }
 NSString* DirListing() {
   NSMutableArray* o = [NSMutableArray array];
   for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:@(DlDir().c_str()) error:nil])
