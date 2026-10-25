@@ -159,7 +159,13 @@ extension SelfTest {
         key("k", code: 40, [.command, .shift], menuOnly: true)
         try? await Task.sleep(for: .milliseconds(300))
         guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "Close All Tabs acted on a blank tab: \(BrowserWindowController.actionCounts)") }
-        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs is disabled and its key does nothing \(violations)")
+        // The New Tab surface hides the page: Find has nothing to search there.
+        guard await until(10, { ctl.newTabShown }) else { return finish(false, "the New Tab surface never showed for the blank tab") }
+        _ = menuLines(bar, path: "bar")
+        for t in ["Find...", "Find Next", "Find Previous", "Use Selection for Find"] {
+            guard let i = menuItem(t), !i.isEnabled else { return finish(false, "\(t) is enabled on the New Tab surface") }
+        }
+        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs and the four Find items are disabled and its key does nothing \(violations)")
     }
 
     /// The items with no shortcut, plus Appearance. (The keyed ones are in shortcuts-once.)

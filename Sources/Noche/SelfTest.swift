@@ -172,6 +172,10 @@ final class SelfTest {
             case "find": await find()
             case "zoom": await zoom()
             case "find-selection": await findSelection()
+            case "find-restart": await findRestart()
+            case "find-nav": await findNavigation()
+            case "find-engine": await findEngine()
+            case "zoom-engine": await zoomEngine()
             default: finish(false, "unknown check")
             }
         }

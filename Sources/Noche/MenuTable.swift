@@ -68,6 +68,8 @@ enum MenuTable {
     private static let sep = E(title: "", separator: true)
 
     /// A working item whose target is the AppDelegate.
+    /// Find acts on a page: not on the New Tab surface, where the page is hidden.
+    private static let pageShown: E.Rule = { $0.window.map { !$0.newTabShown } ?? false }
     private static func app(_ title: String, _ id: String?, _ action: Selector, enabled: @escaping E.Rule = hasWindow, state: E.Rule? = nil, tag: Int = 0) -> E {
         E(title: title, id: id, action: action, enabled: enabled, state: state, tag: tag)
     }
@@ -131,10 +133,10 @@ enum MenuTable {
             std("Select All", #selector(NSText.selectAll(_:)), "edit.selectAll"),
             sep,
             menu("Find", [
-                app("Find...", "edit.find", #selector(AppDelegate.find(_:))),
-                app("Find Next", "edit.findNext", #selector(AppDelegate.findNext(_:))),
-                app("Find Previous", "edit.findPrevious", #selector(AppDelegate.findPrevious(_:))),
-                app("Use Selection for Find", nil, #selector(AppDelegate.useSelectionForFind(_:))),
+                app("Find...", "edit.find", #selector(AppDelegate.find(_:)), enabled: pageShown),
+                app("Find Next", "edit.findNext", #selector(AppDelegate.findNext(_:)), enabled: pageShown),
+                app("Find Previous", "edit.findPrevious", #selector(AppDelegate.findPrevious(_:)), enabled: pageShown),
+                app("Use Selection for Find", nil, #selector(AppDelegate.useSelectionForFind(_:)), enabled: pageShown),
             ]),
             sep,
             menu("Spelling and Grammar", [

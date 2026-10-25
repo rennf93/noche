@@ -36,6 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if hidden { NCWindow.installHiddenGuards() }
+        // Pinch and Cmd+scroll zoom the page inside the engine: the zoom pill reads the level again after each such event.
+        zoomMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify, .scrollWheel]) { [weak self] e in
+            if e.type == .magnify || e.modifierFlags.contains(.command) { DispatchQueue.main.async { MainActor.assumeIsolated { self?.active?.syncZoomSoon() } } }
+            return e
+        }
         let me = ProcessInfo.processInfo.processIdentifier
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.noche.browser")
         if others.contains(where: { $0.processIdentifier != me }) {
@@ -172,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
+    var zoomMonitor: Any?
     var active: BrowserWindowController? { controllers.first { $0.nsWindow?.isKeyWindow == true } ?? controllers.last }
 
     /// A Dock click with no window open makes one. The app never quits when its last window closes, so this is the way back.

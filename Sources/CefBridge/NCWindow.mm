@@ -37,7 +37,7 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
-- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final;
+- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
@@ -137,9 +137,9 @@ class NCClient : public CefClient,
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
 
-  void OnFindResult(CefRefPtr<CefBrowser> b, int, int count, const CefRect&, int ordinal, bool final) override {
+  void OnFindResult(CefRefPtr<CefBrowser> b, int identifier, int count, const CefRect&, int ordinal, bool final) override {
     NC_CEF_CALLBACK;
-    [w_ browser:b foundMatches:count active:ordinal final:final];
+    [w_ browser:b foundMatches:count active:ordinal final:final identifier:identifier];
   }
 
   // The page menu is Noche's: the model is copied inside this call (it must not outlive it) and the host shows an NSMenu.
@@ -776,6 +776,7 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   tab.clearFaviconAtLoadEnd = ![bare isEqualToString:tab.lastLoadURL];
   tab.lastLoadURL = bare;
   tab.faviconListSeen = NO;
+  [self post:^(id<NCWindowDelegate> d) { [d window:self tabDidCommitNewDocument:tab]; }];
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser finishedLoadWithStatus:(int)status {
@@ -788,9 +789,9 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFinishLoadWithStatus:status]; }];
 }
 
-- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final {
+- (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier {
   NCTab* tab = [self tabFor:browser create:NO];
-  if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFindMatches:count active:ordinal final:final]; }];
+  if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFindMatches:count active:ordinal final:final identifier:identifier]; }];
 }
 
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url {

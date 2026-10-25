@@ -44,8 +44,11 @@ NS_SWIFT_UI_ACTOR
 /// The page's context menu: |items| is a copy of Chromium's model, |point| the click in window base coordinates. The host shows its own
 /// menu and calls |completion| exactly once, on the main queue, with the chosen command id (Chromium runs it) or -1 (the menu was dismissed).
 - (void)window:(NCWindow *)window tab:(NCTab *)tab showContextMenu:(NSArray<NCMenuItem *> *)items atWindowPoint:(NSPoint)point completion:(void (^)(NSInteger commandId))completion;
+/// |identifier| grows with every new search of the engine (a later search has a larger one), so a reply of a superseded search is told by it.
 /// Find in page results for |tab| (CefFindHandler::OnFindResult): |count| matches so far, |ordinal| the active one (1 based, 0 for none), |final| when the search is done.
-- (void)window:(NCWindow *)window tab:(NCTab *)tab didFindMatches:(NSInteger)count active:(NSInteger)ordinal final:(BOOL)final;
+/// A main-frame load committed in |tab|: a new document (a reload is one; a same-document navigation is not), which ends a find session.
+- (void)window:(NCWindow *)window tabDidCommitNewDocument:(NCTab *)tab;
+- (void)window:(NCWindow *)window tab:(NCTab *)tab didFindMatches:(NSInteger)count active:(NSInteger)ordinal final:(BOOL)final identifier:(NSInteger)identifier;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR

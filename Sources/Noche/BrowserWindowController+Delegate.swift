@@ -111,6 +111,7 @@ extension BrowserWindowController {
 
     func window(_ window: NCWindow, tab: NCTab, didFinishLoadWithStatus status: Int) {
         recordVisit(tab, status: status)
+        if tab === activeTab { syncZoom() }  // the host zoom of the page that loaded
         app.tabLoaded(tab, status: status)
     }
 
@@ -165,6 +166,7 @@ extension BrowserWindowController {
         case ChromeCommand.find: openFind()
         case ChromeCommand.findNext: findStep(forward: true)
         case ChromeCommand.findPrevious: findStep(forward: false)
+        case ChromeCommand.closeFindOrStop where findShownFor != nil && !BarHook.on("FIND_NOCLOSECMD"): closeFind()  // only while the pill shows; else the engine stops the load
         default: return false
         }
         return true
