@@ -67,9 +67,9 @@ enum MenuTable {
     private static let hasWindow: E.Rule = { $0.window != nil }
     private static let sep = E(title: "", separator: true)
 
-    /// A working item whose target is the AppDelegate.
     /// Find acts on a page: not on the New Tab surface, where the page is hidden.
-    private static let pageShown: E.Rule = { $0.window.map { !$0.newTabShown } ?? false }
+    private static let pageShown: E.Rule = { $0.window.map { !$0.newTabShown || BarHook.on("FIND_NTENABLED") } ?? false }  // the hook is a negative control
+    /// A working item whose target is the AppDelegate.
     private static func app(_ title: String, _ id: String?, _ action: Selector, enabled: @escaping E.Rule = hasWindow, state: E.Rule? = nil, tag: Int = 0) -> E {
         E(title: title, id: id, action: action, enabled: enabled, state: state, tag: tag)
     }

@@ -835,10 +835,12 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
 }
 
 #ifdef NOCHE_TESTHOOKS
+extern NSInteger g_stop_find_calls;
 static NSInteger g_preempted = 0;
 + (NSInteger)testContextMenuContinues { return g_ctx_continues; }
 + (NSInteger)testContextMenuCancels { return g_ctx_cancels; }
 + (NSInteger)testPreemptedKeys { return g_preempted; }
++ (NSInteger)testStopFindCalls { return g_stop_find_calls; }
 #endif
 
 // The one place the claimed chords are listed. Source: chrome/browser/global_keyboard_shortcuts_mac.mm (GetShortcutsNotPresentInMainMenu rows, lines 87 to 174;
@@ -859,7 +861,15 @@ static NSInteger g_preempted = 0;
   });
   NSString* key = event.charactersIgnoringModifiers.lowercaseString;
   if (NC_TEST_FLAG("NOCHE_TEST_NO_PREEMPT")) return NO;  // negative control: the engine's accelerators run first
-  if (![table[key] containsObject:@(m)]) return NO;
+  // Escape: Chromium enables IDC_CLOSE_FIND_OR_STOP only for its own find bar or a running load (browser_command_controller.cc:2726-2728), so on an idle page
+  // it never reaches OnChromeCommand: Noche's find pill closes through this claim, which the delegate grants only while the pill shows.
+  const BOOL escape = event.keyCode == 53 && m == 0;
+  if (escape) {
+    id<NCWindowDelegate> d = _delegate;
+    if (!d || ![d windowShouldClaimEscape:self]) return NO;
+  } else if (![table[key] containsObject:@(m)]) {
+    return NO;
+  }
 #ifdef NOCHE_TESTHOOKS
   g_preempted++;
 #endif

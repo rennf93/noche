@@ -175,6 +175,8 @@ final class SelfTest {
             case "find-restart": await findRestart()
             case "find-nav": await findNavigation()
             case "find-engine": await findEngine()
+            case "find-escape": await findEscape()
+            case "find-escape-page": await findEscapePage()
             case "zoom-engine": await zoomEngine()
             default: finish(false, "unknown check")
             }

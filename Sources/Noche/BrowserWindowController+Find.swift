@@ -95,7 +95,7 @@ extension BrowserWindowController: NSTextFieldDelegate {
         let want = tab.flatMap { finds[$0.identifier] != nil ? $0.identifier : nil }
         guard want != findShownFor else { return }
         // The tab being left (still searching) keeps no highlights; the search re-runs when it is shown again.
-        if let old = findShownFor, finds[old] != nil { window.tabs.first { $0.identifier == old }?.stopFinding(false) }
+        if let old = findShownFor, finds[old] != nil, !BarHook.on("FIND_NOLEAVESTOP") { window.tabs.first { $0.identifier == old }?.stopFinding(false) }
         findShownFor = want
         guard let tab, let want, let state = finds[want] else { findBar.isHidden = true; return }
         findBar.isHidden = false
@@ -131,7 +131,7 @@ extension BrowserWindowController: NSTextFieldDelegate {
     }
 
     func window(_ window: NCWindow, tab: NCTab, didFindMatches count: Int, active ordinal: Int, final: Bool, identifier: Int) {
-        guard var state = finds[tab.identifier], identifier > state.floor else { return }  // closed meanwhile, or a search a newer one replaced
+        guard var state = finds[tab.identifier], identifier > state.floor || BarHook.on("FIND_NOFLOOR") else { return }  // closed meanwhile, or a search a newer one replaced
         state.latest = max(state.latest, identifier)
         // A partial update leaves what it does not know at -1 (and the active match at 0 while it is still counting).
         if count >= 0 { state.count = count }

@@ -41,6 +41,8 @@ NS_SWIFT_UI_ACTOR
 /// A key the engine would take as its own accelerator, which Noche owns instead. The page never sees it: the monitor takes it ahead of the window and the renderer.
 /// Delivered on a later main-queue turn; the bridge has already told the engine the key is handled.
 - (void)window:(NCWindow *)window handlePreemptedKey:(NSEvent *)event;
+/// Asked on the main thread for an Escape key with no modifiers, ahead of the engine: YES claims it (it then arrives as handlePreemptedKey), NO leaves it to the page and the engine.
+- (BOOL)windowShouldClaimEscape:(NCWindow *)window;
 /// The page's context menu: |items| is a copy of Chromium's model, |point| the click in window base coordinates. The host shows its own
 /// menu and calls |completion| exactly once, on the main queue, with the chosen command id (Chromium runs it) or -1 (the menu was dismissed).
 - (void)window:(NCWindow *)window tab:(NCTab *)tab showContextMenu:(NSArray<NCMenuItem *> *)items atWindowPoint:(NSPoint)point completion:(void (^)(NSInteger commandId))completion;
@@ -90,6 +92,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)devToolsClosed;
 /// Test support: keys the bridge claimed before the engine's accelerators (`preemptKey:`), all windows.
 + (NSInteger)testPreemptedKeys;
+/// Test support: `stopFinding:` calls on any tab.
++ (NSInteger)testStopFindCalls;
 /// Test support: Continue and Cancel calls made on the engine's page context menu callbacks, all windows (each shown menu must make exactly one).
 + (NSInteger)testContextMenuContinues;
 + (NSInteger)testContextMenuCancels;

@@ -176,8 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return NSRect(x: area.minX + 100, y: area.maxY - 100 - h, width: w, height: h)
     }
 
-    /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
     var zoomMonitor: Any?
+
+    /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
     var active: BrowserWindowController? { controllers.first { $0.nsWindow?.isKeyWindow == true } ?? controllers.last }
 
     /// A Dock click with no window open makes one. The app never quits when its last window closes, so this is the way back.

@@ -1,4 +1,8 @@
 #import "NCTabInternal.h"
+
+#ifdef NOCHE_TESTHOOKS
+NSInteger g_stop_find_calls = 0;  // read by NCWindow.testStopFindCalls
+#endif
 #include "include/cef_client.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_id_mappers.h"
@@ -118,6 +122,9 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   if (_browser) _browser->GetHost()->Find(text.UTF8String, forward, matchCase, next);
 }
 - (void)stopFinding:(BOOL)clearSelection {
+#ifdef NOCHE_TESTHOOKS
+  g_stop_find_calls++;
+#endif
   if (_browser) _browser->GetHost()->StopFinding(clearSelection);
 }
 

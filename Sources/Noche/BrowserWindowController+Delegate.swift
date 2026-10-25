@@ -134,7 +134,16 @@ extension BrowserWindowController {
     }
 
     /// Chrome commands that duplicate a Noche action run the Noche action and are answered YES.
-    func window(_ window: NCWindow, handlePreemptedKey event: NSEvent) { _ = NSApp.mainMenu?.performKeyEquivalent(with: event) }
+    func window(_ window: NCWindow, handlePreemptedKey event: NSEvent) {
+        if event.keyCode == 53 { closeFind(); return }  // the claimed Escape (windowShouldClaimEscape)
+        _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
+    }
+
+    /// Escape with the page focused closes the find pill: claimed only while the pill shows for the active tab and focus is not in its field (the field handles Escape itself).
+    func windowShouldClaimEscape(_ window: NCWindow) -> Bool {
+        guard let tab = activeTab, findShownFor == tab.identifier, findBar.field.currentEditor() == nil, !commandBar.isOpen else { return false }
+        return true
+    }
 
     func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool {
 #if NOCHE_TESTHOOKS
