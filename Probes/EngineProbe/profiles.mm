@@ -44,7 +44,7 @@ void WaitFor(H h, int timeoutMs, std::function<bool()> cond, std::function<void(
   if (timeoutMs <= 0) { done(false); return; }
   Later(0.1, [=] { WaitFor(h, timeoutMs - 100, cond, done); });
 }
-NSString* Root() { return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"]; }
+NSString* Root() { return (getenv("NOCHE_PROBE_ROOT") ? @(getenv("NOCHE_PROBE_ROOT")) : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"]); }
 NSString* Dir(NSString* n) { return [Root() stringByAppendingPathComponent:n]; }
 bool Exists(NSString* p) { return [NSFileManager.defaultManager fileExistsAtPath:p]; }
 NSString* Page(const H& h, NSString* path) { return [[NSURL URLWithString:path relativeToURL:[NSURL URLWithString:h->url()]] absoluteString]; }
@@ -1026,6 +1026,18 @@ void CheckDelete2(H h) {
   End(h, @"profile-delete-2");
 }
 
+// ---- profile-upgrade ----
+// A profile made by an older engine (run it against a copy, NOCHE_PROBE_ROOT) must start on this engine and load a page. The failure this
+// guards is a startup abort (CefInitialize never returns), so reaching this code at all is most of the proof.
+void CheckUpgrade(H h) {
+  PI(@"profile root %@", Root());
+  auto got = std::make_shared<std::string>();
+  WaitFor(h, 20000, [=] { h->eval(h->first(), @"document.title", false, [=](NSString* r) { *got = r.UTF8String ?: ""; }); return got->find("probe") != std::string::npos; }, [=](bool ok) {
+    g_c.Ok("page-loaded", ok, [NSString stringWithFormat:@"document.title of the first tab: '%s'", got->c_str()]);
+    End(h, @"profile-upgrade");
+  });
+}
+
 }  // namespace
 
 void ProfilesPreEngine(NSString* check, NSString* root) {
@@ -1066,7 +1078,7 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
 
 bool RunProfilesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{ @"profile-dirs" : @0, @"profile-cookie" : @1, @"profile-cookie-2" : @2, @"profile-storage" : @3, @"profile-ext" : @4, @"profile-close" : @5,
-                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10 };
+                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1083,6 +1095,7 @@ bool RunProfilesCheck(NSString* check, const SurfHost& host) {
     case 7: CheckIncognito2(h); break;
     case 8: CheckClear(h); break;
     case 9: CheckDelete(h); break;
+    case 11: CheckUpgrade(h); break;
     default: CheckDelete2(h); break;
   }
   return true;

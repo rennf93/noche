@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble, discard-p1, discard-p1b, discard-p1b-off, discard-p2, discard-p3, discard-api, profile-dirs, profile-cookie, profile-cookie-2, profile-storage, profile-ext, profile-close, profile-incognito, profile-incognito-2, profile-clear, profile-delete, profile-delete-2)
+# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble, discard-p1, discard-p1b, discard-p1b-off, discard-p2, discard-p3, discard-api, profile-dirs, profile-cookie, profile-cookie-2, profile-storage, profile-ext, profile-close, profile-incognito, profile-incognito-2, profile-clear, profile-delete, profile-delete-2, profile-upgrade)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe (store checks: Noche Probe Store, emptied every run). Check names are [a-z0-9-]+.
@@ -20,6 +20,9 @@
 # profile-clear compiles its time-range part only with NOCHE_CLEAR_API=1 (needs CefRequestContext::ClearBrowsingData, patch 0010); without it that part is a failed "clear-api" assertion.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
+# Test-only: NOCHE_PROBE_ROOT=<dir> replaces the probe profile root (profile-upgrade runs against a copy of an old-engine profile).
+# profile-upgrade: NOCHE_PROBE_UPGRADE_FEATURES=1 adds --enable-features=PrepopulatedEnginesMigration,ApplySearchEngineTypeMigration (RED without it on a profile an older engine made).
+PROBE_ROOT="${NOCHE_PROBE_ROOT:-$HOME/Library/Application Support/Noche Probe}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ $# -gt 0 ] || { echo "usage: probe-engine.sh <check>..." >&2; exit 2; }
@@ -67,12 +70,12 @@ crash_reports() { ls "$REPORTS" 2>/dev/null | grep '^Noche Probe.*\.ips$' | sort
 front_pid() { lsappinfo info -only pid "$(lsappinfo front)" 2>/dev/null | sed -n 's/.*pid = \([0-9]*\).*/\1/p' | head -1; }
 # Leftover helpers: PIDs whose command line holds the probe's Frameworks path (literal match, not a regex; the awk itself is skipped).
 helpers() { ps -axo pid=,command= | awk -v p="$APP/Contents/Frameworks" 'index($0, p) && $2 != "awk" { print $1 }'; }
-EXT_DIR="$HOME/Library/Application Support/Noche Probe/Default/Extensions"
+EXT_DIR="$PROBE_ROOT/Default/Extensions"
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
 
 # Copy of the History database (with journal/WAL) queried with sqlite3; prints the query result on one line.
 hist_query() {
-  local hd="$HOME/Library/Application Support/Noche Probe/Default" hc f
+  local hd="$PROBE_ROOT/Default" hc f
   hc="$(mktemp -d)"
   for f in History History-journal History-wal History-shm; do if [ -f "$hd/$f" ]; then cp "$hd/$f" "$hc/$f"; fi; done
   sqlite3 -separator '|' "$hc/History" "$1" 2>&1 | tr '\n' ' '
@@ -90,7 +93,7 @@ for CHECK in "$@"; do
   fi
   REPORTS_BEFORE="$(crash_reports)"
   # probe.log is rewritten by every launch (freopen "w" in main.mm); remove it first so a launch that dies before that cannot show an old launch's lines.
-  rm -f "$HOME/Library/Application Support/Noche Probe/probe.log"
+  rm -f "$PROBE_ROOT/probe.log"
   HIST_MAX0=0
   [[ "$CHECK" == download-control-rejected ]] && HIST_MAX0="$(hist_query 'select coalesce(max(id),0) from downloads' | tr -d ' ')"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
@@ -147,16 +150,16 @@ for CHECK in "$@"; do
   if [ "$RC" != 0 ] && [ "$RC" != 1 ] && [ "$WATCHDOG" = 0 ]; then
     # Exit code 2 is content::RESULT_CODE_HUNG: chrome/browser/shutdown_watchdog_mac.cc _exit()s with it when engine shutdown takes over 10 s
     # (it logs "Teardown watchdog expired"). Seen only under heavy machine load; it is a real failure, shutdown was too slow.
-    if grep -q "Teardown watchdog expired" "$HOME/Library/Application Support/Noche Probe/probe.log" 2>/dev/null; then
+    if grep -q "Teardown watchdog expired" "$PROBE_ROOT/probe.log" 2>/dev/null; then
       echo "PROBE $CHECK fail engine shutdown watchdog fired (exit code $RC = RESULT_CODE_HUNG, shutdown took over 10 s)"
     fi
-    echo "PROBE $CHECK info unexpected exit code $RC (1-minute load $(uptime | sed 's/.*load averages*: *//' | awk '{print $1}')); probe.log tail: $(tail -n 6 "$HOME/Library/Application Support/Noche Probe/probe.log" | cut -c1-200 | tr '\n' '|')"
+    echo "PROBE $CHECK info unexpected exit code $RC (1-minute load $(uptime | sed 's/.*load averages*: *//' | awk '{print $1}')); probe.log tail: $(tail -n 6 "$PROBE_ROOT/probe.log" | cut -c1-200 | tr '\n' '|')"
   fi
   # Independent witness between launches: what the History database holds for the downloads. The app is gone, so copy the database
   # together with its journal/WAL files into a temp dir (a copy of History alone misses rows that only exist in the journal) and
   # print the files that were copied, so a stale snapshot would be visible.
   if [[ "$CHECK" =~ ^download-.*-[12]$ ]] && command -v sqlite3 >/dev/null; then
-    HD="$HOME/Library/Application Support/Noche Probe/Default"
+    HD="$PROBE_ROOT/Default"
     HC="$(mktemp -d)"
     for F in History History-journal History-wal History-shm; do [ -f "$HD/$F" ] && cp "$HD/$F" "$HC/$F"; done
     echo "PROBE $CHECK info History files copied: $(cd "$HC" && ls -l | awk 'NR>1 {print $9 ":" $5}' | tr '\n' ' ')"

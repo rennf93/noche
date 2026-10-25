@@ -1167,7 +1167,7 @@ class WinDelegate : public CefWindowDelegate {
   for (NSString* a in NSProcessInfo.processInfo.arguments)
     if ([a hasPrefix:@"--url="]) url = [a substringFromIndex:6];
   g_url = url;
-  NSString* cache = IsStoreCheck(g_check) ? StoreCachePath() : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"];
+  NSString* cache = IsStoreCheck(g_check) ? StoreCachePath() : (getenv("NOCHE_PROBE_ROOT") ? @(getenv("NOCHE_PROBE_ROOT")) : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"]);
   [NSFileManager.defaultManager createDirectoryAtPath:cache withIntermediateDirectories:YES attributes:nil error:nil];
   // The probe's own profile keeps the service worker script from the first run (a manifest version bump does not
   // replace it, seen as "service worker version: none"), so drop its registration before every start.
@@ -1212,12 +1212,12 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"profile-dirs", @"profile-cookie", @"profile-cookie-2", @"profile-storage", @"profile-ext", @"profile-close", @"profile-incognito", @"profile-incognito-2", @"profile-clear", @"profile-delete", @"profile-delete-2" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"profile-dirs", @"profile-cookie", @"profile-cookie-2", @"profile-storage", @"profile-ext", @"profile-close", @"profile-incognito", @"profile-incognito-2", @"profile-clear", @"profile-delete", @"profile-delete-2", @"profile-upgrade" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
     // CEF logs to stderr (--enable-logging=stderr); keep it in a file so the check can read its own log.
-    g_logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe/probe.log"];
+    g_logPath = [(getenv("NOCHE_PROBE_ROOT") ? @(getenv("NOCHE_PROBE_ROOT")) : [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe"]) stringByAppendingPathComponent:@"probe.log"];  // NOCHE_PROBE_ROOT: test-only root override
     [NSFileManager.defaultManager createDirectoryAtPath:g_logPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     freopen(g_logPath.fileSystemRepresentation, "w", stderr);
     // Quiet switches go in through argv: NCEngine hands it to CefInitialize, and the bridge's own
@@ -1233,6 +1233,8 @@ int main(int argc, const char* argv[]) {
     if ([g_check isEqualToString:@"discard-p1b-off"]) av.push_back("--disable-features=WebContentsDiscard");  // the bridge merges its own disable-features value into this one
     // Engine patch 0008: keep a paused download through a clean quit. An engine without the feature ignores the name.
     if ([g_check hasPrefix:@"download-"]) av.push_back("--enable-features=KeepPausedDownloadsAtShutdown");
+    // profile-upgrade: the two features the app passes so a profile made while the field trial testing config enabled them still starts.
+    if ([g_check isEqualToString:@"profile-upgrade"] && getenv("NOCHE_PROBE_UPGRADE_FEATURES")) av.push_back("--enable-features=PrepopulatedEnginesMigration,ApplySearchEngineTypeMigration");
     av.push_back(nullptr);
     static char** avp = const_cast<char**>(av.data());
     static int ac = (int)av.size() - 1;
