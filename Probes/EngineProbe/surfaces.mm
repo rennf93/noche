@@ -21,7 +21,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -1201,6 +1201,58 @@ void CheckDiscardApi(H h) {
   });
 #endif
 }
+
+#ifdef NOCHE_DISCARD_API
+// Summed RSS in MB (decimal) of this probe's renderer processes (extension renderers included) and how many there are.
+static double RendererRssMB(int* n) {
+  FILE* f = popen("/bin/ps -axo pid=,ppid=,rss=,command=", "r");
+  long kb = 0;
+  int count = 0;
+  char line[8192];
+  while (f && fgets(line, sizeof line, f)) {
+    int pid, ppid, off = 0;
+    long rss;
+    if (sscanf(line, "%d %d %ld %n", &pid, &ppid, &rss, &off) < 3) continue;
+    if (strstr(line + off, "Noche Probe") && strstr(line + off, "--type=renderer")) { kb += rss; count++; }
+  }
+  if (f) pclose(f);
+  if (n) *n = count;
+  return kb * 1024.0 / 1e6;
+}
+#endif
+
+// discard-p5 (note m1-6 5.3 P5): 30 tabs of a heavy page (30 MB touched each), renderer RSS before and after DiscardTab on 20 of the background ones.
+void CheckDiscardP5(H h) {
+#ifndef NOCHE_DISCARD_API
+  DiscDone(h, false, @"NOT RUN: engine patch 0009 API missing (build with NOCHE_DISCARD_API=1 against the 0009 engine)");
+#else
+  PI(@"mode: WebContentsDiscard ON; switches: %@", ArgsFact());
+  auto ids = std::make_shared<std::vector<int>>();
+  for (int i = 1; i <= 30; i++) ids->push_back(DiscTab(h, Page(h, [NSString stringWithFormat:@"heavy.html?t=%d", i])));
+  for (int id : *ids) if (id < 0) { DiscDone(h, false, @"AddTab returned NULL"); return; }
+  WaitFor(h, 60000, [=] { for (int id : *ids) if (!g_load.count(id)) return false; return true; }, [=](bool loaded) {
+    if (!loaded) { DiscDone(h, false, @"30 heavy tabs did not finish loading in 60 s"); return; }
+    Later(5.0, [=] {
+      int p1 = 0;
+      double r1 = RendererRssMB(&p1);
+      PI(@"before: renderer RSS %.1f MB in %d renderer processes, 30 heavy tabs + the first tab", r1, p1);
+      int nDisc = 0;
+      for (int k = 0; k < 20; k++) {
+        auto b = ById(h, (*ids)[k]);
+        if (b && b->GetHost()->DiscardTab()) nDisc++;
+      }
+      PI(@"DiscardTab returned true for %d of 20 tabs; active tab %d", nDisc, ActiveId(h));
+      Later(6.0, [=] {
+        int p2 = 0;
+        double r2 = RendererRssMB(&p2);
+        double saved = r1 - r2;
+        PI(@"after: renderer RSS %.1f MB in %d renderer processes; saved %.1f MB, %.1f MB per discarded tab (%d discarded)", r2, p2, saved, nDisc > 0 ? saved / nDisc : 0.0, nDisc);
+        DiscDone(h, nDisc == 20 && saved > 0, [NSString stringWithFormat:@"discarded=%d of 20, renderer RSS %.1f MB (%d procs) -> %.1f MB (%d procs), %.1f MB saved, %.1f MB per tab", nDisc, r1, p1, r2, p2, saved, nDisc > 0 ? saved / nDisc : 0.0]);
+      });
+    });
+  });
+#endif
+}
 }  // namespace
 
 void SurfEarly(NSString* check) {
@@ -1230,7 +1282,7 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,
     @"download-restart-crash-1" : @10, @"download-restart-crash-2" : @11, @"download-control-cancel-1" : @12,
     @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15,
-    @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20 };
+    @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20, @"discard-p5" : @22 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1257,6 +1309,7 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     case 19: CheckDiscardP3(h); break;
     case 20: CheckDiscardApi(h); break;
     case 21: CheckDiscard(h, false); break;
+    case 22: CheckDiscardP5(h); break;
     default: CheckZoomNoBubble(h); break;
   }
   return true;

@@ -1,0 +1,12 @@
+<!doctype html>
+<title>heavy</title>
+<p>heavy page: commits 30 MB of touched memory (discard-p5)
+<script>
+// One byte per 4 KiB page is written so every page is really committed, not lazily mapped.
+window.__a = [];
+for (let i = 0; i < 30; i++) {
+  const b = new Uint8Array(1 << 20);
+  for (let j = 0; j < b.length; j += 4096) b[j] = i + 1;
+  window.__a.push(b);
+}
+</script>
