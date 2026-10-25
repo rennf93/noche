@@ -723,22 +723,25 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   });
 }
 
-// The chords where Chromium's Mac accelerator table maps the key to a different command than Noche's menu table (Opt+Cmd+C and Opt+Shift+Cmd+C
-// open DevTools in inspect mode; the others open Settings, an incognito window, the bookmark manager, the bookmark bar, Search Tabs or the bookmark bubble).
-// Every other chord Noche owns is left alone: Cmd+C, V, X, A, R, L, K and the rest reach the page and the engine as they always did.
 #ifdef NOCHE_TESTHOOKS
 static NSInteger g_preempted = 0;
 + (NSInteger)testPreemptedKeys { return g_preempted; }
 #endif
 
+// The one place the claimed chords are listed. Source: chrome/browser/global_keyboard_shortcuts_mac.mm (GetShortcutsNotPresentInMainMenu rows, lines 87 to 174;
+// the matcher is -[NSMenuItem cr_firesForKeyEquivalentEvent:] in ui/base/cocoa/nsmenuitem_additions.mm, which clears Shift for printable keys and
+// compares the rest of the modifiers exactly). A chord is claimed only when Noche's MenuTable binds it and the engine's table maps it to a different command:
+//   Cmd+Shift+C      engine IDC_DEV_TOOLS_INSPECT, Noche Edit > Copy URL
+//   Opt+Shift+Cmd+C  no row of its own, but an event with a lowercase "c" and Shift clears to the Cmd+Opt+C row (IDC_DEV_TOOLS_INSPECT); Noche Copy URL as Markdown
+// Everything else in the engine's table is either the same command as Noche's binding (Cmd+Opt+C Inspect, Cmd+Shift+[ and ], Cmd+1..9, Ctrl+Shift+PageDown and Up)
+// or a chord Noche does not bind (left to the engine, listed in docs/app/README.md). Chrome's main-menu shortcuts are not engine accelerators here: Noche has its own menu.
 - (BOOL)preemptKey:(NSEvent*)event {
   const NSEventModifierFlags m = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
   const NSEventModifierFlags cmd = NSEventModifierFlagCommand, shift = NSEventModifierFlagShift, opt = NSEventModifierFlagOption;
   static NSDictionary<NSString*, NSArray<NSNumber*>*>* table;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
-    table = @{@"c": @[@(opt | cmd), @(opt | shift | cmd)], @"b": @[@(opt | cmd), @(shift | cmd)], @",": @[@(cmd)],
-              @"n": @[@(shift | cmd)], @"a": @[@(shift | cmd)], @"d": @[@(cmd)]};
+    table = @{@"c": @[@(shift | cmd), @(opt | shift | cmd)]};
   });
   NSString* key = event.charactersIgnoringModifiers.lowercaseString;
   if (NC_TEST_FLAG("NOCHE_TEST_NO_PREEMPT")) return NO;  // negative control: the engine's accelerators run first

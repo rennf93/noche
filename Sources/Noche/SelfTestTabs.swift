@@ -279,7 +279,10 @@ extension SelfTest {
         reset(); key("-", code: 27); await settle(); verify("Cmd+- (Zoom Out)", "zoom")
         reset(); key("0", code: 29); await settle(); verify("Cmd+0 (Actual Size)", "zoom")
         if tab.zoomLevel != 0 { bad.append("Zoom Out and Actual Size left the zoom at \(tab.zoomLevel)") }
-        reset(); key("c", code: 8, [.command, .shift], chars: "C"); await settle(); verify("Shift+Cmd+C", "copyURL")
+        // Shift+Cmd+C is Inspect in the engine's own table (global_keyboard_shortcuts_mac.mm) and Copy URL here: the bridge claims it, so it runs once with no DevTools window.
+        let claimsAtCopy = NCWindow.testPreemptedKeys(), devToolsAtCopy = NCWindow.devToolsCreated()
+        reset(); sendKey("c", code: 8, [.command, .shift], chars: "C"); await settle(); verify("Shift+Cmd+C", "copyURL")
+        if NCWindow.testPreemptedKeys() - claimsAtCopy != 1 || NCWindow.devToolsCreated() != devToolsAtCopy { bad.append("Shift+Cmd+C: claims \(NCWindow.testPreemptedKeys() - claimsAtCopy) (want 1), DevTools created \(NCWindow.devToolsCreated() - devToolsAtCopy) (want 0)") }
         if BrowserWindowController.pasteboard.string(forType: .string) != tab.url { bad.append("Copy URL put \(BrowserWindowController.pasteboard.string(forType: .string) ?? "nil") on the pasteboard, want \(tab.url)") }
         reset(); shortcut("Go Back"); await settle(); verify("Cmd+[", "back")
         guard await until(10, { tab.canGoForward && !tab.url.hasSuffix("b.html") }) else { return finish(false, "Back did not go back (\(tab.url))") }
@@ -302,8 +305,8 @@ extension SelfTest {
         reset(); cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W closed no tab") }; await settle(); verify("Cmd+W", "closeTab")
         // The keys of the menu table (M1.4 task 2). Print, Inspect Elements and JavaScript Console are counted but not run: a hidden run must not raise their windows.
         BrowserWindowController.suppressChrome = true
-        // The engine maps Opt+Cmd+C and Opt+Shift+Cmd+C to its own Inspect command; the bridge claims them before the engine's accelerator, so a key through
-        // NSApplication.sendEvent (like a real press) runs Noche's item once and opens no DevTools window. Title and address carry a backslash, a bracket and a parenthesis.
+        // The engine's table maps Cmd+Opt+C to Inspect, and its matcher takes Opt+Shift+Cmd+C for that row too; the bridge claims Opt+Shift+Cmd+C before the engine's
+        // accelerator, so a key through NSApplication.sendEvent (like a real press) runs Noche's item once and opens no DevTools window. Title and address carry a backslash, a bracket and a parenthesis.
         let devToolsBefore = NCWindow.devToolsCreated(), claimsBefore = NCWindow.testPreemptedKeys()
         _ = await evaluate(tab, #"document.title = "a\\b] c"; history.pushState(null, "", "/q)x"); 1"#)
         guard await until(10, { tab.title == #"a\b] c"# && tab.url.hasSuffix("/q)x") }) else { return finish(false, "the page did not take the Markdown test title and address (\(tab.title) \(tab.url))") }
@@ -312,7 +315,9 @@ extension SelfTest {
         let wantMarkdown = #"[a\\b\] c]("# + fixture("") + "q%29x)"
         if markdown != wantMarkdown { bad.append("Copy URL as Markdown put \(markdown ?? "nil") on the pasteboard, want \(wantMarkdown)") }
         reset(); sendKey("c", code: 8, [.command, .option]); await settle(); verify("Opt+Cmd+C", "inspectElements")
-        if NCWindow.testPreemptedKeys() - claimsBefore != 2 { bad.append("the bridge claimed \(NCWindow.testPreemptedKeys() - claimsBefore) of the 2 engine chords (the menu alone would also run them in a hidden run)") }
+        // Opt+Cmd+C is Inspect in both tables (same command): left to the engine, so not claimed; Cmd+9 likewise (IDC_SELECT_LAST_TAB in both).
+        sendKey("9", code: 25, .command)
+        if NCWindow.testPreemptedKeys() - claimsBefore != 1 { bad.append("the bridge claimed \(NCWindow.testPreemptedKeys() - claimsBefore) chords of Opt+Shift+Cmd+C, Opt+Cmd+C and Cmd+9, want only the first (the menu alone would also run them in a hidden run)") }
         if NCWindow.devToolsCreated() != devToolsBefore { bad.append("a DevTools window opened (\(NCWindow.devToolsCreated()) created, \(devToolsBefore) before)") }
         // Cmd+C is not claimed: the page sees the keydown, and no Noche action runs.
         if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
@@ -328,7 +333,7 @@ extension SelfTest {
                 if keys.contains("c+meta") { break }
                 try? await Task.sleep(for: .milliseconds(250))
             }
-            if keys.contains("c+meta"), claimed.isEmpty, NCWindow.testPreemptedKeys() - claimsBefore == 2 { passed.append("Cmd+C reached the page") } else { bad.append("Cmd+C: page saw \(keys), Noche actions \(BrowserWindowController.actionCounts)") }
+            if keys.contains("c+meta"), claimed.isEmpty, NCWindow.testPreemptedKeys() - claimsBefore == 1 { passed.append("Cmd+C reached the page") } else { bad.append("Cmd+C: page saw \(keys), Noche actions \(BrowserWindowController.actionCounts)") }
         } else { bad.append("no web view for the Cmd+C case") }
         // Shifted punctuation: the menu resolves each chord of the table that is typed with Shift (US layout: the shifted character, and the plain key ignoring modifiers).
         if let menu = NSApp.mainMenu as? ShortcutMenu, let ns = ctl.nsWindow {
