@@ -261,7 +261,7 @@ extension SelfTest {
         func reset() { BrowserWindowController.actionCounts = [:]; BrowserWindowController.commandLog = [] }
         func verify(_ name: String, _ action: String) {
             let counts = BrowserWindowController.actionCounts, log = BrowserWindowController.commandLog
-            if counts != [action: 1] { bad.append("\(name): actions \(counts), want exactly [\(action): 1]") }
+            if counts != [action: 1] { bad.append("\(name): actions \(counts), want exactly [\(action): 1] (Chrome commands \(log))") }
             else if Set(log).count != log.count { bad.append("\(name): Chrome commands repeated \(log)") }
             else { passed.append(name) }
         }
@@ -270,7 +270,7 @@ extension SelfTest {
         // History for Back and Forward.
         let before = loads
         tab.loadURL(fixture("b.html"))
-        guard await until(10, { loads > before && tab.canGoBack }) else { return finish(false, "no history for Back") }
+        guard await until(10, { loads > before && tab.canGoBack }) else { return finish(false, "no history for Back (loads \(loads) before \(before) canGoBack \(tab.canGoBack) url \(tab.url) bad \(bad) passed \(passed))") }
 
         reset(); key("r", code: 15); await settle(); verify("Cmd+R", "reload")
         reset(); key("r", code: 15, [.command, .shift]); await settle(); verify("Shift+Cmd+R", "forceReload")
@@ -300,6 +300,33 @@ extension SelfTest {
         reset(); nextTab(); await settle(); verify("Shift+Cmd+]", "nextTab")
         reset(); previousTab(); await settle(); verify("Shift+Cmd+[", "previousTab")
         reset(); cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W closed no tab") }; await settle(); verify("Cmd+W", "closeTab")
+        // The keys of the menu table (M1.4 task 2). Print, Inspect Elements and JavaScript Console are counted but not run: a hidden run must not raise their windows.
+        BrowserWindowController.suppressChrome = true
+        // Opt+Cmd+C and Opt+Shift+Cmd+C are claimed by the engine's own accelerator (DevTools in inspect mode) before the menu sees them, so these two go to the menu directly.
+        reset(); key("c", code: 8, [.command, .option, .shift], chars: "C", menuOnly: true); await settle(); verify("Opt+Shift+Cmd+C", "copyURLMarkdown")
+        let titleJSON = await evaluate(tab, "document.title") ?? ""
+        let pageTitle = (try? JSONSerialization.jsonObject(with: Data(titleJSON.utf8), options: .fragmentsAllowed)) as? String ?? "?"
+        let markdown = BrowserWindowController.pasteboard.string(forType: .string)
+        if markdown != "[\(pageTitle)](\(tab.url))" { bad.append("Copy URL as Markdown put \(markdown ?? "nil") on the pasteboard, want [\(pageTitle)](\(tab.url))") }
+        reset(); key("p", code: 35); await settle(); verify("Cmd+P", "print")
+        reset(); key("c", code: 8, [.command, .option], menuOnly: true); await settle(); verify("Opt+Cmd+C", "inspectElements")
+        reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
+        for (name, ch, code, mods, chars, scheme, action) in [("Cmd+Y", "y", UInt16(16), NSEvent.ModifierFlags.command, "y", "chrome://history", "showHistory"),
+                                                             ("Shift+Cmd+J", "j", UInt16(38), [.command, .shift], "J", "chrome://downloads", "showDownloads")] as [(String, String, UInt16, NSEvent.ModifierFlags, String, String, String)] {
+            reset(); key(ch, code: code, mods, chars: chars)
+            guard await until(10, { rowCount == 2 && win.activeTab?.url.hasPrefix(scheme) == true }) else { return finish(false, "\(name) opened rows=\(rowCount) active \(win.activeTab?.url ?? "nil"), want a new tab at \(scheme)") }
+            await settle(); verify(name, action)
+            cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W did not close the \(scheme) tab") }
+        }
+        guard await openTabs(3) else { return finish(false, "no 3 tabs for Close All Tabs (rows=\(rowCount))") }
+        reset(); key("k", code: 40, [.command, .shift], chars: "K")
+        guard await until(10, { rowCount == 1 && win.tabs.count == 1 && ctl.list.items.first?.url == "about:blank" }) else {
+            return finish(false, "Shift+Cmd+K left \(rowCount) rows, \(win.tabs.count) engine tabs, list \(ctl.list.items.map(\.url))")
+        }
+        await settle(); verify("Shift+Cmd+K", "closeAllTabs")
+        let reloaded = loads
+        win.activeTab?.loadURL(fixture(""))
+        _ = await until(10, { loads > reloaded })
         reset(); key("n", code: 45); guard await until(15, { app.controllers.count == 2 && app.controllers[1].nsWindow != nil }) else { return finish(false, "Cmd+N opened no second window") }; await settle(); verify("Cmd+N", "newWindow")
         reset(); key("w", code: 13, [.command, .shift], chars: "W"); guard await until(15, { app.controllers.count == 1 }) else { return finish(false, "Shift+Cmd+W did not close the second window") }; await settle(); verify("Shift+Cmd+W (second window)", "closeWindow")
         reset(); key("i", code: 34, [.command, .option]); await settle(); verify("Opt+Cmd+I", "devTools")

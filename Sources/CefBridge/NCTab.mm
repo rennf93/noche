@@ -109,14 +109,22 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   if (_browser) _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint());
 }
 
-#ifdef NOCHE_TESTHOOKS
-- (BOOL)testExecuteChromeCommandNamed:(NSString*)name {
+// File > Print: Chromium's own print flow for this tab.
+- (void)printPage {
+  if (_browser) _browser->GetHost()->Print();
+}
+
+// Runs the Chrome command with this IDC name on the tab when the engine says it can (Inspect Elements, JavaScript Console).
+- (BOOL)executeChromeCommandNamed:(NSString*)name {
   if (!_browser) return NO;
   const int id = cef_id_for_command_id_name(name.UTF8String);
   if (id < 0 || !_browser->GetHost()->CanExecuteChromeCommand(id)) return NO;
   _browser->GetHost()->ExecuteChromeCommand(id, CEF_WOD_CURRENT_TAB);
   return YES;
 }
+
+#ifdef NOCHE_TESTHOOKS
+- (BOOL)testExecuteChromeCommandNamed:(NSString*)name { return [self executeChromeCommandNamed:name]; }
 #endif
 
 - (void)close {

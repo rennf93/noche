@@ -1,123 +1,65 @@
 import AppKit
+import NocheCore
 
-/// The M1.1 main menu (titles and shortcuts from live-ui.md section 9, the reference's app menu named Noche). App actions
-/// target the AppDelegate, which routes them to the active window's controller; the edit items have no target: they go to the key window's first responder
-/// through the responder chain (the command bar's field editor or the page).
+/// The menu bar, built from `MenuTable.bar` (live-ui.md section 9). App actions target the AppDelegate, which routes them to the active window's
+/// controller; the standard items have no target: they go to the key window's first responder through the responder chain (the command bar's
+/// field editor or the page). Every item built here carries `MenuTable.mark` and a `MenuRule` that the AppDelegate validates it with.
 @MainActor
 enum MainMenu {
+    /// The item's table row, kept on the item (representedObject) so validation and the checks can read its rule.
+    final class Rule: NSObject {
+        let entry: MenuEntry
+        init(_ entry: MenuEntry) { self.entry = entry }
+    }
+
     static func build(app: AppDelegate) -> NSMenu {
-        let cmd: NSEvent.ModifierFlags = .command
-        let shift: NSEvent.ModifierFlags = [.command, .shift]
-        func a(_ title: String, _ action: Selector, _ key: String = "", _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-            let i = item(title, action, key, mods)
-            i.target = app
-            return i
-        }
         let main = ShortcutMenu()
-        main.addItem(submenu("Noche", [
-            item("About Noche", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
-            .separator(),
-            item("Hide Noche", #selector(NSApplication.hide(_:)), "h"),
-            item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
-            item("Show All", #selector(NSApplication.unhideAllApplications(_:)), ""),
-            .separator(),
-            item("Quit Noche", #selector(NSApplication.terminate(_:)), "q"),
-        ]))
-        main.addItem(submenu("File", [
-            a("New Tab", #selector(AppDelegate.newTab(_:)), "t"),
-            a("New Window", #selector(AppDelegate.newWindowMenu(_:)), "n"),
-            a("Reopen Closed Tab", #selector(AppDelegate.reopenClosedTab(_:)), "t", shift),
-            a("Open Command Bar", #selector(AppDelegate.openCommandBar(_:)), "l"),  // opens the command bar (CommandBarController), also for IDC_FOCUS_LOCATION
-            .separator(),
-            a("Close Window", #selector(AppDelegate.closeWindowMenu(_:)), "w", shift),
-            a("Close Tab", #selector(AppDelegate.closeTab(_:)), "w"),
-        ]))
-        main.addItem(submenu("Edit", [
-            item("Undo", Selector(("undo:")), "z"),
-            item("Redo", Selector(("redo:")), "z", shift),
-            .separator(),
-            item("Cut", #selector(NSText.cut(_:)), "x"),
-            item("Copy", #selector(NSText.copy(_:)), "c"),
-            a("Copy URL", #selector(AppDelegate.copyURL(_:)), "c", shift),
-            item("Paste", #selector(NSText.paste(_:)), "v"),
-            item("Select All", #selector(NSText.selectAll(_:)), "a"),
-        ]))
-        let developer = submenu("Developer", [
-            a("Developer Tools", #selector(AppDelegate.developerTools(_:)), "i", [.command, .option]),
-        ])
-        main.addItem(submenu("View", [
-            a("Refresh", #selector(AppDelegate.refresh(_:)), "r"),
-            a("Force Refresh the Page", #selector(AppDelegate.forceRefresh(_:)), "r", shift),
-            .separator(),
-            a("Auto-Hide Tabs", #selector(AppDelegate.toggleSidebar(_:)), "s"),
-            .separator(),
-            a("Zoom to Actual Size", #selector(AppDelegate.zoomActual(_:)), "0"),
-            a("Zoom In", #selector(AppDelegate.zoomIn(_:)), "+", cmd),
-            a("Zoom Out", #selector(AppDelegate.zoomOut(_:)), "-", cmd),
-            .separator(),
-            developer,
-        ]))
-        main.addItem(submenu("Tabs", [
-            a("Go Back", #selector(AppDelegate.goBack(_:)), "[", cmd),
-            a("Go Forward", #selector(AppDelegate.goForward(_:)), "]", cmd),
-            a("Next Tab", #selector(AppDelegate.nextTab(_:)), "]", shift),
-            a("Previous Tab", #selector(AppDelegate.previousTab(_:)), "[", shift),
-            .separator(),
-            // Engine source: chrome/browser/ui/browser_command_controller.cc:1985-2003 enables IDC_SELECT_NEXT_TAB, IDC_MOVE_TAB_NEXT and _PREVIOUS,
-            // IDC_SELECT_TAB_0 to _7 and IDC_SELECT_LAST_TAB only when supports_tabs (the window's kFeatureTabStrip) is true; a CEF views-hosted window has none.
-            // The engine disables its own tab commands in a views-hosted window, so these keys never arrive as Chrome commands; as menu items
-            // they are answered by Noche from the list (and the page view lets a key the menu owns through to the menu).
-            a("Move Tab Forward", #selector(AppDelegate.moveTabForward(_:)), String(UnicodeScalar(NSPageDownFunctionKey)!), [.control, .shift]),
-            a("Move Tab Backward", #selector(AppDelegate.moveTabBackward(_:)), String(UnicodeScalar(NSPageUpFunctionKey)!), [.control, .shift]),
-            .separator(),
-        ] + (1...8).map { n in
-            let i = a("Select Tab \(n)", #selector(AppDelegate.selectTabNumber(_:)), String(n), cmd); i.tag = n; return i
-        } + [a("Select Last Tab", #selector(AppDelegate.selectLastTab(_:)), "9", cmd)]))
-        main.addItem(submenu("Window", [
-            item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
-        ]))
+        main.commands = MenuTable.commands.map { c in (c.chord, c.title, { [unowned app] in c.run(app) }) }
+        for entry in MenuTable.bar { main.addItem(item(entry, app: app)) }
         return main
     }
 
-    /// `title|key|modifiers` per item in order, a submenu's own line first; separators are left out.
-    static func dump(_ menu: NSMenu) -> [String] {
-        var out: [String] = []
-        for i in menu.items where !i.isSeparatorItem {
-            var mods: [String] = []
-            let m = i.keyEquivalentModifierMask
-            if m.contains(.control) { mods.append("ctrl") }
-            if m.contains(.option) { mods.append("opt") }
-            if m.contains(.shift) { mods.append("shift") }
-            if m.contains(.command) { mods.append("cmd") }
-            // AppKit rewrites "[" and "]" to the layout's own keys (the Spanish layout gives "ñ" and "´"): report the US ones.
-            let key = ["ñ": "[", "´": "]"][i.keyEquivalent] ?? i.keyEquivalent
-            out.append("\(i.title)|\(key)|\(i.keyEquivalent.isEmpty ? "" : mods.joined(separator: "+"))")
-            if let sub = i.submenu { out += dump(sub) }
+    private static func item(_ e: MenuEntry, app: AppDelegate) -> NSMenuItem {
+        if e.separator {
+            let s = NSMenuItem.separator()
+            s.identifier = MenuTable.mark
+            return s
         }
-        return out
-    }
-
-    private static func item(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-        let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        i.keyEquivalentModifierMask = mods
+#if NOCHE_TESTHOOKS
+        // Negative control for menu-diff: the table loses History > Show History...
+        let drift = ProcessInfo.processInfo.environment["NOCHE_TEST_MENU_DRIFT"] == "1"
+#else
+        let drift = false
+#endif
+        let i = NSMenuItem(title: e.title, action: e.action, keyEquivalent: e.key)
+        i.keyEquivalentModifierMask = e.modifiers
+        i.target = e.viaResponder ? nil : (e.action == nil ? nil : app)
+        i.tag = e.tag
+        i.identifier = MenuTable.mark
+        i.representedObject = Rule(e)
+        if let sub = e.submenu {
+            let menu = NSMenu(title: e.title)
+            menu.autoenablesItems = true
+            for s in sub where !(drift && s.title == "Show History...") { menu.addItem(item(s, app: app)) }
+            i.submenu = menu
+            switch e.role {
+            case .services: NSApp.servicesMenu = menu
+            case .windows: NSApp.windowsMenu = menu
+            case .help: NSApp.helpMenu = menu
+            case nil: break
+            }
+        }
         return i
-    }
-
-    private static func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
-        let menu = NSMenu(title: title)
-        menu.autoenablesItems = true
-        items.forEach(menu.addItem)
-        let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        holder.submenu = menu
-        return holder
     }
 }
 
 /// The main menu with exact shortcut matching. AppKit's own matching lets a plain Cmd+W or Cmd+] fire Close Window or Next Tab
-/// (the Shift item listed first), so an item whose key and full modifier set equal the event's wins; everything else falls back to AppKit.
+/// (the Shift item listed first), so an item whose key and full modifier set equal the event's wins; a key that matches nothing exactly is left to the page.
+/// Key commands that have no menu item (`MenuTable.commands`) are matched the same way after the items.
 final class ShortcutMenu: NSMenu {
     private static let unshifted: [Character: Character] = ["{": "[", "}": "]", "+": "=", "_": "-"]
     private static let shifted = Dictionary(uniqueKeysWithValues: unshifted.map { ($1, $0) })
+    var commands: [(chord: Chord, title: String, run: () -> Void)] = []
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -131,10 +73,22 @@ final class ShortcutMenu: NSMenu {
         let viaShift = Set(typed.compactMap { Self.shifted[$0] })
         if let item = match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil), let menu = item.menu {
             menu.update()
+#if NOCHE_TESTHOOKS
+            // Negative control for menu-disabled: a disabled item acts anyway.
+            if ProcessInfo.processInfo.environment["NOCHE_TEST_MENU_NODISABLE"] == "1" { item.isEnabled = true }
+#endif
             if item.isEnabled, let i = menu.items.firstIndex(of: item) { menu.performActionForItem(at: i) }
             return true
         }
-        return super.performKeyEquivalent(with: event)
+        if let c = commands.first(where: { c in
+            let k = c.chord.menuKey
+            return k.mods == mods && k.key.lowercased().first.map(keys.contains) == true
+        }) {
+            c.run()
+            return true
+        }
+        // Not AppKit's own matching: it ignores extra Shift and Option, so a plain Cmd+K would fire Close All Tabs (Shift+Cmd+K) instead of reaching the page.
+        return false
     }
 
     private func match(_ menu: NSMenu, _ keys: Set<Character>, _ mods: NSEvent.ModifierFlags) -> NSMenuItem? {

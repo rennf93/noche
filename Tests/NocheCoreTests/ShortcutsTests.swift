@@ -283,4 +283,21 @@ final class ShortcutsTests: XCTestCase {
         r.clear("file.newTab"); r.reset("file.newTab")
         XCTAssertEqual(r.overrides.entries["file.newTab"]?.reset, true)
     }
+
+    /// The menu bar's chords come from one place: Settings rows through `table`, the fixed ones (system and non-menu commands) through `fixed`.
+    func testFixedChordsForMenuAndCommands() {
+        XCTAssertTrue(Set(ShortcutDefaults.fixed.keys).isDisjoint(with: ShortcutDefaults.table.map(\.id)))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "file.openCommandBar"), Chord("l", Chord.cmd))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "edit.pasteMatchStyle"), Chord("v", Chord.cmd | Chord.shift))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "edit.showSpelling"), Chord("\u{3a}", Chord.cmd))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "tabs.selectTab.1"), Chord("1", Chord.cmd))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "tabs.selectLastTab"), Chord("9", Chord.cmd))
+        XCTAssertEqual(ShortcutDefaults.chord(for: "tabs.moveTabForward"), Chord("pagedown", Chord.ctrl | Chord.shift))
+        XCTAssertNil(ShortcutDefaults.chord(for: "file.share"))
+        XCTAssertNil(ShortcutDefaults.chord(for: "no.such.id"))
+        let own = Array(ShortcutDefaults.fixed.values)
+        XCTAssertEqual(Set(own).count, own.count)
+        XCTAssertTrue(Set(own).isDisjoint(with: ShortcutDefaults.table.compactMap { $0.defaultChord }))
+        XCTAssertTrue(own.allSatisfy { $0.isValid })
+    }
 }

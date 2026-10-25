@@ -81,3 +81,28 @@ extension ShortcutDefaults {
         return t
     }()
 }
+
+/// Chords that are not Settings > Shortcuts rows: the system items of the menu bar (Hide, Quit, Edit, Minimize) and the key commands
+/// that have no menu item (live-ui.md section 9 lists none for them). The menu table and `ShortcutMenu` read them here, so there is one
+/// source of truth for every chord. A shifted symbol is stored canonically (Cmd+: is Cmd+Shift+;).
+extension ShortcutDefaults {
+    public static let fixed: [String: Chord] = {
+        let c = Chord.cmd, s = Chord.shift, o = Chord.opt, k = Chord.ctrl
+        var m: [String: Chord] = [
+            "app.hide": Chord("h", c), "app.hideOthers": Chord("h", o | c), "app.quit": Chord("q", c),
+            "app.minimize": Chord("m", c), "app.minimizeAll": Chord("m", o | c),
+            "edit.undo": Chord("z", c), "edit.redo": Chord("z", s | c), "edit.cut": Chord("x", c), "edit.copy": Chord("c", c),
+            "edit.paste": Chord("v", c), "edit.pasteMatchStyle": Chord("v", s | c), "edit.selectAll": Chord("a", c),
+            "edit.showSpelling": Chord(":", c), "edit.checkSpelling": Chord(";", c),
+            "tabs.selectLastTab": Chord("9", c),
+            "tabs.moveTabForward": Chord("pagedown", k | s), "tabs.moveTabBackward": Chord("pageup", k | s),
+        ]
+        for n in 1...8 { m["tabs.selectTab.\(n)"] = Chord(String(n), c) }
+        return m
+    }()
+
+    /// The default chord of a menu or command id: a Settings row first, then a fixed one. Nil: no shortcut.
+    public static func chord(for id: String) -> Chord? {
+        table.first { $0.id == id }?.defaultChord ?? fixed[id]
+    }
+}

@@ -1,0 +1,175 @@
+# Noche menu bar, transcribed by hand from live-ui.md section 9 (menu and shortcut inventory), the reference app's name replaced by Noche.
+# Line: <menu path>|<title>|<key>|<modifiers>|<enabled in a one-tab window>   ("---" is a separator, "bar" the top level)
+# Key: the US-layout key as AppKit stores it ("+" for Zoom In, ":" for Cmd+:); modifiers in the order ctrl+opt+shift+cmd.
+# Enabled: 1, 0, or r (nil-targeted: the responder chain decides, so it is not asserted; a hidden window is never key).
+# Items of a later milestone are present and 0. Layout glyph keys of section 1 are the US keys (Cmd+[ and Cmd+] for Go Back and Go Forward).
+# Omitted on purpose (no Noche counterpart, design section 3): the reference's invite item, plan label, Upgrade Plan..., Sign Out, Chat with Support,
+#   Video Tour, Status, Record Performance Issue..., the per-profile Window items (profiles arrive in M1.7), the installed-extensions list
+#   and the Recent Bookmarks entries (dynamic). Submenus of Move to Group, Move to Profile, Move to Window and Bookmarks Bar are dynamic: the items stand alone.
+# Window items the system adds (Fill, Center, Move & Resize, Full Screen Tile, Move to display, the window list) carry no Noche mark and are skipped.
+bar|Noche|||1
+bar|File|||1
+bar|Edit|||1
+bar|View|||1
+bar|Tabs|||1
+bar|Bookmarks|||1
+bar|History|||1
+bar|Extensions|||1
+bar|Window|||1
+bar|Help|||1
+Noche|About Noche|||r
+Noche|Check for Updates...|||0
+Noche|---|||-
+Noche|Settings...|,|cmd|0
+Noche|Import from Another Browser...|||0
+Noche|---|||-
+Noche|Services|||1
+Noche|---|||-
+Noche|Hide Noche|h|cmd|r
+Noche|Hide Others|h|opt+cmd|r
+Noche|Show All|||r
+Noche|---|||-
+Noche|Quit Noche|q|cmd|r
+File|New Tab|t|cmd|1
+File|New Tab in Group|t|opt+cmd|0
+File|New Window|n|cmd|1
+File|New Incognito Window|n|shift+cmd|0
+File|Reopen Closed Tab|t|shift+cmd|0
+File|---|||-
+File|Chat...|e|cmd|0
+File|Focus Chat|e|ctrl+cmd|0
+File|---|||-
+File|Open Command Bar|l|cmd|1
+File|---|||-
+File|Close Window|w|shift+cmd|1
+File|Close Tab|w|cmd|1
+File|Close All Tabs|k|shift+cmd|1
+File|Clean Up Tabs|k|opt+cmd|0
+File|---|||-
+File|Share...|||0
+File|Print...|p|cmd|1
+Edit|Undo|z|cmd|r
+Edit|Redo|z|shift+cmd|r
+Edit|---|||-
+Edit|Cut|x|cmd|r
+Edit|Copy|c|cmd|r
+Edit|Copy URL|c|shift+cmd|1
+Edit|Copy URL as Markdown|c|opt+shift+cmd|1
+Edit|Paste|v|cmd|r
+Edit|Paste and Match Style|v|shift+cmd|r
+Edit|Delete|||r
+Edit|Select All|a|cmd|r
+Edit|---|||-
+Edit|Find|||1
+Edit/Find|Find...|f|cmd|0
+Edit/Find|Find Next|g|cmd|0
+Edit/Find|Find Previous|g|shift+cmd|0
+Edit/Find|Use Selection for Find|||0
+Edit|---|||-
+Edit|Spelling and Grammar|||1
+Edit/Spelling and Grammar|Show Spelling and Grammar|:|cmd|r
+Edit/Spelling and Grammar|Check Document Now|;|cmd|r
+Edit/Spelling and Grammar|---|||-
+Edit/Spelling and Grammar|Check Spelling While Typing|||r
+Edit/Spelling and Grammar|Check Grammar With Spelling|||r
+Edit/Spelling and Grammar|Correct Spelling Automatically|||r
+Edit|Substitutions|||1
+Edit/Substitutions|Show Substitutions|||r
+Edit/Substitutions|---|||-
+Edit/Substitutions|Smart Copy/Paste|||r
+Edit/Substitutions|Smart Quotes|||r
+Edit/Substitutions|Smart Dashes|||r
+Edit/Substitutions|Smart Links|||r
+Edit/Substitutions|Data Detectors|||r
+Edit/Substitutions|Text Replacement|||r
+Edit|Transformations|||1
+Edit/Transformations|Make Upper Case|||r
+Edit/Transformations|Make Lower Case|||r
+Edit/Transformations|Capitalize|||r
+Edit|Speech|||1
+Edit/Speech|Start Speaking|||r
+Edit/Speech|Stop Speaking|||r
+Edit|AutoFill|||1
+Edit/AutoFill|Contact...|||0
+Edit/AutoFill|Passwords...|||0
+Edit/AutoFill|Credit Card...|||0
+Edit|---|||-
+Edit|Start Dictation...|||r
+Edit|Emoji & Symbols|||r
+View|Appearance|||1
+View/Appearance|Automatic|||1
+View/Appearance|Light|||1
+View/Appearance|Dark|||1
+View|---|||-
+View|Refresh|r|cmd|1
+View|Force Refresh the Page|r|shift+cmd|1
+View|---|||-
+View|Show Tabs in Sidebar|s|shift+cmd|0
+View|Auto-Hide Tabs|s|cmd|1
+View|---|||-
+View|Open Split Pane|+|ctrl|0
+View|Focus Next Split Pane|'|ctrl+shift|0
+View|Focus Previous Split Pane|;|ctrl+shift|0
+View|---|||-
+View|Show Bookmarks Bar|||1
+View/Show Bookmarks Bar|Always|||0
+View/Show Bookmarks Bar|On New Tab Only|||0
+View/Show Bookmarks Bar|Never|||0
+View/Show Bookmarks Bar|---|||-
+View/Show Bookmarks Bar|Toggle Bookmarks Bar|b|shift+cmd|0
+View|Show Full URL|||1
+View|---|||-
+View|Zoom to Actual Size|0|cmd|1
+View|Zoom In|+|cmd|1
+View|Zoom Out|-|cmd|1
+View|---|||-
+View|Enter Full Screen|||r
+View|---|||-
+View|Developer|||1
+View/Developer|Developer Tools|i|opt+cmd|1
+View/Developer|Inspect Elements|c|opt+cmd|1
+View/Developer|JavaScript Console|j|opt+cmd|1
+Tabs|Go Back|[|cmd|0
+Tabs|Go Forward|]|cmd|0
+Tabs|Next Tab|]|shift+cmd|1
+Tabs|Previous Tab|[|shift+cmd|1
+Tabs|---|||-
+Tabs|Search Tabs...|a|shift+cmd|0
+Tabs|Pin|d|shift+cmd|0
+Tabs|Duplicate|||1
+Tabs|---|||-
+Tabs|New Group with Tab|n|ctrl+cmd|0
+Tabs|Move to Group|||0
+Tabs|Move to Profile|||0
+Tabs|Move to Window|||0
+Tabs|---|||-
+Tabs|Rename...|||0
+Tabs|Change Icon...|||0
+Bookmarks|Bookmark This Page|d|cmd|0
+Bookmarks|Manage Bookmarks|b|opt+cmd|0
+Bookmarks|---|||-
+Bookmarks|Bookmarks Bar|||0
+Bookmarks|Other Bookmarks|||0
+History|Show History...|y|cmd|1
+Extensions|Add Extension...|||0
+Extensions|Manage Extensions...|||0
+Extensions|Pin Extensions...|||0
+Window|Minimize|m|cmd|r
+Window|Minimize All|m|opt+cmd|r
+Window|Arrange in Front|||1
+Window|---|||-
+Window|Downloads|j|shift+cmd|1
+Window|Task Manager|||0
+Window|Merge All Windows|||0
+Help|Copy Diagnostics|||0
+command|Select Tab 1|1|cmd|1
+command|Select Tab 2|2|cmd|1
+command|Select Tab 3|3|cmd|1
+command|Select Tab 4|4|cmd|1
+command|Select Tab 5|5|cmd|1
+command|Select Tab 6|6|cmd|1
+command|Select Tab 7|7|cmd|1
+command|Select Tab 8|8|cmd|1
+command|Select Last Tab|9|cmd|1
+command|Move Tab Forward|pagedown|ctrl+shift|1
+command|Move Tab Backward|pageup|ctrl+shift|1

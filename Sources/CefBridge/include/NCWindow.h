@@ -100,6 +100,9 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)loadURL:(NSString *)url;
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
 - (void)showDevTools;
+- (void)printPage;
+/// Runs the Chrome command with this IDC name on the tab when the engine can execute it; NO when it cannot.
+- (BOOL)executeChromeCommandNamed:(NSString *)name;
 #ifdef NOCHE_TESTHOOKS
 /// Test support (builds with NOCHE_TESTHOOKS only): runs the Chrome command with this IDC name on the tab, bypassing Noche's actions.
 - (BOOL)testExecuteChromeCommandNamed:(NSString *)name;

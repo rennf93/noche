@@ -21,7 +21,7 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 - Controls the app cannot give itself: new `Noche*.ips` crash reports (after a 3 s settle), the frontmost app (every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s).
 - A hidden window gets no frames while the screen is locked, and a loaded CPU can trip the watchdog: a timeout then is not necessarily a code fault. Check `ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` and `uptime`.
 
-## Checks (29, plus the M1.2 and M1.3 tables below)
+## Checks (28, plus the M1.2, M1.3 and M1.4 tables below)
 
 | Check | What it asserts |
 |---|---|
@@ -42,10 +42,9 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 | long-title | titles of 300 W, Arabic and emoji stay inside their rows (pitch 37), show no ellipsis, have the fade mask with its stop 20 pt from the end, and the rows show the placeholder favicon. The toolbar is not examined |
 | load-error | a typed address of a closed port shows the failed host in the row title and the address field, Back returns to the page. The error page itself is not asserted |
 | load-error-link | a link on a normal fixture page to a closed port shows the failed host in the row title and address, Cmd+L seeds the field with the failed URL, Back returns to the page and clears the failure |
-| menu | the 48 menu lines equal the M1.1 list plus the 11 tab by-number and move items of M1.2 (Move Tab Forward and Backward, Select Tab 1 to 8, Select Last Tab) and the 6 edit actions are nil-targeted |
 | sidebar-toggle | Cmd+S hides and shows the sidebar, and the toolbar button hides it again, within the motion limits (see Deviations), with the traffic lights hidden and the show overshoot between 0.3 and 2.5 pt |
 | sidebar-scroll | with 40 tabs at window heights 1436 and 800, Shift+Cmd+[ from tab 1 wraps to tab 40 and its row is fully visible, the row pitch stays 37, a row scrolled into view takes the click |
-| shortcuts-once | each of 19 shortcuts (reload, force reload, zoom in, out and actual size, Copy URL, back, forward, Cmd+L, address editing, Cmd+S, Cmd+T, next, previous, Cmd+W, Cmd+N, close window, Opt+Cmd+I) acts exactly once with no repeated Chrome command; an unclaimed Cmd+K reaches the page. The exact modifier matching is shown by those counts and by the NOEXACT negative control |
+| shortcuts-once | each of 26 shortcuts acts exactly once with no repeated Chrome command: reload, force reload, zoom in, out and actual size, Copy URL, back, forward, Cmd+L, address editing, Cmd+S, Cmd+T, next, previous, Cmd+W, and (M1.4 task 2, from the menu table) Copy URL as Markdown (the pasteboard holds `[title](url)`, the title read from the page through CDP), Print, Inspect Elements, JavaScript Console, Show History and Downloads (each a new tab at its `chrome://` page, closed again), Close All Tabs (3 tabs become one blank tab), then Cmd+N, close window and Opt+Cmd+I; an unclaimed Cmd+K reaches the page (it used to fall to AppKit's loose matching, which fires Close All Tabs). The exact modifier matching is shown by those counts and by the NOEXACT negative control. Print, Inspect Elements and JavaScript Console are counted but not run (`BrowserWindowController.suppressChrome`: a hidden run must not raise a print or DevTools window), and Opt+Cmd+C and Opt+Shift+Cmd+C go to the menu directly (menuOnly) because the engine claims those two accelerators first, see Deviations |
 | focus-return | an AppKit text field takes first responder (its field editor), then `focusActiveContent` makes the page's own view the first responder again; the same again with a DevTools window open, with no activation or alpha guard counted during the call; with the candidate count forced to 2 (`NOCHE_TEST_PAGE_VIEWS`) the responder stays on the field and one ambiguous-focus line is counted (the line itself goes to stderr, which the script does not capture); the NO_FOCUS and NO_AMBIGUOUS_GUARD negative controls fail it |
 | newtab-surface | `webContentHidden` YES removes the page view from view while the window keeps one tab and a JS evaluation in that hidden tab still returns; NO shows the view again at the exact previous rect with the corner mask; hiding then activating or opening another tab shows the page again (bridge rule: any active-tab switch clears the flag; the caller sets it again) and JS works in both tabs; the NO_HIDE and NO_UNHIDE negative controls fail it |
 | eval-async | evaluation completions never run inside a CEF callback (a normal reply, and a tab closed while evaluating); closed or closing tabs fail with "tab closed", later and never before the call returns |
@@ -115,6 +114,39 @@ The M1.1 checks that typed into the address field (`navigate`, `load-error`, `lo
 
 Negative controls added in M1.3 (`--negative`): `history-record` NOCHE_TEST_NO_RECORD, `cb-layout` NOCHE_TEST_BAR_LAYOUT, `cb-open` NOCHE_TEST_BAR_NOFOCUS, `cb-motion` NOCHE_TEST_BAR_NOMOTION, `cb-go` NOCHE_TEST_BAR_NOGO and NOCHE_TEST_BAR_ROUTE, `cb-escape` NOCHE_TEST_BAR_ESC and NOCHE_TEST_NO_FOCUS, `cb-arrows` NOCHE_TEST_BAR_NOARROWS, `cb-inline` NOCHE_TEST_BAR_INLINE, `cb-switch-tab` NOCHE_TEST_BAR_DUPTAB, `cb-outside` NOCHE_TEST_BAR_NOOUTSIDE, `cb-nonet` NOCHE_TEST_NO_DEBOUNCE, NOCHE_TEST_HOST_SWAP, NOCHE_TEST_HOST_SWAP_UNGUARDED and NOCHE_TEST_REMOTE_IGNORE_OFF, `cb-nonet-default` NOCHE_TEST_REMOTE_IGNORE_OFF, `cb-open` NOCHE_TEST_BAR_NOFOCUSLOC, `cb-inline` NOCHE_TEST_BAR_STALEDELETE, `history-record` NOCHE_TEST_TYPED_STICKY, `cb-history` NOCHE_TEST_NO_RECORD. Each must fail on its own `NOCHE_TEST <check> fail` line.
 
+## M1.4 menu checks
+
+The menu bar is `MenuTable.bar` (`Sources/Noche/MenuTable.swift`, the only place items are defined); keys and modifiers come from NocheCore's `ShortcutDefaults` by id (`table` for the Settings rows, `fixed` for system items and the key commands that have no menu item). `Tests/fixtures/app/menu-expected.txt` is the transcription of live-ui.md section 9 the checks compare with.
+
+| Check | What it asserts |
+|---|---|
+| menu-diff | the live bar, walked recursively after each menu validated itself, equals `menu-expected.txt` line for line (`<menu path>|<title>|<key>|<modifiers>|<enabled in a one-tab window>`, separators as `---`, the 11 key commands as `command` lines): 166 lines. Rows AppKit adds itself (Window tiling rows, the window list, the Help search field) carry no Noche mark and are the skipped system rows. `r` means nil-targeted (the responder chain decides; not asserted). Also: every item without an action names a milestone. The dump maps the owner's Spanish-layout glyphs back to US keys and the ellipsis to three dots. Negative pair: `NOCHE_TEST_MENU_DRIFT=1` drops History > Show History... |
+| menu-disabled | every disabled item that has a key equivalent (32 in a one-tab window: later-milestone items, Go Back and Forward, Reopen Closed Tab) is fired through the menu key route: no action counted, no Chrome command logged, no tab or window changed; the positive control Cmd+R then reloads once. Negative pair: `NOCHE_TEST_MENU_NODISABLE=1` makes `ShortcutMenu` act on a disabled item |
+| menu-actions | the items with no shortcut: Tabs > Duplicate (a second tab, same address, new one active, one action), View > Show Full URL (the toolbar address shows the whole URL, then the host again, with its checkmark), View > Appearance (Dark, Light, Automatic set `NSApp.appearance`, with checkmarks). Negative pairs: `NOCHE_TEST_NO_DUPLICATE=1` and `NOCHE_TEST_NO_FULLURL=1` |
+
+Superseded: the M1.1 `menu` check (the 48-line M1.1 list) is replaced by `menu-diff`; its nil-targeted edit assertion lives on in the `r` rows. The Tabs items M1.2 added (Cmd+1 to Cmd+9, Ctrl+Shift+Page Down and Up) are not in section 9, so they are no longer menu items: they are `MenuTable.commands`, matched by `ShortcutMenu` with the same exact matching, and `tab-chords`, `move-tab-relaunch` and `tabs-keys` still pass unchanged.
+
+Negative controls added in M1.4 task 2 (`--negative`): `menu-diff` NOCHE_TEST_MENU_DRIFT, `menu-disabled` NOCHE_TEST_MENU_NODISABLE, `menu-actions` NOCHE_TEST_NO_DUPLICATE and NOCHE_TEST_NO_FULLURL, `shortcuts-once` NOCHE_TEST_NO_CLOSEALL (Close All Tabs does nothing).
+
+Items present and disabled until their feature exists (`docs` requirement; the milestone is in the table row and `menu-diff` fails on a disabled item without one):
+
+| Item (menu) | Arrives |
+|---|---|
+| Check for Updates..., Settings... (Noche) | M1.8 |
+| Import from Another Browser... (Noche), New Incognito Window, Share... (File), Move to Window (Tabs), Task Manager, Merge All Windows (Window), Copy Diagnostics (Help) | not placed in a roadmap row yet ("unscheduled") |
+| New Tab in Group, Clean Up Tabs (File); Show Tabs in Sidebar (View); Search Tabs..., Pin, New Group with Tab, Move to Group, Rename..., Change Icon... (Tabs) | M1.6 |
+| Chat..., Focus Chat (File) | M2 |
+| Find..., Find Next, Find Previous, Use Selection for Find (Edit > Find) | M1.4 task 4 (the find bar) |
+| AutoFill > Contact..., Passwords..., Credit Card... (Edit) | M1.10 |
+| Open Split Pane, Focus Next Split Pane, Focus Previous Split Pane (View) | M1.10 |
+| Show Bookmarks Bar > Always, On New Tab Only, Never, Toggle Bookmarks Bar (View); Bookmark This Page, Manage Bookmarks, Bookmarks Bar, Other Bookmarks (Bookmarks) | M1.5 |
+| Move to Profile (Tabs) | M1.7 |
+| Add Extension..., Manage Extensions..., Pin Extensions... (Extensions) | M1.9 |
+
+Omitted on purpose (no Noche counterpart, see the header of `menu-expected.txt`): Invite, the plan label, Upgrade Plan, Sign Out, Chat with Support, Video Tour, Status, Record Performance Issue, the per-profile Window items, the installed-extension list and the Recent Bookmarks entries. Move to Group, Move to Profile, Move to Window and Bookmarks Bar are dynamic submenus in the reference: here single disabled items. History > Show History... opens `chrome://history` and Window > Downloads opens `chrome://downloads` in a new tab until M1.5.
+
+Menu calls: Window > Arrange in Front runs `NSApp.arrangeInFront` through an app action because AppKit retitles the system selector "Bring All to Front"; Enter Full Screen and Emoji & Symbols have no key shown (the reference's Fn+F and Fn+E come from macOS); Appearance Light uses system colors until light is captured; Show Full URL is per app run (the Settings of M1.8 will persist it).
+
 ## Builder calls and rulings
 
 Calls the design left open:
@@ -154,6 +186,7 @@ M1.3 command bar calls (every CALL item of the research note, adopted as written
 
 Deviations and rulings that change behavior:
 
+- Opt+Cmd+C (Inspect Elements) and Opt+Shift+Cmd+C (Copy URL as Markdown) are claimed by the engine's own accelerator before the menu sees them: with a window in the way the engine opens DevTools in inspect mode and Noche's menu never runs, so Copy URL as Markdown works from the menu but not from the keyboard until the bridge claims the key (a CEF key handler that asks the menu first). The check delivers both keys to the menu directly. Reported, not fixed here.
 - The sidebar hide motion takes about 130 ms in the reference, with a 15 ms tolerance: the limit is 145 ms. Show has a 125 ms limit. The recorded run has Cmd+S hide at 129 ms and the button hide at 130 ms against 145 ms, and show at 118 ms against 125 ms (a hidden window gets no display-link frames, so the motion is timed from the main thread).
 - `tabs-rapid` uses 20 Cmd+W.
 - Window frames are AppKit global coordinates (origin bottom-left of the primary screen), converted to CEF's top-left DIPs once, in `NCWindow` (`cefInitialBounds`). An earlier cause "unknown" of a window opening 2320 wide at x 240 was two things: the bridge passed bottom-left y to a top-left API (fixed), and a left-edge band that macOS keeps windows out of. On this Mac that band is the Stage Manager strip (240 pt on the 2560x1440 screen, 112 pt on the second one): a window asked to start inside it is moved to its edge and cut to fit, whoever asks. AppKit's `constrainFrameRect` does not move it, and the WindowManager process owns windows inside that band. This is outside Noche's control, so `window-frame` and the self-test windows start at least 300 pt from a screen's left edge.

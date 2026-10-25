@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var storeFallback: String?
     var windows: [NCWindow] { controllers.map(\.window) }
     var searchTemplate = AddressInput.defaultSearchTemplate
+    /// View > Show Full URL: the toolbar address shows the whole address instead of the host.
+    var showFullURL = false
     private var finished = false
     private var exitCode: Int32 = 0
     private var status: Int?
@@ -199,20 +201,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func goForward(_ s: Any?) { active?.goForward() }
     @objc func nextTab(_ s: Any?) { active?.selectNextTab() }
     @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
-    @objc func selectTabNumber(_ s: NSMenuItem) { active?.selectTab(at: s.tag - 1) }
-    @objc func selectLastTab(_ s: Any?) { active?.selectTab(at: nil) }
-    @objc func moveTabForward(_ s: Any?) { active?.moveTab(1) }
-    @objc func moveTabBackward(_ s: Any?) { active?.moveTab(-1) }
+    @objc func closeAllTabs(_ s: Any?) { active?.closeAllTabs() }
+    @objc func copyURLMarkdown(_ s: Any?) { active?.copyURLMarkdown() }
+    @objc func printPage(_ s: Any?) { active?.printPage() }
+    @objc func inspectElements(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_INSPECT", note: "inspectElements") }
+    @objc func javaScriptConsole(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_CONSOLE", note: "javaScriptConsole") }
+    @objc func duplicateTab(_ s: Any?) { active?.duplicateTab() }
+    /// History and Downloads are Chromium's own pages in a new tab until M1.5 has Noche's.
+    @objc func showHistory(_ s: Any?) { openPage("chrome://history", note: "showHistory") }
+    @objc func showDownloads(_ s: Any?) { openPage("chrome://downloads", note: "showDownloads") }
+    private func openPage(_ url: String, note: String) {
+        if let a = active { a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
+    }
+    @objc func arrangeWindowsInFront(_ s: Any?) { NSApp.arrangeInFront(s) }
+    @objc func toggleFullURL(_ s: Any?) { showFullURL.toggle(); controllers.forEach { $0.refresh() } }
+    /// Automatic, Light and Dark by tag. Dark is the only captured theme; light uses the system's colors until it is captured.
+    @objc func setAppearance(_ s: NSMenuItem) { NSApp.appearance = [nil, NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)][s.tag] }
 
+    /// The rule of the item's table row decides (MenuTable); items that are not table rows (AppKit's own) stay enabled.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        switch item.action {
-        case #selector(toggleSidebar(_:)): item.state = active?.sidebarHidden == true ? .on : .off
-        case #selector(goBack(_:)): return active?.window.activeTab?.canGoBack ?? false
-        case #selector(goForward(_:)): return active?.window.activeTab?.canGoForward ?? false
-        case #selector(reopenClosedTab(_:)): return !closing && (writer?.hasClosed ?? false)
-        default: break
-        }
-        return true
+        guard let rule = (item.representedObject as? MainMenu.Rule)?.entry else { return true }
+        let ctx = MenuContext(app: self, window: active)
+        if let state = rule.state { item.state = state(ctx) ? .on : .off }
+        return rule.enabled(ctx)
     }
 
     /// Called by NCApplication.terminate (Cmd+Q).

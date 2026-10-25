@@ -162,35 +162,6 @@ extension SelfTest {
         finish(bad.isEmpty && violations.isEmpty, "titles of 300 W, Arabic and emoji stay inside rows of pitch 37, no ellipsis, fade mask, placeholder favicon \(bad) \(violations)")
     }
 
-    static let expectedMenu = [
-        "Noche||", "About Noche||", "Hide Noche|h|cmd", "Hide Others|h|opt+cmd", "Show All||", "Quit Noche|q|cmd",
-        "File||", "New Tab|t|cmd", "New Window|n|cmd", "Reopen Closed Tab|t|shift+cmd", "Open Command Bar|l|cmd", "Close Window|w|shift+cmd", "Close Tab|w|cmd",
-        "Edit||", "Undo|z|cmd", "Redo|z|shift+cmd", "Cut|x|cmd", "Copy|c|cmd", "Copy URL|c|shift+cmd", "Paste|v|cmd", "Select All|a|cmd",
-        "View||", "Refresh|r|cmd", "Force Refresh the Page|r|shift+cmd", "Auto-Hide Tabs|s|cmd", "Zoom to Actual Size|0|cmd",
-        "Zoom In|+|cmd", "Zoom Out|-|cmd", "Developer||", "Developer Tools|i|opt+cmd",
-        "Tabs||", "Go Back|[|cmd", "Go Forward|]|cmd", "Next Tab|]|shift+cmd", "Previous Tab|[|shift+cmd",
-        "Move Tab Forward|\u{F72D}|ctrl+shift", "Move Tab Backward|\u{F72C}|ctrl+shift",
-        "Select Tab 1|1|cmd", "Select Tab 2|2|cmd", "Select Tab 3|3|cmd", "Select Tab 4|4|cmd", "Select Tab 5|5|cmd", "Select Tab 6|6|cmd",
-        "Select Tab 7|7|cmd", "Select Tab 8|8|cmd", "Select Last Tab|9|cmd",
-        "Window||", "Minimize|m|cmd",
-    ]
-
-    func menu() async {
-        guard let menu = NSApp.mainMenu else { return finish(false, "no main menu") }
-        // AppKit adds an AutoFill group to the Edit menu itself.
-        let injected: Set<String> = ["AutoFill||", "Contact…||", "Passwords…||", "Credit Card…||"]
-        let got = MainMenu.dump(menu).filter { !injected.contains($0) }
-        if got != Self.expectedMenu {
-            let diff = zip(got, Self.expectedMenu).enumerated().first { $0.element.0 != $0.element.1 }
-            return finish(false, "menu differs: \(got.count) lines vs \(Self.expectedMenu.count), first difference \(String(describing: diff)); live menu \(got)")
-        }
-        // The edit actions have no target: AppKit sends them to the key window's first responder.
-        let editTitles: Set<String> = ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
-        let edit = menu.items.first { $0.title == "Edit" }?.submenu?.items.filter { editTitles.contains($0.title) } ?? []
-        guard edit.count == 6, edit.allSatisfy({ $0.target == nil }) else { return finish(false, "edit items with a target: \(edit.filter { $0.target != nil }.map(\.title))") }
-        finish(true, "\(got.count) menu lines equal the M1.1 list (plus the tab by-number and move items of M1.2), the 6 edit actions are nil-targeted")
-    }
-
     func sidebarToggle() async {
         guard await ready(), let ctl else { return }
         /// Milliseconds from the synthesized key event (or click) to the settled frame: cmdS is synchronous, so this is exact.

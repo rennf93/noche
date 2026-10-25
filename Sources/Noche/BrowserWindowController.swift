@@ -86,6 +86,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var actionCounts: [String: Int] = [:]
     static var commandLog: [Int] = []
     static var pasteboard = NSPasteboard.general
+    /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
+    static var suppressChrome = false
     var toggleStart: TimeInterval = 0, toggleEnd: TimeInterval = 0
     var cardLog: [(t: TimeInterval, x: CGFloat)] = []
 #endif
@@ -206,7 +208,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         let tab = activeTab
         toolbar.back.isEnabled = tab?.canGoBack ?? false
         toolbar.forward.isEnabled = tab?.canGoForward ?? false
-        toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : AddressInput.displayHost(shownURL($0)) } ?? ""
+        toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : (app.showFullURL ? shownURL($0) : AddressInput.displayHost(shownURL($0))) } ?? ""
         toolbar.address.isHidden = commandBar.isOpen && commandBar.placement == .overlay
     }
 
