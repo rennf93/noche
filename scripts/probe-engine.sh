@@ -85,6 +85,8 @@ for CHECK in "$@"; do
     FAILED=1; continue
   fi
   REPORTS_BEFORE="$(crash_reports)"
+  # probe.log is rewritten by every launch (freopen "w" in main.mm); remove it first so a launch that dies before that cannot show an old launch's lines.
+  rm -f "$HOME/Library/Application Support/Noche Probe/probe.log"
   HIST_MAX0=0
   [[ "$CHECK" == download-control-rejected ]] && HIST_MAX0="$(hist_query 'select coalesce(max(id),0) from downloads' | tr -d ' ')"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
