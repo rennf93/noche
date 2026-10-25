@@ -1,0 +1,107 @@
+Fix round 2 evidence (probe binary built from the tree at 49dcb99 for the probe runs; engine vendor 156.0.18-noche.3663+g50b4e3d)
+
+## download-keep-quit: EXPECTED RED UNTIL BUILD
+Probe: Profile 1 window navigates to mid.bin, is closed mid-download (download dir keeps growing with no window), the probe releases every reference of its own and finishes, the engine quits with the kept download running.
+Current engine g50b4e3d: the check's own assertions pass, then the engine aborts at quit (rc 134, DCHECK all_.empty() at cef/libcef/browser/browser_context.cc:45). Run 2 times, same result.
+PROBE download-keep-quit info assert window-loaded PASS: B first tab loaded
+PROBE download-keep-quit info assert download-started PASS: download dir holds 1048576 bytes
+PROBE download-keep-quit info assert window-closed-download-kept PASS: window destroyed=1; download dir 1245184 -> 6422528 bytes over 2.5 s with no window (want growth)
+PROBE download-keep-quit pass download-keep-quit: every assertion held
+PROBE crash signal=06
+PROBE crash fault_addr=0x197bf5650 pc=0x197bf5650 lr=0x197c3197c
+PROBE download-keep-quit fail exit-rc=134 watchdog=0
+[81240:61561950:1025/210157.649002:FATAL:cef/libcef/browser/browser_context.cc:45] DCHECK failed: all_.empty().
+Cause (re-review answer d): the kept request holds its CefBrowser (kept_browser_), which holds the browser's CefRequestContextImpl (browser_host_base.h request_context_), so the CefBrowserContext cannot shut down and is still registered in ImplManager::all_ at CefShutdown.
+Prepared fix: engine/patches/0008 (this commit). The destruction observer stays registered for the CEF context after the browser is gone while requests are kept, so OnContextDestroyed reaches CancelKeptRequests, which releases the kept CefBrowser references. NOT BUILT, NOT PROVEN: the engine build needs the owner's go; the probe above must turn green (rc 0) with it. The release happens on the IO thread after a post from the UI thread, so whether it runs before the context set is checked at CefShutdown is unproven.
+The patch re-applies on the base (git am onto 804d57968 files, checked). Delta of this change: see the report, section Fix round 2.
+
+## 0008 pause and resume retries
+engine/patches/0008 CefDownloadItemCallbackImpl::GiveUp logs an error when the 50 x 100 ms retries run out (DoPause and DoResume). CefDownloadItemCallback::Pause()/Resume() return nothing, so the embedder sees the failure as an unchanged item in its next OnDownloadUpdated; an error return would be an API change. Not built, not probed (no probe can make an item stay without a path).
+
+## E15 item 3 (context destroyed with a kept request)
+Unproven. README 0008 now says why: releasing the last CefRequestContext does not destroy a profile with a kept download (the kept request references the context), so CancelKeptRequests only runs at CefShutdown or proxy shutdown, where the process exits before a probe can see that no callback arrived. The promise in include/cef_resource_request_handler.h stays as the target.
+
+## main.mm timeout lines
+Forced SW error (NOCHE_PROBE_FORCE_SW_ERROR=1 scripts/probe-engine.sh ext-loaded), the last error text and the window state are in the fail line:
+PROBE ext-loaded fail no answer from the service worker in 30s; last answer {"error":"forced by NOCHE_PROBE_FORCE_SW_ERROR"} (window: nsvisible=0 occlusionVisible=0 cefIsVisible=0 cefIsActive=0)
+PROBE ext-loaded fail exit-rc=1 watchdog=0
+
+## discard-p1, discard-p3, discard-api alone (display awake again, occlusion no longer blocks)
+PROBE discard-p1 pass discarded=5 of 5 background tabs, all original CefBrowser ids valid=1, activation reload OnLoadEnd=1 (115 ms), active-tab explicit discard reply {"id":1055833276,"discarded":true,"ok":true}
+PROBE discard-p3 pass visible 9.73/s, hidden after 10 s 0.95/s (want <= 2.5, about 1), hidden=1, freeze not within 50 s
+PROBE discard-api pass DiscardTab + OnTabDiscarded(true then false) + active tab refused + reload + browser valid after discard=1 + document.wasDiscarded=true
+Earlier today the same three timed out or failed with the hidden window not receiving frames (gate3: discard-p1 timeout, discard-p3 hidden=0, discard-api reload OnLoadEnd=0), together with switch-latency occlusionVisible=0 which also failed on the 59ee574 probe code (run recorded in the fix report). They pass now, so the earlier failures were the environment, not the fix commits.
+
+## profile-clear rc 139 (one crash in the gate)
+Alone, 10 of 10 runs pass (rc 0, no PROBE crash line), loads 5.9 to 16.4:
+run=1 load=7.30 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=2 load=7.82 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=3 load=9.91 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=4 load=6.27 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=5 load=9.72 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=6 load=11.87 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=7 load=16.36 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=8 load=7.67 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=9 load=7.33 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+run=10 load=5.94 rc=0 PROBE profile-clear pass profile-clear: every assertion held| 
+PC10 DONE
+Open item: 1 crash (rc 139, SIGSEGV, after a "timeout") in 15 runs of profile-clear (1 in the gate at load about 4 to 7, 14 passes after it: 4 + 10); cause not found, no stack captured because it did not recur. If it recurs capture the PROBE crash lines and DiagnosticReports.
+
+## App tests under the shared lock
+solo crash-mid-write rc=0 load=6.79 :: NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []|NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []|
+solo hidden rc=0 load=7.12 :: NOCHE_TEST hidden pass windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=0 title="Noche App Fixture" violations=[]|
+solo crash-mid-write rc=0 load=5.60 :: NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []|NOCHE_TEST crash-mid-write pass phase 2: restored the previous snapshot whole (2 tabs, selected index 0) []|
+solo hidden rc=0 load=5.81 :: NOCHE_TEST hidden pass windows=1 tabs=1 alpha=0.0 key=false active=false level=3 clickthrough=true activations-blocked=0 alpha-attempts-own=0 title="Noche App Fixture" violations=[]|
+full rc=0 pass=70
+NOCHE_TEST load-error-link pass link to a closed port: row title and address show localhost, Cmd+L seeds http://localhost:1, Back returns to the page and clears the failure []
+neg rc=0
+APP3 DONE
+
+## profile-upgrade hook RED and seed script (re-review item 6)
+scripts/seed-old-profile.sh run (3659 profile seeded from a scratch worktree):
+cef_version=156.0.14-noche.3659+g18b1359+chromium-156.0.8078.48
+PROBE profile-upgrade info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info profile root /private/tmp/claude-501/-Users-renzof-Documents-GitHub-ZZZ-noche/d88195dd-9fe5-4172-8b44-5c94520d2457/scratchpad/oldroot
+PROBE profile-upgrade info assert page-loaded PASS: document.title of the first tab: 'probe'
+PROBE profile-upgrade info alpha-guard hooked calls=5
+PROBE profile-upgrade info activate calls blocked=0
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-upgrade info frontmost samples=23 probe-frontmost=0 unknown=0
+PROBE profile-upgrade info crash reports: none new
+seeded old-engine profile at /private/tmp/claude-501/-Users-renzof-Documents-GitHub-ZZZ-noche/d88195dd-9fe5-4172-8b44-5c94520d2457/scratchpad/oldroot
+profile-upgrade on that profile, current engine, plain build, then hook build with the env unset, then RED with NOCHE_TESTHOOKS=1 NOCHE_TEST_NO_UPGRADE_FEATURES=1:
+## GREEN plain build (bridge enables the two names)
+PROBE profile-upgrade info assert page-loaded PASS: document.title of the first tab: 'probe'
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+rc=
+## GREEN hook build, env unset
+PROBE profile-upgrade info assert page-loaded PASS: document.title of the first tab: 'probe'
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+rc=
+## RED hook build, NOCHE_TEST_NO_UPGRADE_FEATURES=1
+PROBE profile-upgrade fail exit-rc=134 watchdog=0
+rc=
+Plain build strings | grep -c NOCHE_TEST: 0 (see the report gate).
+
+## One-off failing lines for the assertions changed in round 2
+### ONE-OFF keep-stream-exactly-once | edit in Probes/EngineProbe/surfaces.mm : recs.size() == 1, => recs.size() == 2,
+PROBE download-keep-stream info assert d-on-resource-load-complete-exactly-once FAIL: 1 OnResourceLoadComplete for the held request (want exactly 1, measured on 3659 and 3663): browser=2 status=4 valid=0
+PROBE download-keep-stream fail kept-request contract, non-download stream: 1 assertion(s) failed: d-on-resource-load-complete-exactly-once
+### ONE-OFF clear-cb-destroyed-once | edit in Probes/EngineProbe/profiles.mm : *nDestroyed == 1, [NSString => *nDestroyed == 2, [NSString
+PROBE profile-clear-callbacks info assert destroyed-context-callback-once FAIL: callbacks after the context was released mid-removal and 3 s: 1 (want exactly 1, measured; the engine is still running, so no crash)
+PROBE profile-clear-callbacks fail profile-clear-callbacks: FAILED assertions destroyed-context-callback-once
+### ONE-OFF keepquit-grows | edit in Probes/EngineProbe/profiles.mm : destroyed && b1 > b0 + 500000, => destroyed && b1 > b0 + 500000000,
+PROBE download-keep-quit info assert window-closed-download-kept FAIL: window destroyed=1; download dir 1245184 -> 6356992 bytes over 2.5 s with no window (want growth)
+PROBE download-keep-quit fail download-keep-quit: FAILED assertions window-closed-download-kept
+### ONE-OFF keepquit-started | edit in Probes/EngineProbe/profiles.mm : DirBytesOf(dir) > 1000000; }, [=](bool started) { => DirBytesOf(dir) > 1000000000; }, [=](bool started) {
+PROBE download-keep-quit info assert download-started FAIL: download dir holds 25165824 bytes
+PROBE download-keep-quit info assert window-closed-download-kept FAIL: window destroyed=1; download dir 25165824 -> 25165824 bytes over 2.5 s with no window (want growth)
+PROBE download-keep-quit fail download-keep-quit: FAILED assertions download-started window-closed-download-kept

@@ -288,3 +288,5 @@ PROBE profile-clear-callbacks info guard orderWindow:relativeTo: class=NSStatusB
 PROBE profile-clear-callbacks fail exit-rc=1 watchdog=0
 PROBE profile-clear-callbacks info frontmost samples=3 probe-frontmost=0 unknown=0
 PROBE profile-clear-callbacks info crash reports: none new
+
+Fix round 2: profile-upgrade hook RED (rc 134), the seed script run and the profile-clear 1-in-15 open item are in docs/engine/evidence/fix-round-2.txt.

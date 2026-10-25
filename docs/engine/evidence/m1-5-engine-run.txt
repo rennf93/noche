@@ -951,3 +951,5 @@ datasharing=on run=87 rc=0 NOCHE_TEST quit-early pass quit right after the first
 datasharing=on run=88 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
 datasharing=on run=89 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
 datasharing=on run=90 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+
+Fix round 2: the kept-state pin that aborts quit (download-keep-quit, expected red until build), the retry give-up log and the E15 item 3 status are in docs/engine/evidence/fix-round-2.txt.
