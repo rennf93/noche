@@ -83,9 +83,21 @@ using WP = std::shared_ptr<Win>;
 std::vector<WP> g_wins;
 std::function<void(CefRefPtr<CefBrowser>)> g_observe;
 
+// Downloads in these windows go to the harness's temp download directory (deleted on exit), never to ~/Downloads.
+class PDl : public CefDownloadHandler {
+ public:
+  bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>, const CefString& name, CefRefPtr<CefBeforeDownloadCallback> cb) override {
+    const char* d = getenv("NOCHE_PROBE_DL_DIR");
+    cb->Continue(std::string(d ? d : NSTemporaryDirectory().UTF8String) + "/" + name.ToString(), false);
+    return true;
+  }
+ private:
+  IMPLEMENT_REFCOUNTING(PDl);
+};
 class PClient : public CefClient, public CefLoadHandler, public CefLifeSpanHandler {
  public:
   explicit PClient(WP w) : w_(w) {}
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return new PDl(); }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override { w_->closed.insert(b->GetIdentifier()); }
@@ -391,40 +403,53 @@ void CheckStorage(H h) {
 }
 
 // ---- profile-ext ----
+// The command line loads fixture X (probe-extension) and fixture Y (probe-extension-b) into EVERY profile. The check removes X from B and Y from A
+// with each fixture's own chrome.management.uninstallSelf, so afterwards A's registry holds only X and B's only Y, and everything below compares two
+// profiles that really hold different extensions: B has no entry for X and no X action, A none for Y, chrome.tabs in each only lists its own window.
 #ifdef NOCHE_ACTIONS_API
+const char* kNameX = "Noche engine probe extension";
+const char* kNameY = "Noche second probe extension";
 struct ActObs : CefExtensionActionObserver {
-  int added = 0, updated = 0;
-  std::string lastBadge;
-  void OnActionAdded(CefRefPtr<CefExtensionAction>) override { added++; }
-  void OnActionUpdated(CefRefPtr<CefExtensionAction> a) override { updated++; if (a) lastBadge = a->GetBadgeText(nullptr).ToString(); }
+  int xUpdates = 0, yUpdates = 0;
+  void OnActionUpdated(CefRefPtr<CefExtensionAction> a) override {
+    if (!a) return;
+    const std::string n = a->GetName().ToString();
+    if (n == kNameX) xUpdates++; else if (n == kNameY) yUpdates++;
+  }
   IMPLEMENT_REFCOUNTING(ActObs);
 };
 std::string ActionNames(CefRefPtr<CefBrowserView> v) {
   std::vector<CefRefPtr<CefExtensionAction>> all;
   if (v) v->GetExtensionActions(all);
+  std::vector<std::string> n;
+  for (auto& a : all) n.push_back(a->GetName().ToString());
+  std::sort(n.begin(), n.end());
   std::string s;
-  for (auto& a : all) s += (s.empty() ? "" : "|") + a->GetName().ToString();
+  for (auto& x : n) s += (s.empty() ? "" : "|") + x;
   return s.empty() ? "(none)" : s;
 }
-std::string BadgeOf(CefRefPtr<CefBrowserView> v, CefRefPtr<CefBrowser> tab) {
+std::string BadgeOf(CefRefPtr<CefBrowserView> v, CefRefPtr<CefBrowser> tab, const char* name) {
   std::vector<CefRefPtr<CefExtensionAction>> all;
   if (v) v->GetExtensionActions(all);
-  for (auto& a : all) if (a->GetName().ToString().find("Noche engine probe extension") != std::string::npos) return a->GetBadgeText(tab).ToString();
+  for (auto& a : all) if (a->GetName().ToString() == name) return a->GetBadgeText(tab).ToString();
   return "(no action)";
 }
 #endif
 
-// One extension command in the service worker behind |tab| (the content script relays 'noche-cmd', see the fixture), answer as JSON.
-void ExtOn(H h, CefRefPtr<CefBrowser> tab, NSDictionary* cmd, std::function<void(NSDictionary*)> cb) {
+// One command in the service worker of fixture X (second=false) or Y (second=true) behind |tab| (the content script relays 'noche-cmd' / 'noche-cmd-b').
+void ExtOn(H h, CefRefPtr<CefBrowser> tab, NSDictionary* cmd, bool second, std::function<void(NSDictionary*)> cb) {
+  if (!tab) { cb(@{@"error" : @"no tab"}); return; }
   NSData* json = [NSJSONSerialization dataWithJSONObject:@[ [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:cmd options:0 error:nil] encoding:NSUTF8StringEncoding] ] options:0 error:nil];
   NSString* arr = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
-  NSString* js = [NSString stringWithFormat:@"delete document.documentElement.dataset.nocheReply; document.dispatchEvent(new CustomEvent('noche-cmd', {detail: %@[0]})); 'sent'", arr];
-  if (!tab) { cb(@{@"error" : @"no tab"}); return; }
+  NSString* evt = second ? @"noche-cmd-b" : @"noche-cmd";
+  NSString* key = second ? @"nocheReplyB" : @"nocheReply";
+  NSString* js = [NSString stringWithFormat:@"delete document.documentElement.dataset.%@; document.dispatchEvent(new CustomEvent('%@', {detail: %@[0]})); 'sent'", key, evt, arr];
+  NSString* readJs = [NSString stringWithFormat:@"document.documentElement.dataset.%@ || ''", key];
   auto tries = std::make_shared<int>(0);
   auto poll = std::make_shared<std::function<void()>>();
   *poll = [=] {
     if (h->done()) return;
-    Ev(h, tab, @"document.documentElement.dataset.nocheReply || ''", false, [=](NSString* r) {
+    Ev(h, tab, readJs, false, [=](NSString* r) {
       if (r.length) {
         NSDictionary* j = [NSJSONSerialization JSONObjectWithData:[r dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
         *poll = nullptr;
@@ -449,77 +474,73 @@ int CountSide(NSDictionary* j, NSString* side) {
   for (NSDictionary* t in j[@"tabs"]) if ([[NSString stringWithFormat:@"%@", t[@"url"]] containsString:side]) n++;
   return n;
 }
+// "x/y": which fixture content scripts ran on the page ("1" or "-").
+void Mark(H h, CefRefPtr<CefBrowser> tab, std::function<void(NSString*)> cb) {
+  Ev(h, tab, @"(document.documentElement.dataset.nocheExt || '-') + '/' + (document.documentElement.dataset.nocheExtB || '-')", false, cb);
+}
 
 void CheckExt(H h) {
+#ifndef NOCHE_ACTIONS_API
+  g_c.Ok("actions-api", false, @"built without NOCHE_ACTIONS_API");
+  End(h, @"profile-ext");
+#else
   auto cB = MakeCtx(Dir(@"Profile 1"));
   auto w = Open(cB, Localhost(Page(h, @"index.html?side=B&n=1")));
   auto tabA1 = h->first();
   auto tabA2 = h->view()->AddTab(Page(h, @"index.html?side=A&n=2").UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
   tabA1->GetMainFrame()->LoadURL(Page(h, @"index.html?side=A&n=1").UTF8String);
   WaitFor(h, 20000, [=] { return Loaded(w, w->first()); }, [=](bool loaded) {
-    g_c.Ok("B-window-loaded", loaded && tabA2, @"B window first tab loaded, A has a second tab");
     auto bFirst = TabOf(w->view, w->first());
     auto b2 = w->view->AddTab(Localhost(Page(h, @"index.html?side=B&n=2")).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
     auto b3 = w->view->AddTab(Localhost(Page(h, @"index.html?side=B&n=3")).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
-    g_c.Ok("B-has-three-tabs", b2 && b3 && w->view->GetTabCount() == 3 && h->view()->GetTabCount() == 2, [NSString stringWithFormat:@"B tabs %zu, A tabs %zu", w->view->GetTabCount(), h->view()->GetTabCount()]);
-    Later(3.0, [=] {  // page loads and the content script's own run
-      Ev(h, bFirst, @"document.documentElement.dataset.nocheExt || 'no-content-script'", false, [=](NSString* markB) {
-        PI(@"content script marker in B first tab: %@ (the fixture is loaded with --load-extension; 1 means the extension is loaded in profile B too)", markB);
-        const bool extInB = [markB isEqualToString:@"1"];
-#ifdef NOCHE_ACTIONS_API
-        PI(@"toolbar actions: A=%s B=%s", ActionNames(h->view()).c_str(), ActionNames(w->view).c_str());
+    g_c.Ok("windows-set-up", loaded && tabA2 && b2 && b3 && w->view->GetTabCount() == 3 && h->view()->GetTabCount() == 2, [NSString stringWithFormat:@"B tabs %zu (want 3), A tabs %zu (want 2)", w->view->GetTabCount(), h->view()->GetTabCount()]);
+    Later(3.0, [=] {
+      Mark(h, tabA1, [=](NSString* mA) { Mark(h, bFirst, [=](NSString* mB) {
+        PI(@"before removal: content scripts in A first tab %@, in B first tab %@ (X/Y); actions A=%s B=%s", mA, mB, ActionNames(h->view()).c_str(), ActionNames(w->view).c_str());
+        g_c.Ok("premise-both-fixtures-in-both-profiles", [mA isEqualToString:@"1/1"] && [mB isEqualToString:@"1/1"], [NSString stringWithFormat:@"content scripts X/Y: A %@, B %@ (the command line loads both fixtures into every profile)", mA, mB]);
         CefRefPtr<ActObs> obsA = new ActObs(), obsB = new ActObs();
         h->view()->AddExtensionActionObserver(obsA);
         w->view->AddExtensionActionObserver(obsB);
-#endif
-        ExtOn(h, tabA1, @{@"what" : @"tabsinfo"}, [=](NSDictionary* ta) {
-          PI(@"A chrome.tabs.query: %@", ta[@"error"] ?: TabUrlsOf(ta));
-          g_c.Ok("A-tabs-are-A-only", !ta[@"error"] && CountSide(ta, @"side=A") == 2 && CountSide(ta, @"side=B") == 0 && [ta[@"tabs"] count] == 2, [NSString stringWithFormat:@"A sees %lu tabs, %d of A, %d of B", (unsigned long)[ta[@"tabs"] count], CountSide(ta, @"side=A"), CountSide(ta, @"side=B")]);
-          ExtOn(h, extInB ? bFirst : nullptr, @{@"what" : @"tabsinfo"}, [=](NSDictionary* tb) {
-            if (extInB) {
-              PI(@"B chrome.tabs.query: %@", tb[@"error"] ?: TabUrlsOf(tb));
-              g_c.Ok("B-tabs-are-B-only", !tb[@"error"] && CountSide(tb, @"side=B") == 3 && CountSide(tb, @"side=A") == 0 && [tb[@"tabs"] count] == 3, [NSString stringWithFormat:@"B sees %lu tabs, %d of B, %d of A", (unsigned long)[tb[@"tabs"] count], CountSide(tb, @"side=B"), CountSide(tb, @"side=A")]);
-            } else {
-              g_c.Ok("B-tabs-are-B-only", false, @"NOT RUN: the extension is not loaded in profile B, so chrome.tabs in B cannot be asked (profile B has no entry, which is no leak, but the B side of the check has no witness)");
-            }
-            ExtOn(h, tabA1, @{@"what" : @"windowNormal"}, [=](NSDictionary* wa) {
-              ExtOn(h, extInB ? bFirst : nullptr, @{@"what" : @"windowNormal"}, [=](NSDictionary* wb) {
-                PI(@"A windows: %@ ; B windows: %@", wa[@"error"] ?: wa[@"wins"], wb[@"error"] ?: wb[@"wins"]);
-                NSArray* wsa = wa[@"wins"]; NSArray* wsb = wb[@"wins"];
-                g_c.Ok("A-one-window-own-tabs", wsa.count == 1 && [wsa[0][@"tabs"] intValue] == 2, [NSString stringWithFormat:@"A windows.getAll normal: %@", wa[@"error"] ?: wa[@"wins"]]);
-                if (extInB) {
-                  g_c.Ok("B-one-window-own-tabs", wsb.count == 1 && [wsb[0][@"tabs"] intValue] == 3, [NSString stringWithFormat:@"B windows.getAll normal: %@", wb[@"error"] ?: wb[@"wins"]]);
-                  g_c.Ok("window-ids-differ", wsa.count == 1 && wsb.count == 1 && ![wsa[0][@"id"] isEqual:wsb[0][@"id"]], [NSString stringWithFormat:@"A window id %@, B window id %@", wsa.count ? wsa[0][@"id"] : @"-", wsb.count ? wsb[0][@"id"] : @"-"]);
-                }
-#ifdef NOCHE_ACTIONS_API
-                // Badge: set in A's worker, B's action must not show it; then set in B's worker, A's must keep its own.
-                ExtOn(h, tabA1, @{@"what" : @"badge", @"text" : @"A", @"color" : @"#112233"}, [=](NSDictionary*) {
-                  Later(1.0, [=] {
-                    const std::string bA = BadgeOf(h->view(), tabA1), bB = BadgeOf(w->view, bFirst);
-                    PI(@"after badge A set in A: A action badge '%s', B action badge '%s'; observer updates A=%d B=%d (B last badge '%s')", bA.c_str(), bB.c_str(), obsA->updated, obsB->updated, obsB->lastBadge.c_str());
-                    g_c.Ok("A-badge-shows-in-A", bA == "A", [NSString stringWithFormat:@"A action badge '%s'", bA.c_str()]);
-                    g_c.Ok("A-badge-absent-in-B", bB != "A" && obsB->lastBadge != "A", [NSString stringWithFormat:@"B action badge '%s', B observer last badge '%s'", bB.c_str(), obsB->lastBadge.c_str()]);
-                    if (extInB) ExtOn(h, bFirst, @{@"what" : @"badge", @"text" : @"B", @"color" : @"#332211"}, [=](NSDictionary*) {
-                      Later(1.0, [=] {
-                        const std::string cA = BadgeOf(h->view(), tabA1), cB2 = BadgeOf(w->view, bFirst);
-                        PI(@"after badge B set in B: A action badge '%s', B action badge '%s'", cA.c_str(), cB2.c_str());
-                        g_c.Ok("B-badge-shows-in-B-and-A-keeps-its-own", cB2 == "B" && cA == "A", [NSString stringWithFormat:@"A '%s', B '%s'", cA.c_str(), cB2.c_str()]);
-                        // Popup anchoring per window is not probed: popups need a window ordered in (see NeedsVisibleWindow in main.mm), which the hidden rule forbids for a second window.
-                        End(h, @"profile-ext");
-                      });
-                    }); else End(h, @"profile-ext");
-                  });
-                });
-#else
-                End(h, @"profile-ext");
-#endif
-              });
-            });
-          });
+        // Remove X from B and Y from A, each through the fixture's own uninstallSelf.
+        ExtOn(h, bFirst, @{@"what" : @"uninstallSelf"}, false, [](NSDictionary*) {});
+        ExtOn(h, tabA1, @{@"what" : @"uninstallSelf"}, true, [](NSDictionary*) {});
+        WaitFor(h, 20000, [=] { return ActionNames(h->view()) == kNameX && ActionNames(w->view) == kNameY; }, [=](bool removed) {
+          const std::string na = ActionNames(h->view()), nb = ActionNames(w->view);
+          g_c.Ok("A-registry-has-only-X", na == kNameX, [NSString stringWithFormat:@"A toolbar actions after Y's uninstallSelf: %s", na.c_str()]);
+          g_c.Ok("B-registry-has-only-Y-no-X-entry", nb == kNameY, [NSString stringWithFormat:@"B toolbar actions after X's uninstallSelf: %s (an empty or Y-only list: X has no entry in B)", nb.c_str()]);
+          if (!removed) PI(@"uninstallSelf did not remove the fixture in 20 s (it may be refused for a command-line loaded extension); the isolation assertions below compare profiles that still hold both fixtures");
+          obsA->xUpdates = obsA->yUpdates = obsB->xUpdates = obsB->yUpdates = 0;
+          // Fresh pages: only the remaining fixture's content script runs in each profile.
+          NavWait(h, tabA2, Page(h, @"index.html?side=A&n=2&nav=1"), [=](bool nA) { NavWait(h, b2, Localhost(Page(h, @"index.html?side=B&n=2&nav=1")), [=](bool nB) {
+            Mark(h, tabA2, [=](NSString* m2A) { Mark(h, b2, [=](NSString* m2B) {
+              g_c.Ok("content-scripts-per-profile", nA && nB && [m2A isEqualToString:@"1/-"] && [m2B isEqualToString:@"-/1"], [NSString stringWithFormat:@"content scripts X/Y on a fresh A page %@ (want 1/-), on a fresh B page %@ (want -/1)", m2A, m2B]);
+              ExtOn(h, tabA2, @{@"what" : @"tabsinfo"}, false, [=](NSDictionary* ta) { ExtOn(h, b2, @{@"what" : @"tabsinfo"}, true, [=](NSDictionary* tb) {
+                PI(@"X chrome.tabs.query in A: %@ ; Y chrome.tabs.query in B: %@", ta[@"error"] ?: TabUrlsOf(ta), tb[@"error"] ?: TabUrlsOf(tb));
+                g_c.Ok("A-tabs-query-lists-only-A", !ta[@"error"] && [ta[@"tabs"] count] == 2 && CountSide(ta, @"side=A") == 2 && CountSide(ta, @"side=B") == 0, [NSString stringWithFormat:@"X in A sees %lu tabs: %d of A, %d of B", (unsigned long)[ta[@"tabs"] count], CountSide(ta, @"side=A"), CountSide(ta, @"side=B")]);
+                g_c.Ok("B-tabs-query-never-returns-A-tab", !tb[@"error"] && [tb[@"tabs"] count] == 3 && CountSide(tb, @"side=B") == 3 && CountSide(tb, @"side=A") == 0, [NSString stringWithFormat:@"Y in B sees %lu tabs: %d of B, %d of A", (unsigned long)[tb[@"tabs"] count], CountSide(tb, @"side=B"), CountSide(tb, @"side=A")]);
+                ExtOn(h, tabA2, @{@"what" : @"windowNormal"}, false, [=](NSDictionary* wa) { ExtOn(h, b2, @{@"what" : @"windowNormal"}, true, [=](NSDictionary* wb) {
+                  NSArray* wsa = wa[@"wins"]; NSArray* wsb = wb[@"wins"];
+                  PI(@"X windows in A: %@ ; Y windows in B: %@", wa[@"error"] ?: wsa, wb[@"error"] ?: wsb);
+                  g_c.Ok("window-identity-per-profile", wsa.count == 1 && wsb.count == 1 && [wsa[0][@"tabs"] intValue] == 2 && [wsb[0][@"tabs"] intValue] == 3 && ![wsa[0][@"id"] isEqual:wsb[0][@"id"]] && [wsa[0][@"type"] isEqual:@"normal"] && [wsb[0][@"type"] isEqual:@"normal"], [NSString stringWithFormat:@"A: %lu normal window(s) with %@ tabs, id %@; B: %lu with %@ tabs, id %@ (want 1 and 2, 1 and 3, ids differ)", (unsigned long)wsa.count, wsa.count ? wsa[0][@"tabs"] : @"-", wsa.count ? wsa[0][@"id"] : @"-", (unsigned long)wsb.count, wsb.count ? wsb[0][@"tabs"] : @"-", wsb.count ? wsb[0][@"id"] : @"-"]);
+                  // Badges: X's badge set in A must not appear in B (no X action there), Y's set in B not in A.
+                  ExtOn(h, tabA2, @{@"what" : @"badge", @"text" : @"A", @"color" : @"#112233"}, false, [=](NSDictionary*) { ExtOn(h, b2, @{@"what" : @"badge", @"text" : @"B", @"color" : @"#332211"}, true, [=](NSDictionary*) {
+                    Later(1.5, [=] {
+                      const std::string xa = BadgeOf(h->view(), tabA2, kNameX), yb = BadgeOf(w->view, b2, kNameY), xb = BadgeOf(w->view, b2, kNameX), ya = BadgeOf(h->view(), tabA2, kNameY);
+                      PI(@"badges: X in A '%s', Y in B '%s', X in B '%s', Y in A '%s'; observer updates: A saw X=%d Y=%d, B saw X=%d Y=%d", xa.c_str(), yb.c_str(), xb.c_str(), ya.c_str(), obsA->xUpdates, obsA->yUpdates, obsB->xUpdates, obsB->yUpdates);
+                      g_c.Ok("badges-stay-in-their-profile", xa == "A" && yb == "B" && xb == "(no action)" && ya == "(no action)" && obsA->xUpdates >= 1 && obsB->yUpdates >= 1 && obsB->xUpdates == 0 && obsA->yUpdates == 0, [NSString stringWithFormat:@"X in A '%s', Y in B '%s', X in B '%s', Y in A '%s'; B observer updates for X %d, A observer updates for Y %d (want 0)", xa.c_str(), yb.c_str(), xb.c_str(), ya.c_str(), obsB->xUpdates, obsA->yUpdates]);
+                      PI(@"install in B and the dialog's anchor window (patch 0004): NOT RUN by this check; see the report (no hidden-run install path reaches ExtensionInstallUIDesktop; owner check)");
+                      End(h, @"profile-ext");
+                    });
+                  }); });
+                }); });
+              }); });
+            }); });
+          }); });
         });
-      });
+      }); });
     });
   });
+#endif
 }
 
 // ---- profile-close ----
@@ -543,9 +564,28 @@ void SwitchTimes(H h, std::function<void(double)> cb) {
   };
   (*step)(0);
 }
-void AddSlowImage(H h, CefRefPtr<CefBrowser> b) {  // an in-flight subresource keeps the tab loading (big.bin at about 2 MB/s)
-  const char* slow = getenv("NOCHE_PROBE_SLOW_URL");
-  Ev(h, b, [NSString stringWithFormat:@"(() => { const i = new Image(); i.src = '%s?t=' + Date.now() + Math.random(); window.__slow = i; return 'added'; })()", slow ? slow : ""], false, [](NSString*) {});
+// A main document whose response the fixture server (slow_server.py /hold.html) keeps open: the tab stays loading until the connection closes.
+NSString* HoldUrl(NSString* q) {
+  const char* s = getenv("NOCHE_PROBE_SLOW_URL");
+  return [(s ? @(s) : @"") stringByReplacingOccurrencesOfString:@"big.bin" withString:[@"hold.html?" stringByAppendingString:q]];
+}
+// IsLoading of every tab of |v|, as "id=1 id=1"; all is true when there is at least |min| tab and each is loading.
+NSString* LoadingFacts(CefRefPtr<CefBrowserView> v, size_t min, bool* all) {
+  std::vector<CefRefPtr<CefBrowser>> t;
+  if (v) v->GetTabs(t);
+  NSMutableArray* o = [NSMutableArray array];
+  bool every = t.size() >= min;
+  for (auto& b : t) { [o addObject:[NSString stringWithFormat:@"%d=%d", b->GetIdentifier(), (int)b->IsLoading()]]; if (!b->IsLoading()) every = false; }
+  *all = every;
+  return [o componentsJoinedByString:@" "];
+}
+// Sends every tab of |v| to a hold page and waits until each reports IsLoading.
+void HoldAll(H h, CefRefPtr<CefBrowserView> v, NSString* tag, std::function<void(bool, NSString*)> cb) {
+  int n = 0;
+  for (int id : IdsOf(v)) TabOf(v, id)->GetMainFrame()->LoadURL(HoldUrl([NSString stringWithFormat:@"%@%d", tag, n++]).UTF8String);
+  auto last = std::make_shared<NSString*>(@"");
+  const size_t want = IdsOf(v).size();
+  WaitFor(h, 15000, [=] { bool all = false; *last = LoadingFacts(v, want, &all); return all; }, [=](bool ok) { cb(ok, *last); });
 }
 
 void CloseProfile(H h);
@@ -561,30 +601,34 @@ void CheckClose(H h) {
         g_c.Ok("set-cookie-B", ok, @"cookie in B");
         Flush(*cB, [=] {
           SwitchTimes(h, [=](double before) {
-            PI(@"A switch+round trip median before: %.1f ms", before);
-            for (int id : IdsOf(h->view())) AddSlowImage(h, TabOf(h->view(), id));
-            auto idsB = (*wB)->created;
-            auto closeIds = std::make_shared<std::vector<int>>(idsB);
-            (*wB)->window->Close();
-            WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
-              bool allClosed = true;
-              for (int id : *closeIds) if (!(*wB)->closed.count(id)) allClosed = false;
-              g_c.Ok("B-closed-callbacks", destroyed && allClosed, [NSString stringWithFormat:@"window destroyed=%d, OnBeforeClose for %zu of %zu B browsers", (int)destroyed, (*wB)->closed.size(), closeIds->size()]);
-              // Release every reference to profile B: window, view, context.
-              g_wins.clear(); *wB = nullptr; *cB = nullptr;
-              Ev(h, h->first(), @"'alive:' + (1+1)", false, [=](NSString* r) {
-                g_c.Ok("A-interactive-after-B-closed", [r isEqualToString:@"alive:2"], [NSString stringWithFormat:@"A eval round trip: '%@'", r]);
-                Later(3.0, [=] {
-                  SwitchTimes(h, [=](double after) {
-                    PI(@"A switch+round trip median after: %.1f ms (before %.1f ms)", after, before);
-                    g_c.Ok("A-switch-latency-unchanged", before > 0 && after > 0 && after <= before * 3 + 30, [NSString stringWithFormat:@"median before %.1f ms, after %.1f ms (limit 3x + 30 ms, eval round trip includes noise)", before, after]);
-                    // Reopen B: the profile loads again from disk and keeps its cookie.
-                    auto cB2 = MakeCtx(Dir(@"Profile 1"));
-                    auto w2 = Open(cB2, Localhost(Page(h, @"index.html?side=B&reopen=1")));
-                    WaitFor(h, 20000, [=] { return Loaded(w2, w2->first()); }, [=](bool l2) {
-                      Ev(h, TabOf(w2->view, w2->first()), @"document.cookie", false, [=](NSString* ck) {
-                        g_c.Ok("B-reopened-keeps-cookie", l2 && [ck containsString:@"nocheB=1"], [NSString stringWithFormat:@"reopened B document.cookie: %@", DocCookie(ck)]);
-                        CloseProfile(h);
+            PI(@"A switch+round trip median before (A idle): %.1f ms", before);
+            // Both A tabs now sit on a main document the server holds open: they must be loading when B closes.
+            HoldAll(h, h->view(), @"a", [=](bool holding, NSString* facts) {
+              g_c.Ok("A-two-tabs-loading-before-B-closes", holding, [NSString stringWithFormat:@"A tabs IsLoading (id=value): %@ (hold page held open by the fixture server)", facts]);
+              auto closeIds = std::make_shared<std::vector<int>>((*wB)->created);
+              (*wB)->window->Close();
+              WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
+                bool allClosed = true;
+                for (int id : *closeIds) if (!(*wB)->closed.count(id)) allClosed = false;
+                g_c.Ok("B-closed-callbacks", destroyed && allClosed, [NSString stringWithFormat:@"window destroyed=%d, OnBeforeClose for %zu of %zu B browsers", (int)destroyed, (*wB)->closed.size(), closeIds->size()]);
+                // Release every reference to profile B: window, view, context.
+                g_wins.clear(); *wB = nullptr; *cB = nullptr;
+                Ev(h, h->first(), @"'alive:' + (1+1)", false, [=](NSString* r) {
+                  bool allLoading = false;
+                  NSString* f2 = LoadingFacts(h->view(), 2, &allLoading);
+                  g_c.Ok("A-interactive-and-still-loading-after-B-closed", [r isEqualToString:@"alive:2"] && allLoading, [NSString stringWithFormat:@"A eval round trip '%@'; A tabs IsLoading: %@", r, f2]);
+                  Later(3.0, [=] {
+                    SwitchTimes(h, [=](double after) {
+                      PI(@"A switch+round trip median after (A loading): %.1f ms (before %.1f ms)", after, before);
+                      g_c.Ok("A-switch-latency-unchanged", before > 0 && after > 0 && after <= before * 3 + 30, [NSString stringWithFormat:@"median before %.1f ms, after %.1f ms (limit 3x + 30 ms, eval round trip includes noise)", before, after]);
+                      // Reopen B: the profile loads again from disk and keeps its cookie.
+                      auto cB2 = MakeCtx(Dir(@"Profile 1"));
+                      auto w2 = Open(cB2, Localhost(Page(h, @"index.html?side=B&reopen=1")));
+                      WaitFor(h, 20000, [=] { return Loaded(w2, w2->first()); }, [=](bool l2) {
+                        Ev(h, TabOf(w2->view, w2->first()), @"document.cookie", false, [=](NSString* ck) {
+                          g_c.Ok("B-reopened-keeps-cookie", l2 && [ck containsString:@"nocheB=1"], [NSString stringWithFormat:@"reopened B document.cookie: %@", DocCookie(ck)]);
+                          CloseProfile(h);
+                        });
                       });
                     });
                   });
@@ -597,28 +641,29 @@ void CheckClose(H h) {
     });
   });
 }
-// Second direction: close the main window (profile Default, A) while B has two tabs loading.
+// Second direction: close the main window (profile Default, A) while B has two tabs whose main documents are held open.
 void CloseProfile(H h) {
   WP w = g_wins.back();
-  auto b2 = w->view->AddTab(Localhost(Page(h, @"index.html?side=B&n=2")).UTF8String, nullptr, CefBrowserSettings(), nullptr, true);
+  w->view->AddTab(Localhost(Page(h, @"index.html?side=B&n=2")).UTF8String, nullptr, CefBrowserSettings(), nullptr, true);
   Later(1.5, [=] {
-    for (int id : IdsOf(w->view)) AddSlowImage(h, TabOf(w->view, id));
-    Later(1.0, [=] {
-      std::vector<int> aIds;
-      for (int id : IdsOf(h->view())) aIds.push_back(id);
-      auto bLoading = TabOf(w->view, w->view->GetActiveTab() ? w->view->GetActiveTab()->GetIdentifier() : -1);
-      PI(@"closing the main window (A, %zu tabs) while B has %zu tabs, active B tab IsLoading=%d", aIds.size(), w->view->GetTabCount(), bLoading ? (int)bLoading->IsLoading() : -1);
+    HoldAll(h, w->view, @"b", [=](bool holding, NSString* facts) {
+      g_c.Ok("B-two-tabs-loading-before-A-closes", holding, [NSString stringWithFormat:@"B tabs IsLoading (id=value): %@ (hold page held open by the fixture server)", facts]);
+      std::vector<int> aIds = IdsOf(h->view());
+      PI(@"closing the main window (A, %zu tabs) while B has %zu loading tabs", aIds.size(), w->view->GetTabCount());
       h->closeMain();
       WaitFor(h, 10000, [=] { return h->mainGone(); }, [=](bool gone) {
         auto bc = h->beforeClose();
         bool all = true;
         for (int id : aIds) if (!bc.count(id)) all = false;
         g_c.Ok("A-closed-callbacks", gone && all && !aIds.empty(), [NSString stringWithFormat:@"A window destroyed=%d, OnBeforeClose for all %zu A browsers=%d", (int)gone, aIds.size(), (int)all]);
-        Ev(h, TabOf(w->view, w->view->GetActiveTab() ? w->view->GetActiveTab()->GetIdentifier() : -1), @"'alive:' + (1+1)", false, [=](NSString* r) {
-          g_c.Ok("B-interactive-after-A-closed", [r isEqualToString:@"alive:2"], [NSString stringWithFormat:@"B eval round trip after A's window closed: '%@'", r]);
+        auto active = w->view->GetActiveTab();
+        Ev(h, active, @"'alive:' + (1+1)", false, [=](NSString* r) {
+          bool stillLoading = false;
+          NSString* f2 = LoadingFacts(w->view, 2, &stillLoading);
+          g_c.Ok("B-interactive-and-still-loading-after-A-closed", [r isEqualToString:@"alive:2"] && stillLoading, [NSString stringWithFormat:@"B eval round trip '%@'; B tabs IsLoading: %@", r, f2]);
           Later(2.0, [=] {
-            Ev(h, TabOf(w->view, w->first()), @"document.cookie", false, [=](NSString* ck) {
-              g_c.Ok("B-still-has-cookie", [ck containsString:@"nocheB=1"], [NSString stringWithFormat:@"B document.cookie two seconds later: %@", DocCookie(ck)]);
+            ListCk(w->ctx, [=](std::vector<std::string> b) {
+              g_c.Ok("B-still-has-cookie", Has(b, "nocheB"), [NSString stringWithFormat:@"B cookies two seconds later (cookie manager, the pages are on the hold origin): %@", Join(b)]);
               End(h, @"profile-close");
             });
           });
@@ -637,17 +682,24 @@ std::string Sqlite(NSString* dbCopy, NSString* q) {
   return out;
 }
 // A copy of Default/History with its journal files (the engine has it open), then the count of urls rows matching |like|.
-int HistoryRows(NSString* like) {
-  NSString* tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[@"noche-hist-" stringByAppendingString:Token()]];
+// The count a query gives on a copy of <profile dir>/<db> with its journal files (-1 on an error or a missing database).
+int DbCount(NSString* profileDir, NSString* db, NSString* sql) {
+  NSString* tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[@"noche-db-" stringByAppendingString:Token()]];
   [NSFileManager.defaultManager createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
-  for (NSString* f in @[ @"History", @"History-journal", @"History-wal", @"History-shm" ])
-    [NSFileManager.defaultManager copyItemAtPath:Dir([@"Default/" stringByAppendingString:f]) toPath:[tmp stringByAppendingPathComponent:f] error:nil];
-  std::string r = Sqlite([tmp stringByAppendingPathComponent:@"History"], [NSString stringWithFormat:@"select count(*) from urls where url like '%%%@%%'", like]);
+  for (NSString* suffix in @[ @"", @"-journal", @"-wal", @"-shm" ]) {
+    NSString* f = [db stringByAppendingString:suffix];
+    [NSFileManager.defaultManager copyItemAtPath:Dir([NSString stringWithFormat:@"%@/%@", profileDir, f]) toPath:[tmp stringByAppendingPathComponent:f] error:nil];
+  }
+  std::string r = Sqlite([tmp stringByAppendingPathComponent:db], sql);
   [NSFileManager.defaultManager removeItemAtPath:tmp error:nil];
   char* end = nullptr;
   long n = strtol(r.c_str(), &end, 10);
   return (end && *end == 0 && !r.empty()) ? (int)n : -1;
 }
+int HistoryRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"History", [NSString stringWithFormat:@"select count(*) from urls where url like '%%%@%%'", like]); }
+int HistoryRows(NSString* like) { return HistoryRowsIn(@"Default", like); }
+int DownloadRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"History", [NSString stringWithFormat:@"select count(*) from downloads_url_chains where url like '%%%@%%'", like]); }
+int FormRowsIn(NSString* profileDir, NSString* like) { return DbCount(profileDir, @"Web Data", [NSString stringWithFormat:@"select count(*) from autocomplete where value like '%%%@%%'", like]); }
 void CheckIncognito(H h) {
   NSString* tok = Token();
   NSString* origin = Localhost(h->url());
@@ -714,8 +766,54 @@ void CheckIncognito2(H h) {
 
 // ---- profile-clear ----
 #ifdef NOCHE_CLEAR_API
-void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB);
+void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, NSString* uB);
+void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, std::function<void()> next);
 #endif
+NSString* SlowFile(NSString* name) {
+  const char* s = getenv("NOCHE_PROBE_SLOW_URL");
+  return [(s ? @(s) : @"") stringByReplacingOccurrencesOfString:@"big.bin" withString:name];
+}
+// Polls |query| once a second (up to |ms|) until |ok| holds on its value; |done| gets the last value.
+void PollCount(H h, int ms, std::function<int()> query, std::function<bool(int)> ok, std::function<void(bool, int)> done) {
+  auto last = std::make_shared<int>(-2);
+  WaitFor(h, ms, [=] { *last = query(); return ok(*last); }, [=](bool good) { done(good, *last); });
+}
+// Creates Chrome-layer data in profile B (and a history row in A) through hidden windows only, then proves the databases show it, so a later
+// "cleared" reading means something. B: a visited page (History urls), a finished download of small.bin (History downloads_url_chains), a submitted text
+// form (Web Data autocomplete; may not be creatable hidden: reported, not asserted). Saved passwords cannot be created hidden (the save is a Chrome
+// bubble that needs user interaction), so the PASSWORDS bit stays source-read only. These witnesses run on every engine; the clearing runs with NOCHE_CLEAR_API.
+void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, std::function<void(bool)> next) {
+  NSString* like = [@"histB=" stringByAppendingString:tok];
+  NSString* likeA = [@"histA=" stringByAppendingString:tok];
+  auto bVisit = wB->view->AddTab(Localhost(Page(h, [NSString stringWithFormat:@"index.html?%@", like])).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
+  h->view()->AddTab(Page(h, [NSString stringWithFormat:@"index.html?%@", likeA]).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
+  wB->view->AddTab(SlowFile(@"small.bin").UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
+  auto form = wB->view->AddTab(Localhost(Page(h, @"profile-form.html")).UTF8String, nullptr, CefBrowserSettings(), nullptr, false);
+  (void)bVisit;
+  Later(4.0, [=] {
+    NSString* typed = [@"noche-form-" stringByAppendingString:tok];
+    Ev(h, form, @"document.getElementById('q').focus(); document.activeElement.id", false, [=](NSString* focused) {
+      h->cdp(form, @"Input.insertText", @{@"text" : typed}, [=](NSDictionary*) {
+        Ev(h, form, @"document.getElementById('f').requestSubmit(); 'submitted'", false, [=](NSString*) {
+          PI(@"form fixture: focused '%@', typed '%@' and submitted", focused, typed);
+          PollCount(h, 40000, [=] { return HistoryRowsIn(@"Profile 1", like); }, [](int n) { return n >= 1; }, [=](bool okB, int nB) {
+            g_c.Ok("history-witness-B", okB, [NSString stringWithFormat:@"Profile 1/History urls rows for %@: %d", like, nB]);
+            PollCount(h, 40000, [=] { return HistoryRowsIn(@"Default", likeA); }, [](int n) { return n >= 1; }, [=](bool okA, int nA) {
+              g_c.Ok("history-witness-A", okA, [NSString stringWithFormat:@"Default/History urls rows for %@: %d", likeA, nA]);
+              PollCount(h, 40000, [=] { return DownloadRowsIn(@"Profile 1", @"small.bin"); }, [](int n) { return n >= 1; }, [=](bool okD, int nD) {
+                g_c.Ok("download-witness-B", okD, [NSString stringWithFormat:@"Profile 1/History downloads_url_chains rows for small.bin: %d (the download ran through B's client handler into the temp dir)", nD]);
+                PollCount(h, 30000, [=] { return FormRowsIn(@"Profile 1", tok); }, [](int n) { return n >= 1; }, [=](bool okF, int nF) {
+                  PI(@"form data witness: Profile 1/Web Data autocomplete rows for %@: %d, %s", tok, nF, okF ? "created hidden: the FORM_DATA clear is asserted" : "NOT created in a hidden run (the programmatic submit was not recorded as a user entry): FORM_DATA is source-read only here, no assertion");
+                  next(okF);
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
 void CheckClear(H h) {
   NSString* tok = Token();
   auto cB = MakeCtx(Dir(@"Profile 1"));
@@ -753,13 +851,15 @@ void CheckClear(H h) {
                   hit(tabA, u1, [=](NSString* ha) { hit(tabB, u1, [=](NSString* hb) {
                     g_c.Ok("A-cache-cleared", ha.intValue > 0, [NSString stringWithFormat:@"force-cache fetch in A after ClearHttpCache: transferSize %@ (>0 means a network fetch)", ha]);
                     g_c.Ok("B-cache-kept", [hb isEqualToString:@"0"], [NSString stringWithFormat:@"force-cache fetch in B: transferSize %@ (0 = still cached)", hb]);
+                    ChromeWitness(h, tok, wB, cB, [=](bool formMade) {
 #ifndef NOCHE_CLEAR_API
-                    PI(@"CefRequestContext::ClearBrowsingData is not in this engine build (NOCHE_CLEAR_API unset): the time-range, storage, history and everything parts cannot be called; needs patch 0010");
-                    g_c.Ok("clear-api", false, @"NOT RUN: CefRequestContext::ClearBrowsingData (engine patch 0010) missing; build with NOCHE_CLEAR_API=1 against the 0010 engine");
-                    End(h, @"profile-clear");
+                      PI(@"CefRequestContext::ClearBrowsingData is not in this engine build (NOCHE_CLEAR_API unset): the history, downloads, form data, time-range, storage and everything parts cannot be called; needs patch 0010");
+                      g_c.Ok("clear-api", false, @"NOT RUN: CefRequestContext::ClearBrowsingData (engine patch 0010) missing; build with NOCHE_CLEAR_API=1 against the 0010 engine");
+                      End(h, @"profile-clear");
 #else
-                    ClearRanges(h, tok, wB, cB);
+                      ClearChrome(h, tok, cB, formMade, [=] { ClearRanges(h, tok, wB, cB, u1); });
 #endif
+                    });
                   }); });
                 }); });
               }));
@@ -775,7 +875,37 @@ void CheckClear(H h) {
 // Time ranges (patch 0010). In A: localhost holds a cookie, a localStorage key and a cached URL written BEFORE t0; the origin
 // 127.0.0.1 holds the same three AFTER t0. ClearBrowsingData(cookies|cache|site storage, since = t0) must remove only the after-t0 set,
 // and leave B (written after t0 too) untouched. Then ClearBrowsingData(all, since = 0) on A removes the rest.
-void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB) {
+// Chrome-layer bits on B (patch 0010): downloads first (the download rows go, the visited-page rows stay), then history (its rows go, A's stay),
+// then form data when the witness created some.
+void ClearChrome(H h, NSString* tok, CefRefPtr<CefRequestContext> cB, bool formMade, std::function<void()> next) {
+  NSString* like = [@"histB=" stringByAppendingString:tok];
+  NSString* likeA = [@"histA=" stringByAppendingString:tok];
+  cB->ClearBrowsingData(CEF_BROWSING_DATA_DOWNLOADS, CefBaseTime(), new CB([=] {
+    PollCount(h, 15000, [=] { return DownloadRowsIn(@"Profile 1", @"small.bin"); }, [](int n) { return n == 0; }, [=](bool dGone, int nD) {
+      const int histB = HistoryRowsIn(@"Profile 1", like);
+      g_c.Ok("downloads-clear-removes-B-download-rows", dGone && histB >= 1, [NSString stringWithFormat:@"after ClearBrowsingData(DOWNLOADS) on B: downloads_url_chains rows %d (want 0), B visited-page rows %d (want >= 1, untouched)", nD, histB]);
+      cB->ClearBrowsingData(CEF_BROWSING_DATA_HISTORY, CefBaseTime(), new CB([=] {
+        PollCount(h, 15000, [=] { return HistoryRowsIn(@"Profile 1", like); }, [](int n) { return n == 0; }, [=](bool hGone, int nH) {
+          const int histA = HistoryRowsIn(@"Default", likeA);
+          g_c.Ok("history-clear-removes-B-rows-and-keeps-A", hGone && histA >= 1, [NSString stringWithFormat:@"after ClearBrowsingData(HISTORY) on B: B urls rows %d (want 0), A urls rows %d (want >= 1)", nH, histA]);
+          auto finish = [=] {
+            PI(@"PASSWORDS bit: not exercised (a saved password needs the Chrome save bubble and user input; source-read mapping only)");
+            next();
+          };
+          if (!formMade) { finish(); return; }
+          cB->ClearBrowsingData(CEF_BROWSING_DATA_FORM_DATA, CefBaseTime(), new CB([=] {
+            PollCount(h, 15000, [=] { return FormRowsIn(@"Profile 1", tok); }, [](int n) { return n == 0; }, [=](bool fGone, int nF) {
+              g_c.Ok("form-data-clear-removes-B-autocomplete-rows", fGone, [NSString stringWithFormat:@"after ClearBrowsingData(FORM_DATA) on B: Web Data autocomplete rows %d (want 0)", nF]);
+              finish();
+            });
+          }));
+        });
+      }));
+    });
+  }));
+}
+
+void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, NSString* uB) {
   auto cA = CefRequestContext::GetGlobalContext();
   NSString* oldO = Localhost(h->url());
   NSString* newO = h->url();  // the 127.0.0.1 origin
@@ -817,10 +947,15 @@ void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB) {
                                           g_c.Ok("everything-clears-Default-data", !Has(a2, "oldCk") && [lo2 isEqualToString:@"null"], [NSString stringWithFormat:@"ClearBrowsingData(all, since 0) on Default: cookies %@, localStorage old '%@'", Join(a2), lo2]);
                                           ListCk(cB, [=](std::vector<std::string> b2) {
                                             g_c.Ok("everything-in-A-leaves-B", Has(b2, "clearB"), [NSString stringWithFormat:@"B cookies after Default was cleared: %@", Join(b2)]);
-                                            DelAllCk(cB, [=](int) { End(h, @"profile-clear"); });
+                                            Ev(h, tabB, @"window.noche.ls('bkey')", false, [=](NSString* lb2) {
+                                              Ev(h, tabB, [NSString stringWithFormat:@"window.noche.hit('%@')", uB], true, [=](NSString* cb2) {
+                                                g_c.Ok("everything-in-A-leaves-B-storage-and-cache", [lb2 isEqualToString:@"1"] && [cb2 isEqualToString:@"0"], [NSString stringWithFormat:@"after ClearBrowsingData(all, since 0) on Default: B localStorage 'bkey' '%@' (want 1), B force-cache transferSize for its primed URL %@ (want 0 = still cached)", lb2, cb2]);
+                                                DelAllCk(cB, [=](int) { End(h, @"profile-clear"); });
+                                              });
+                                            });
+                                              });
+                                            });
                                           });
-                                        });
-                                      });
                                     }));
                                   });
                                 });

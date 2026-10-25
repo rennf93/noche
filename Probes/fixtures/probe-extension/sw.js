@@ -66,6 +66,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       .then(() => reply({ ok: true }), (e) => reply({ error: "badge rejected: " + ((e && e.message) || String(e)) }));
     return true;
   }
+  if (msg && msg.what === "uninstallSelf") {  // profile-ext: reply first, the worker dies with the extension
+    reply({ ok: true });
+    setTimeout(() => chrome.management.uninstallSelf({ showConfirmDialog: false }).catch((e) => console.log("NOCHE-SW uninstallSelf rejected " + String(e))), 50);
+    return;
+  }
   if (msg && msg.what === "popup") { popupTab = msg.tabId; reply({ ok: true }); return; }
   if (msg && msg.what === "popupClick") { popupClicks++; reply({ ok: true }); return; }
   if (msg && msg.what === "popupTab") { reply({ tabId: popupTab, clicks: popupClicks }); return; }

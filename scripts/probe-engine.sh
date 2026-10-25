@@ -98,9 +98,11 @@ for CHECK in "$@"; do
   [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble|discard-.*|profile-.*)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
   # Web Store checks (store-*, install-no-window) load a live page and wait for an install: 150 s probe watchdog.
   [[ "$CHECK" == store-* || "$CHECK" == install-no-window ]] && LIMIT=$((150 + ${NOCHE_PROBE_SLACK:-20}))
+  # profile-ext also loads the second fixture (command line loads reach every profile; the check then removes each fixture from the profile that must not have it).
+  EXTS="$ROOT/Probes/fixtures/probe-extension"; [ "$CHECK" = profile-ext ] && EXTS="$EXTS,$ROOT/Probes/fixtures/probe-extension-b"
   # Outer watchdog: if the app outlives its own 40s timeout, kill that one PID (see smoke.sh).
   (cd / && exec "$BIN" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
-      --load-extension="$ROOT/Probes/fixtures/probe-extension" --enable-logging=stderr >"$OUTF") &
+      --load-extension="$EXTS" --enable-logging=stderr >"$OUTF") &
   APP_PID=$!
   WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0; KILLED=0
   for _ in $(seq 1 $((LIMIT * 10))); do

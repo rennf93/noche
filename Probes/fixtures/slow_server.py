@@ -6,6 +6,8 @@ Usage: slow_server.py PORT [REQUEST_LOG]
 Files (both about 2 MB/s, with Range, ETag and Last-Modified so a download can resume):
   /big.bin   200 MB
   /mid.bin   24 MB, small enough to finish inside one probe run
+  /small.bin 4 KB (profile-clear: a finished download in a profile)
+  /hold.html a text/html response that sends its first bytes and then holds the connection open for 120 s (profile-close: a document that stays loading)
 The body is a deterministic pattern, byte i = (i * 31 + 7) mod 251, so a probe can compute the expected SHA-256 of any
 prefix without trusting the app or the engine. Every request is appended to REQUEST_LOG as "<path> range=<Range header>",
 the witness for "the resume sent a Range request".
@@ -13,7 +15,7 @@ the witness for "the resume sent a Range request".
 import sys, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-FILES = {"/big.bin": 200 * 1024 * 1024, "/mid.bin": 24 * 1024 * 1024}
+FILES = {"/big.bin": 200 * 1024 * 1024, "/mid.bin": 24 * 1024 * 1024, "/small.bin": 4096}
 CHUNK = 64 * 1024
 DELAY = 0.03
 PERIOD = bytes((i * 31 + 7) % 251 for i in range(251))
@@ -35,6 +37,18 @@ class H(BaseHTTPRequestHandler):
         if LOG:
             with open(LOG, "a") as f:
                 f.write(f"{path} range={rng or '-'}\n")
+        if path == "/hold.html":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            try:
+                self.wfile.write(b"<!doctype html><title>hold</title><p>holding the response open"); self.wfile.flush()
+                for _ in range(1200):
+                    time.sleep(0.1)
+                    self.wfile.write(b" "); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         size = FILES.get(path)
         if size is None:
             self.send_response(404); self.end_headers(); return
