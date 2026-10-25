@@ -18,7 +18,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"ctx-ext-items", @"zoom-scope", @"chrome-pages" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -495,6 +495,56 @@ void CheckZoom(H h) {
   });
 }
 
+// ---- M1.4 zoom bubble (patch 0007) ----
+// Zoom steps through IDC_ZOOM_PLUS/MINUS; the check fails if a NativeWidgetMacNSWindow (the bubble's class) shows up in NSApp.windows at any
+// sample (right after the command, then every 20 ms for 700 ms) or if the zoom level did not move as expected.
+void CheckZoomNoBubble(H h) {
+  auto base = std::make_shared<NSSet*>(WindowSet());
+  auto bubbles = std::make_shared<int>(0), seen = std::make_shared<int>(0);
+  auto logged = std::make_shared<std::set<void*>>();
+  auto sample = [=](const char* when) {
+    for (NSWindow* w in NSApp.windows) {
+      if ([*base containsObject:[NSValue valueWithNonretainedObject:w]]) continue;
+      bool isBubble = strcmp(class_getName([w class]), "NativeWidgetMacNSWindow") == 0;
+      if (isBubble) (*bubbles)++;
+      if (!logged->insert((__bridge void*)w).second) continue;  // log each distinct window once, count every sighting
+      (*seen)++;
+      PI(@"%s NEW window class=%s frame=%@ alpha=%.2f visible=%d bubble-class=%d", when, class_getName([w class]), NSStringFromRect(w.frame), w.alphaValue, (int)w.isVisible, (int)isBubble);
+    }
+  };
+  auto level = [=] { return h->first()->GetHost()->GetZoomLevel(); };
+  h->view()->SetActiveTab(h->first());
+  h->first()->GetHost()->SetZoomLevel(0);
+  Later(1.5, [=] {
+    *base = WindowSet();
+    auto levels = std::make_shared<std::vector<double>>();
+    levels->push_back(level());
+    const char* cmds[3] = { "IDC_ZOOM_PLUS", "IDC_ZOOM_PLUS", "IDC_ZOOM_MINUS" };
+    auto step = std::make_shared<std::function<void(int)>>();
+    *step = [=](int i) {
+      if (i == 3) {
+        bool moved = levels->at(1) > levels->at(0) && levels->at(2) > levels->at(1) && levels->at(3) < levels->at(2);
+        PI(@"zoom levels initial=%.3f +=%.3f ++=%.3f -=%.3f moved-as-expected=%d; new windows seen=%d bubble-class windows=%d", levels->at(0), levels->at(1), levels->at(2), levels->at(3), (int)moved, *seen, *bubbles);
+        h->first()->GetHost()->SetZoomLevel(0);
+        Done(h, moved && *bubbles == 0, moved ? (*bubbles == 0 ? @"no zoom bubble window and zoom moved as expected" : @"zoom bubble window appeared") : @"zoom level did not move as expected");
+        return;
+      }
+      h->first()->GetHost()->ExecuteChromeCommand(cef_id_for_command_id_name(cmds[i]), CEF_WOD_CURRENT_TAB);
+      sample(cmds[i]);
+      double t0 = NowMs();
+      auto poll = std::make_shared<std::function<void()>>();
+      *poll = [=] {
+        sample(cmds[i]);
+        if (NowMs() - t0 < 700) { Later(0.02, *poll); return; }
+        levels->push_back(level());
+        (*step)(i + 1);
+      };
+      Later(0.02, *poll);
+    };
+    (*step)(0);
+  });
+}
+
 // ---- R14 ----
 void CheckChromePages(H h) {
   auto urls = @[ @"chrome://history", @"chrome://downloads", @"chrome://bookmarks" ];
@@ -537,7 +587,7 @@ void SurfOnLoadEnd(int id, int status) { g_load[id] = status; }
 bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{
     @"cmd-enabled" : @0, @"bubbles" : @1, @"download-restart-1" : @2, @"download-restart-2" : @3, @"download-tab-close" : @4,
-    @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7 };
+    @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -550,7 +600,8 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     case 4: DownloadTabClose(h); break;
     case 5: CheckCtx(h); break;
     case 6: CheckZoom(h); break;
-    default: CheckChromePages(h); break;
+    case 7: CheckChromePages(h); break;
+    default: CheckZoomNoBubble(h); break;
   }
   return true;
 }
