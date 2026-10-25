@@ -927,7 +927,9 @@ void ClearRanges(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, NSS
   Ev(h, tabA, @"window.noche.ls('old', '1')", false, [=](NSString*) {
     Ev(h, tabA, [NSString stringWithFormat:@"window.noche.prime('%@')", uOld], true, [=](NSString*) {
       SetCk(cA, oldO, "oldCk", [=](bool) {
-        Later(3.0, [=] {
+        // localStorage keeps an origin's last-modified time from its disk commit, which comes 5 s after the write (local_storage_impl.cc
+        // kCommitDefaultDelaySecs); a shorter wait puts the commit after t0 and the clear then removes the before-t0 origin too.
+        Later(7.0, [=] {
           const CefBaseTime t0 = CefBaseTime::Now();
           Later(0.3, [=] {
             // After t0: a second tab on the 127.0.0.1 origin in A, and B's data.
