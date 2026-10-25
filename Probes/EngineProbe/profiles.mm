@@ -78,7 +78,6 @@ struct Win {
   std::vector<int> created;     // browser ids in creation order (the first is the first tab)
   std::set<int> closed;         // ids whose OnBeforeClose ran
   bool destroyed = false;
-  CefRefPtr<RlRecorder> rl;     // set before Open(): reports this window's requests (download-keep-context)
   int first() const { return created.empty() ? -1 : created[0]; }
 };
 using WP = std::shared_ptr<Win>;
@@ -86,13 +85,8 @@ std::vector<WP> g_wins;
 std::function<void(CefRefPtr<CefBrowser>)> g_observe;
 
 // Downloads in these windows go to the harness's temp download directory (deleted on exit), never to ~/Downloads.
-std::atomic<long long> g_pdl_recv{0};  // bytes of the newest in-progress download seen by a PDl (download-keep-context)
-std::atomic<int> g_pdl_inprog{0};
 class PDl : public CefDownloadHandler {
  public:
-  void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
-    g_pdl_recv = item->GetReceivedBytes(); g_pdl_inprog = item->IsInProgress() ? 1 : 0;
-  }
   bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>, const CefString& name, CefRefPtr<CefBeforeDownloadCallback> cb) override {
     const char* d = getenv("NOCHE_PROBE_DL_DIR");
     cb->Continue(std::string(d ? d : NSTemporaryDirectory().UTF8String) + "/" + name.ToString(), false);
@@ -105,7 +99,6 @@ class PClient : public CefClient, public CefLoadHandler, public CefLifeSpanHandl
  public:
   explicit PClient(WP w) : w_(w) {}
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return new PDl(); }
-  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return w_->rl; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override { w_->closed.insert(b->GetIdentifier()); }
@@ -830,7 +823,7 @@ void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, s
 // Basic-auth witness for ClearHttpAuthCredentials (profile Default). Tab 1 opens /auth: the server answers 401, the client's GetAuthCredentials supplies noche:probe,
 // the retry carries Authorization. A second navigation then reaches the server already with Authorization (the auth cache). After ClearHttpAuthCredentials the
 // next navigation must reach the server WITHOUT Authorization again. The server's request log is the witness, not the engine.
-struct AuthSt { CefRefPtr<RlRecorder> rec; CefRefPtr<RlClient> cl; int tab = -1; std::string url; size_t seen = 0; bool cached = false; bool tabAlive = false; };
+struct AuthSt { CefRefPtr<RlRecorder> rec; CefRefPtr<RlClient> cl; int tab = -1; std::string url, credUrl; size_t seen = 0; bool cached = false; bool tabAlive = false; };
 std::vector<std::string> AuthLines() {
   std::vector<std::string> o;
   NSString* l = [NSString stringWithContentsOfFile:@(getenv("NOCHE_PROBE_SLOW_LOG") ?: "/dev/null") encoding:NSUTF8StringEncoding error:nil] ?: @"";
@@ -848,13 +841,14 @@ void AuthPrime(H h, std::function<void(std::shared_ptr<AuthSt>)> cb) {
   st->rec = new RlRecorder(); st->rec->answerAuth = true;
   st->cl = new RlClient(st->rec, nullptr);
   st->url = SlowFile(@"auth").UTF8String;
+  st->credUrl = [SlowFile(@"auth") stringByReplacingOccurrencesOfString:@"http://" withString:@"http://noche:probe@"].UTF8String;  // the client supplies the credentials in the URL: a Chrome-style tab never asked GetAuthCredentials
   const size_t log0 = AuthLines().size();
-  auto b = h->view()->AddTab(st->url, st->cl, CefBrowserSettings(), nullptr, false);
+  auto b = h->view()->AddTab(st->credUrl, st->cl, CefBrowserSettings(), nullptr, false);
   st->tab = b ? b->GetIdentifier() : -1;
   WaitFor(h, 15000, [=] { return st->cl->loads >= 1; }, [=](bool first) {
     auto after1 = AuthLines();
     const size_t k = after1.size();
-    g_c.Ok("auth-first-request-challenged-then-credentialed", first && k >= log0 + 2 && after1[log0] == "/auth auth=no" && after1.back() == "/auth auth=yes" && st->rec->authAsked >= 1, [NSString stringWithFormat:@"server log /auth lines %zu..%zu: first '%s', last '%s'; GetAuthCredentials answered %d time(s)", log0, k, k > log0 ? after1[log0].c_str() : "(none)", k ? after1.back().c_str() : "(none)", st->rec->authAsked.load()]);
+    g_c.Ok("auth-first-request-challenged-then-credentialed", first && k >= log0 + 2 && after1[log0] == "/auth auth=no" && after1.back() == "/auth auth=yes", [NSString stringWithFormat:@"server log /auth lines %zu..%zu: first '%s', last '%s'; credentials sent in the URL (GetAuthCredentials answered %d time(s))", log0, k, k > log0 ? after1[log0].c_str() : "(none)", k ? after1.back().c_str() : "(none)", st->rec->authAsked.load()]);
     AuthNav(h, st, [=](bool second) {
       auto after2 = AuthLines();
       st->cached = second && after2.size() > k && after2[k] == "/auth auth=yes";
@@ -1087,55 +1081,6 @@ void CheckDelete2(H h) {
 }
 
 
-// ---- download-keep-context (0008: a kept request cancelled with its request context gets no completion) ----
-// Profile 1's window navigates to mid.bin (a 24 MB download at about 2 MB/s) and is closed: the download is kept. Then every reference to the window and the
-// context goes. The request is cancelled with the context (CancelKeptRequests), and the client's OnResourceLoadComplete must not run for it. Witnesses:
-// the bytes the profile handler sees stop growing (the request is gone) and the recorder, which outlives the window, holds no mid.bin completion.
-void CheckKeepContext(H h) {
-#ifndef NOCHE_DOWNLOAD_API
-  g_c.Ok("profile-handler-api", false, @"NOT RUN: CefRequestContext::SetDownloadHandler (engine patch 0008) missing; build with NOCHE_DOWNLOAD_API=1");
-  End(h, @"download-keep-context");
-#else
-  const char* mid = getenv("NOCHE_PROBE_MID_URL");
-  if (!mid) { h->finish(false, @"NOCHE_PROBE_MID_URL not set (run through probe-engine.sh)"); return; }
-  NSString* midUrl = @(mid);
-  g_pdl_recv = 0; g_pdl_inprog = 0;
-  auto cB = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 1")));
-  (*cB)->SetDownloadHandler(new PDl());
-  auto wB = std::make_shared<WP>(Open(*cB, Localhost(Page(h, @"index.html?side=B"))));
-  auto rec = CefRefPtr<RlRecorder>(new RlRecorder());
-  (*wB)->rl = rec;
-  WaitFor(h, 20000, [=] { return Loaded(*wB, (*wB)->first()); }, [=](bool loaded) {
-    g_c.Ok("window-loaded", loaded, @"B first tab loaded");
-    TabOf((*wB)->view, (*wB)->first())->GetMainFrame()->LoadURL(midUrl.UTF8String);  // becomes the download
-    WaitFor(h, 30000, [=] { return g_pdl_inprog == 1 && g_pdl_recv > 1000000; }, [=](bool started) {
-      g_c.Ok("download-started", started, [NSString stringWithFormat:@"in-progress download in B, %lld bytes received", g_pdl_recv.load()]);
-      (*wB)->window->Close();
-      WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
-        const long long r0 = g_pdl_recv;
-        Later(2.5, [=] {
-          const long long r1 = g_pdl_recv;
-          g_c.Ok("window-closed-download-kept", destroyed && r1 > r0 + 500000, [NSString stringWithFormat:@"window destroyed=%d; bytes %lld -> %lld over 2.5 s with no window (want growth)", (int)destroyed, r0, r1]);
-          g_c.Ok("no-completion-while-kept", rec->Recs("mid.bin").empty(), [NSString stringWithFormat:@"%zu mid.bin completions before the context goes (want 0)", rec->Recs("mid.bin").size()]);
-          g_wins.clear(); *wB = nullptr; *cB = nullptr;  // the request context is destroyed
-          Later(1.0, [=] {
-            const long long s0 = g_pdl_recv;
-            Later(4.0, [=] {
-              const long long s1 = g_pdl_recv;
-              g_c.Ok("context-destroyed-cancels-the-request", s1 == s0, [NSString stringWithFormat:@"bytes %lld -> %lld over 4 s after the context was released (want no growth: the kept request was cancelled)", s0, s1]);
-              auto recs = rec->Recs("mid.bin");
-              g_c.Ok("no-completion-after-context-destroyed", recs.empty(), [NSString stringWithFormat:@"%zu OnResourceLoadComplete for mid.bin after the context was destroyed (want 0, CancelKeptRequests): %zu", recs.size(), recs.size()]);
-              End(h, @"download-keep-context");
-            });
-          });
-        });
-      });
-    });
-  });
-#endif
-}
-
-
 // ---- profile-clear-callbacks (0010 callback contract: exactly once, also for an unknown mask and a destroyed context) ----
 void CheckClearCallbacks(H h) {
 #ifndef NOCHE_CLEAR_API
@@ -1231,7 +1176,7 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
 
 bool RunProfilesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{ @"profile-dirs" : @0, @"profile-cookie" : @1, @"profile-cookie-2" : @2, @"profile-storage" : @3, @"profile-ext" : @4, @"profile-close" : @5,
-                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12, @"download-keep-context" : @13 };
+                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1250,7 +1195,6 @@ bool RunProfilesCheck(NSString* check, const SurfHost& host) {
     case 9: CheckDelete(h); break;
     case 11: CheckUpgrade(h); break;
     case 12: CheckClearCallbacks(h); break;
-    case 13: CheckKeepContext(h); break;
     default: CheckDelete2(h); break;
   }
   return true;

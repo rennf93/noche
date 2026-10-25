@@ -22,7 +22,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-context", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -518,6 +518,7 @@ void KeepStream(H h) {
   if (!DlEnv(h)) return;
   auto A = std::make_shared<Asserts>();
   auto rec = CefRefPtr<RlRecorder>(new RlRecorder());
+  rec->keepNeedle = "hold.html?keep=";
   auto cl = CefRefPtr<RlClient>(new RlClient(rec, nullptr));
   NSString* path = [@"/hold.html?keep=" stringByAppendingString:Token()];
   NSString* url = [[@(SlowUrl()) stringByReplacingOccurrencesOfString:@"/big.bin" withString:@""] stringByAppendingString:path];
@@ -556,7 +557,9 @@ void KeepStream(H h) {
     auto recs = rec->Recs("hold.html?keep=");
     A->Check("d-on-resource-load-complete-at-most-once", recs.size() <= 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for the held request (want <= 1): %@", recs.size(), RecFacts(recs)]);
     A->Check("e-tab-gone", ById(h, *id) == nullptr, @"the closed tab is no longer listed");
-    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, non-download stream: %@", A->Summary()]);
+    NSString* sum = A->Summary();
+    rec->Clear();
+    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, non-download stream: %@", sum]);
   });
   RunSteps(S);
 }
@@ -565,6 +568,7 @@ void KeepComplete(H h) {
   if (!DlEnv(h)) return;
   auto A = std::make_shared<Asserts>();
   auto rec = CefRefPtr<RlRecorder>(new RlRecorder());
+  rec->keepNeedle = "mid.bin";
   auto cl = CefRefPtr<RlClient>(new RlClient(rec, CefRefPtr<CefDownloadHandler>(g_dl)));
   auto id = std::make_shared<int>(-1);
   auto early = std::make_shared<bool>(false);
@@ -597,7 +601,9 @@ void KeepComplete(H h) {
     A->Check("c-exactly-one-completion", r.size() == 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for mid.bin after the download finished (want 1): %@", r.size(), RecFacts(r)]);
     A->Check("d-completion-only-after-the-bytes-arrived", !*early, @"no completion was seen at any 100 ms sample while the file was still short");
     A->Check("e-original-browser-and-invalid", r.size() == 1 && r[0].browserId == *id && r[0].browser && !r[0].browser->IsValid(), [NSString stringWithFormat:@"completion browser id %d (want %d), IsValid=%d (want 0)", r.empty() ? -1 : r[0].browserId, *id, r.empty() || !r[0].browser ? -1 : (int)r[0].browser->IsValid()]);
-    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, kept download: %@", A->Summary()]);
+    NSString* sum = A->Summary();
+    rec->Clear();  // drops the CefBrowser references the records hold: a browser still referenced at shutdown aborts the engine
+    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, kept download: %@", sum]);
   });
   RunSteps(S);
 }

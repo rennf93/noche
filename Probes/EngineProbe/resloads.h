@@ -24,10 +24,11 @@ class RlRecorder : public CefRequestHandler, public CefResourceRequestHandler {
  public:
   std::atomic<bool> answerAuth{false};
   std::atomic<int> authAsked{0};
+  std::string keepNeedle;  // set before use: only records whose URL holds it keep their CefBrowser (a browser still referenced at shutdown aborts the engine)
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>, bool, bool, const CefString&, bool&) override { return this; }
   void OnResourceLoadComplete(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> req, CefRefPtr<CefResponse>, URLRequestStatus st, int64_t) override {
     RlRec r;
-    r.url = req->GetURL().ToString(); r.browserId = b ? b->GetIdentifier() : -1; r.status = (int)st; r.ms = RlNowMs(); r.browser = b;
+    r.url = req->GetURL().ToString(); r.browserId = b ? b->GetIdentifier() : -1; r.status = (int)st; r.ms = RlNowMs(); if (!keepNeedle.empty() && r.url.find(keepNeedle) != std::string::npos) r.browser = b;
     std::lock_guard<std::mutex> g(m_);
     recs_.push_back(r);
   }
