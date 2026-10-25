@@ -34,6 +34,7 @@ inline int NCTestInt(const char* name) {
 @property(nonatomic, readwrite, copy) NSString* url;
 @property(nonatomic, readwrite, copy) NSString* title;
 @property(nonatomic, readwrite) BOOL isLoading, canGoBack, canGoForward;
+@property(nonatomic, readwrite) BOOL isHTMLFullscreen;
 @property(nonatomic, readwrite, nullable) NSImage* favicon;
 @property(nonatomic, readwrite, copy, nullable) NSString* faviconURL;
 /// YES from [close] until the tab ends or the close is reported cancelled (a beforeunload dialog answered Stay).

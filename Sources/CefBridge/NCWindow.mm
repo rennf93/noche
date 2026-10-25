@@ -38,6 +38,7 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
 - (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier;
+- (void)browser:(CefRefPtr<CefBrowser>)browser fullscreen:(BOOL)fullscreen;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
@@ -205,6 +206,10 @@ class NCClient : public CefClient,
     if (!f->IsMain()) return;
     NSString* s = @(url.ToString().c_str());
     [w_ browser:b update:^(NCTab* t) { t.url = s; }];
+  }
+  void OnFullscreenModeChange(CefRefPtr<CefBrowser> b, bool fullscreen) override {
+    NC_CEF_CALLBACK;
+    [w_ browser:b fullscreen:fullscreen];
   }
   void OnFaviconURLChange(CefRefPtr<CefBrowser> b, const std::vector<CefString>& urls) override {
     NC_CEF_CALLBACK;
@@ -794,6 +799,10 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFindMatches:count active:ordinal final:final identifier:identifier]; }];
 }
 
+- (void)browser:(CefRefPtr<CefBrowser>)browser fullscreen:(BOOL)fullscreen {
+  if (NCTab* tab = [self tabFor:browser create:NO]) tab.isHTMLFullscreen = fullscreen;
+}
+
 - (void)browser:(CefRefPtr<CefBrowser>)browser failedLoadWithCode:(int)code url:(NSString*)url {
   NCTab* tab = [self tabFor:browser create:NO];
   if (tab) [self post:^(id<NCWindowDelegate> d) { [d window:self tab:tab didFailLoadWithCode:code url:url]; }];
@@ -865,6 +874,19 @@ static NSInteger g_preempted = 0;
   // it never reaches OnChromeCommand: Noche's find pill closes through this claim, which the delegate grants only while the pill shows.
   const BOOL escape = event.keyCode == 53 && m == 0;
   if (escape) {
+    if (NC_TEST_FLAG("NOCHE_TEST_ESC_ALWAYS")) {  // negative control: Escape is claimed whatever the state
+#ifdef NOCHE_TESTHOOKS
+      g_preempted++;
+#endif
+      [self post:^(id<NCWindowDelegate> d) { [d window:self handlePreemptedKey:event]; }];
+      return YES;
+    }
+    // Claimed only when the page's own view is the first responder (not a page dialog or another view), it has no IME composition (that Escape
+    // belongs to the composition) and the tab is not in HTML fullscreen (Escape leaves it), and then only if the delegate agrees.
+    NSView* page = self.webView ? FindByClass(self.webView, @"RenderWidgetHostViewCocoa") : nil;
+    if (!page || self.nsWindow.firstResponder != page) return NO;
+    if ([(id<NSTextInputClient>)page hasMarkedText]) return NO;
+    if (self.activeTab.isHTMLFullscreen) return NO;
     id<NCWindowDelegate> d = _delegate;
     if (!d || ![d windowShouldClaimEscape:self]) return NO;
   } else if (![table[key] containsObject:@(m)]) {

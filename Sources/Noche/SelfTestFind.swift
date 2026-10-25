@@ -400,5 +400,51 @@ extension SelfTest {
         guard NCWindow.testPreemptedKeys() == claims1, keys.contains("Escape") else { return finish(false, "with no pill Escape was claimed (\(NCWindow.testPreemptedKeys() - claims1)) or the page saw \(keys), want unclaimed and Escape") }
         finish(violations.isEmpty, "with no pill Escape is not claimed and the page's keydown listener sees it")
     }
+
+    /// Escape stays with whoever needs it: an IME composition in the page, another view with focus, an HTML fullscreen page. None of them is claimed and the pill stays.
+    func findEscapeGuards() async {
+        guard await ready(), let ctl, let win, let tab = win.activeTab, let ns = ctl.nsWindow else { return }
+        guard await loadFind(tab) else { return finish(false, "find.html did not load (\(tab.url))") }
+        guard let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let client = page as? NSTextInputClient else { return finish(false, "no page view") }
+        guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber,
+                                        context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) else { return finish(false, "no Escape event") }
+        key("f", code: 3)
+        guard await until(5, { !ctl.findBar.isHidden && ctl.findBar.field.currentEditor() != nil }) else { return finish(false, "Cmd+F did not open the pill") }
+        for ch in "needle" { ctl.findBar.field.currentEditor()?.insertText(String(ch)) }
+        guard await until(10, { findCount() == "1 of 3" }) else { return finish(false, "needle shows '\(findCount())', want '1 of 3'") }
+        func unclaimed(_ what: String) -> String? {
+            let before = NCWindow.testPreemptedKeys()
+            NSApp.sendEvent(ev)
+            if NCWindow.testPreemptedKeys() != before { return "Escape was claimed \(what)" }
+            if ctl.findBar.isHidden { return "Escape closed the pill \(what)" }
+            return nil
+        }
+        // An IME composition in the page view: its Escape cancels the composition.
+        ns.makeFirstResponder(page)
+        client.setMarkedText("a", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        guard client.hasMarkedText() else { return finish(false, "setMarkedText left the page view with no marked text, the composition cannot be driven") }
+        if let m = unclaimed("while the page view had marked text") { return finish(false, m) }
+        client.unmarkText()
+        // Another view has focus (not the page, not the pill's field): not the page's Escape.
+        ns.makeFirstResponder(nil)
+        if let m = unclaimed("while the window itself was the first responder") { return finish(false, m) }
+        // HTML fullscreen: Escape leaves it. A hidden run may not be allowed to enter it.
+        ns.makeFirstResponder(page)
+        _ = await evaluate(tab, "document.documentElement.requestFullscreen().catch(() => {}); 1")
+        let fsState = await evaluate(tab, "JSON.stringify([document.fullscreenEnabled, document.fullscreenElement === null])") ?? "nil"
+        var note = "HTML fullscreen could not be entered in the hidden run (owner check 14; [fullscreenEnabled, no element] = \(fsState))"
+        if await until(5, { tab.isHTMLFullscreen }) {
+            if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
+            _ = await evaluate(tab, "document.exitFullscreen(); 1")
+            note = "an HTML fullscreen page too"
+        }
+        // The claim itself still works once the guards are clear.
+        ns.makeFirstResponder(page)
+        guard await until(5, { !tab.isHTMLFullscreen }) else { return finish(false, "the page stayed in fullscreen") }
+        let before = NCWindow.testPreemptedKeys()
+        NSApp.sendEvent(ev)
+        guard await until(5, { ctl.findBar.isHidden }), NCWindow.testPreemptedKeys() - before == 1 else { return finish(false, "Escape with the page focused and no composition did not close the pill") }
+        finish(violations.isEmpty, "Escape is not claimed during an IME composition in the page view, with the window as first responder, or \(note); with the guards clear it closes the pill")
+    }
 }
 #endif

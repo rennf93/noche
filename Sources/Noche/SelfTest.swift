@@ -177,6 +177,7 @@ final class SelfTest {
             case "find-engine": await findEngine()
             case "find-escape": await findEscape()
             case "find-escape-page": await findEscapePage()
+            case "find-escape-guards": await findEscapeGuards()
             case "zoom-engine": await zoomEngine()
             default: finish(false, "unknown check")
             }
