@@ -302,14 +302,57 @@ extension SelfTest {
         reset(); cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W closed no tab") }; await settle(); verify("Cmd+W", "closeTab")
         // The keys of the menu table (M1.4 task 2). Print, Inspect Elements and JavaScript Console are counted but not run: a hidden run must not raise their windows.
         BrowserWindowController.suppressChrome = true
-        // Opt+Cmd+C and Opt+Shift+Cmd+C are claimed by the engine's own accelerator (DevTools in inspect mode) before the menu sees them, so these two go to the menu directly.
-        reset(); key("c", code: 8, [.command, .option, .shift], chars: "C", menuOnly: true); await settle(); verify("Opt+Shift+Cmd+C", "copyURLMarkdown")
-        let titleJSON = await evaluate(tab, "document.title") ?? ""
-        let pageTitle = (try? JSONSerialization.jsonObject(with: Data(titleJSON.utf8), options: .fragmentsAllowed)) as? String ?? "?"
+        // The engine maps Opt+Cmd+C and Opt+Shift+Cmd+C to its own Inspect command; the bridge claims them before the engine's accelerator, so a key through
+        // NSApplication.sendEvent (like a real press) runs Noche's item once and opens no DevTools window. Title and address carry a backslash, a bracket and a parenthesis.
+        let devToolsBefore = NCWindow.devToolsCreated(), claimsBefore = NCWindow.testPreemptedKeys()
+        _ = await evaluate(tab, #"document.title = "a\\b] c"; history.pushState(null, "", "/q)x"); 1"#)
+        guard await until(10, { tab.title == #"a\b] c"# && tab.url.hasSuffix("/q)x") }) else { return finish(false, "the page did not take the Markdown test title and address (\(tab.title) \(tab.url))") }
+        reset(); sendKey("c", code: 8, [.command, .option, .shift], chars: "C"); await settle(); verify("Opt+Shift+Cmd+C", "copyURLMarkdown")
         let markdown = BrowserWindowController.pasteboard.string(forType: .string)
-        if markdown != "[\(pageTitle)](\(tab.url))" { bad.append("Copy URL as Markdown put \(markdown ?? "nil") on the pasteboard, want [\(pageTitle)](\(tab.url))") }
+        let wantMarkdown = #"[a\\b\] c]("# + fixture("") + "q%29x)"
+        if markdown != wantMarkdown { bad.append("Copy URL as Markdown put \(markdown ?? "nil") on the pasteboard, want \(wantMarkdown)") }
+        reset(); sendKey("c", code: 8, [.command, .option]); await settle(); verify("Opt+Cmd+C", "inspectElements")
+        if NCWindow.testPreemptedKeys() - claimsBefore != 2 { bad.append("the bridge claimed \(NCWindow.testPreemptedKeys() - claimsBefore) of the 2 engine chords (the menu alone would also run them in a hidden run)") }
+        if NCWindow.devToolsCreated() != devToolsBefore { bad.append("a DevTools window opened (\(NCWindow.devToolsCreated()) created, \(devToolsBefore) before)") }
+        // Cmd+C is not claimed: the page sees the keydown, and no Noche action runs.
+        if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8) {
+            _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
+            ns.makeFirstResponder(page); reset()
+            NSApp.sendEvent(ev)  // not claimed by Noche: no action runs
+            let claimed = BrowserWindowController.actionCounts
+            ns.firstResponder?.keyDown(with: ev)  // and the page gets the key, as AppKit's fall-through gives it (a hidden window is never key)
+            var keys = ""
+            for _ in 0..<20 {
+                keys = await evaluate(tab, "JSON.stringify(window.__keys || [])") ?? ""
+                if keys.contains("c+meta") { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            if keys.contains("c+meta"), claimed.isEmpty, NCWindow.testPreemptedKeys() - claimsBefore == 2 { passed.append("Cmd+C reached the page") } else { bad.append("Cmd+C: page saw \(keys), Noche actions \(BrowserWindowController.actionCounts)") }
+        } else { bad.append("no web view for the Cmd+C case") }
+        // Shifted punctuation: the menu resolves each chord of the table that is typed with Shift (US layout: the shifted character, and the plain key ignoring modifiers).
+        if let menu = NSApp.mainMenu as? ShortcutMenu, let ns = ctl.nsWindow {
+            // AppKit rewrites some keys for the machine's layout once an item is in the menu (a Spanish layout turns "[" into "ñ"): a press there types the live key.
+            func resolves(_ name: String, _ usPlain: String, _ usShifted: String, _ mods: NSEvent.ModifierFlags, _ title: String) {
+                let plain = menuItem(title)?.keyEquivalent.replacingOccurrences(of: "+", with: "=") ?? usPlain
+                let direct = plain != usPlain && plain != "="
+                let shifted = direct ? plain : usShifted
+                let mods = direct ? (menuItem(title)?.keyEquivalentModifierMask ?? mods) : mods
+                guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber,
+                                                context: nil, characters: shifted, charactersIgnoringModifiers: plain, isARepeat: false, keyCode: 0) else { return bad.append("\(name): no event") }
+                let got = menu.item(for: ev)?.title
+                if got == title { passed.append("\(name) is \(title)") } else { bad.append("\(name) resolved \(got ?? "nothing"), want \(title)") }
+            }
+            resolves("Cmd+: (Shift+Cmd+;)", ";", ":", [.command, .shift], "Show Spelling and Grammar")
+            resolves("Cmd+;", ";", ";", .command, "Check Document Now")
+            resolves("Cmd++ (Shift+Cmd+=)", "=", "+", [.command, .shift], "Zoom In")
+            resolves("Ctrl++ (Ctrl+Shift+=)", "=", "+", [.control, .shift], "Open Split Pane")
+            resolves("Ctrl+Shift+'", "'", "\"", [.control, .shift], "Focus Next Split Pane")
+            resolves("Ctrl+Shift+[", "[", "{", [.control, .shift], "Focus Previous Split Pane")
+            resolves("Shift+Cmd+]", "]", "}", [.command, .shift], "Next Tab")
+            resolves("Shift+Cmd+[", "[", "{", [.command, .shift], "Previous Tab")
+        } else { bad.append("no ShortcutMenu or window for the shifted punctuation rows") }
         reset(); key("p", code: 35); await settle(); verify("Cmd+P", "print")
-        reset(); key("c", code: 8, [.command, .option], menuOnly: true); await settle(); verify("Opt+Cmd+C", "inspectElements")
         reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
         for (name, ch, code, mods, chars, scheme, action) in [("Cmd+Y", "y", UInt16(16), NSEvent.ModifierFlags.command, "y", "chrome://history", "showHistory"),
                                                              ("Shift+Cmd+J", "j", UInt16(38), [.command, .shift], "J", "chrome://downloads", "showDownloads")] as [(String, String, UInt16, NSEvent.ModifierFlags, String, String, String)] {

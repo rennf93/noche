@@ -132,6 +132,8 @@ extension BrowserWindowController {
     }
 
     /// Chrome commands that duplicate a Noche action run the Noche action and are answered YES.
+    func window(_ window: NCWindow, handlePreemptedKey event: NSEvent) { _ = NSApp.mainMenu?.performKeyEquivalent(with: event) }
+
     func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool {
 #if NOCHE_TESTHOOKS
         Self.commandLog.append(commandId)

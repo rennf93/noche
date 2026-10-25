@@ -34,6 +34,8 @@
 - (void)browser:(CefRefPtr<CefBrowser>)browser faviconURLs:(const std::vector<CefString>&)urls;
 - (void)browser:(CefRefPtr<CefBrowser>)browser mainFrameLoadStarted:(NSString*)url;
 - (BOOL)chromeCommand:(int)commandId;
+- (BOOL)preemptKey:(NSEvent*)event;
++ (void)registerForKeyClaims:(NCWindow*)w;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
 - (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser;
 @end
@@ -233,6 +235,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     _table = [NSMutableDictionary dictionary];
     _devtools = [NSMutableSet set];
     _closed = [NSMutableSet set];
+    [NCWindow registerForKeyClaims:self];
     _client = new NCClient(self);
     _view = CefBrowserView::CreateBrowserView(_client, url.UTF8String, TabSettings(), nullptr, nullptr,
                                               new NCViewDelegate(self));
@@ -718,6 +721,50 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
     if (tab.browser && self->_table[@(tab.identifier)] == tab) [self unloadDialogResolved:tab.browser leaves:NO];
   });
+}
+
+// The chords where Chromium's Mac accelerator table maps the key to a different command than Noche's menu table (Opt+Cmd+C and Opt+Shift+Cmd+C
+// open DevTools in inspect mode; the others open Settings, an incognito window, the bookmark manager, the bookmark bar, Search Tabs or the bookmark bubble).
+// Every other chord Noche owns is left alone: Cmd+C, V, X, A, R, L, K and the rest reach the page and the engine as they always did.
+#ifdef NOCHE_TESTHOOKS
+static NSInteger g_preempted = 0;
++ (NSInteger)testPreemptedKeys { return g_preempted; }
+#endif
+
+- (BOOL)preemptKey:(NSEvent*)event {
+  const NSEventModifierFlags m = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
+  const NSEventModifierFlags cmd = NSEventModifierFlagCommand, shift = NSEventModifierFlagShift, opt = NSEventModifierFlagOption;
+  static NSDictionary<NSString*, NSArray<NSNumber*>*>* table;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    table = @{@"c": @[@(opt | cmd), @(opt | shift | cmd)], @"b": @[@(opt | cmd), @(shift | cmd)], @",": @[@(cmd)],
+              @"n": @[@(shift | cmd)], @"a": @[@(shift | cmd)], @"d": @[@(cmd)]};
+  });
+  NSString* key = event.charactersIgnoringModifiers.lowercaseString;
+  if (NC_TEST_FLAG("NOCHE_TEST_NO_PREEMPT")) return NO;  // negative control: the engine's accelerators run first
+  if (![table[key] containsObject:@(m)]) return NO;
+#ifdef NOCHE_TESTHOOKS
+  g_preempted++;
+#endif
+  [self post:^(id<NCWindowDelegate> d) { [d window:self handlePreemptedKey:event]; }];
+  return YES;
+}
+
+// Chromium handles these chords in its window's performKeyEquivalent before the renderer (no CEF key callback is made for them), so the claim is
+// a local event monitor, which runs in NSApplication sendEvent ahead of the window. It only sees events of our own windows.
+static NSHashTable<NCWindow*>* g_key_windows;
++ (void)registerForKeyClaims:(NCWindow*)w {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    g_key_windows = [NSHashTable weakObjectsHashTable];
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent*(NSEvent* e) {
+      for (NCWindow* c in g_key_windows) {
+        if (e.window && e.window == c.nsWindow) return [c preemptKey:e] ? nil : e;
+      }
+      return e;
+    }];
+  });
+  [g_key_windows addObject:w];
 }
 
 - (BOOL)chromeCommand:(int)commandId {

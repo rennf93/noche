@@ -213,6 +213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func openPage(_ url: String, note: String) {
         if let a = active { a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
     }
+    @objc func share(_ s: Any?) { active?.share() }
+    @objc func taskManager(_ s: Any?) { active?.chromeCommand("IDC_TASK_MANAGER", note: "taskManager") }
+    @objc func copyDiagnostics(_ s: Any?) { BrowserWindowController.copyDiagnostics() }
     @objc func arrangeWindowsInFront(_ s: Any?) { NSApp.arrangeInFront(s) }
     @objc func toggleFullURL(_ s: Any?) { showFullURL.toggle(); controllers.forEach { $0.refresh() } }
     /// Automatic, Light and Dark by tag. Dark is the only captured theme; light uses the system's colors until it is captured.

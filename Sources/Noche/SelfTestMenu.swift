@@ -21,7 +21,8 @@ extension SelfTest {
             if m.contains(.command) { mods.append("cmd") }
             // AppKit rewrites "[" and "]" to the layout's own keys (the Spanish layout gives "ñ" and "´"): report the US ones.
             let key = ["ñ": "[", "´": "]", "¿": ":", "¡": ";", "`": "'"][i.keyEquivalent] ?? i.keyEquivalent
-            let enabled = i.submenu != nil ? "1" : (i.action != nil && i.target == nil ? "r" : (i.isEnabled ? "1" : "0"))
+            // Task Manager is enabled exactly when the engine can execute IDC_TASK_MANAGER: asserted by menu-diff, not written down.
+            let enabled = i.title == "Task Manager" ? "e" : i.submenu != nil ? "1" : (i.action != nil && i.target == nil ? "r" : (i.isEnabled ? "1" : "0"))
             out.append("\(path)|\(i.title.replacingOccurrences(of: "…", with: "..."))|\(key)|\(key.isEmpty ? "" : mods.joined(separator: "+"))|\(enabled)")
             // The bar lists its menus first; below the bar a submenu's lines follow its own line.
             if path != "bar", let sub = i.submenu, i.title != "Services" { out += menuLines(sub, path: "\(path)/\(i.title)") }
@@ -86,6 +87,36 @@ extension SelfTest {
         }
         walk(MenuTable.bar)
         guard undated.isEmpty else { return finish(false, "disabled items without a milestone: \(undated)") }
+        // Every nil-targeted row has the expected standard action and no target (hand-written list, not read from the table).
+        let selectors: [String: String] = [
+            "About Noche": "orderFrontStandardAboutPanel:", "Hide Noche": "hide:", "Hide Others": "hideOtherApplications:", "Show All": "unhideAllApplications:",
+            "Quit Noche": "terminate:", "Undo": "undo:", "Redo": "redo:", "Cut": "cut:", "Copy": "copy:", "Paste": "paste:",
+            "Paste and Match Style": "pasteAsPlainText:", "Delete": "delete:", "Select All": "selectAll:",
+            "Show Spelling and Grammar": "showGuessPanel:", "Check Document Now": "checkSpelling:", "Check Spelling While Typing": "toggleContinuousSpellChecking:",
+            "Check Grammar With Spelling": "toggleGrammarChecking:", "Correct Spelling Automatically": "toggleAutomaticSpellingCorrection:",
+            "Show Substitutions": "orderFrontSubstitutionsPanel:", "Smart Copy/Paste": "toggleSmartInsertDelete:", "Smart Quotes": "toggleAutomaticQuoteSubstitution:",
+            "Smart Dashes": "toggleAutomaticDashSubstitution:", "Smart Links": "toggleAutomaticLinkDetection:", "Data Detectors": "toggleAutomaticDataDetection:",
+            "Text Replacement": "toggleAutomaticTextReplacement:", "Make Upper Case": "uppercaseWord:", "Make Lower Case": "lowercaseWord:", "Capitalize": "capitalizeWord:",
+            "Start Speaking": "startSpeaking:", "Stop Speaking": "stopSpeaking:", "Start Dictation...": "startDictation:", "Emoji & Symbols": "orderFrontCharacterPalette:",
+            "Enter Full Screen": "toggleFullScreen:", "Minimize": "performMiniaturize:", "Minimize All": "miniaturizeAll:"]
+        var badSelectors: [String] = [], seen = 0
+        func walkLive(_ m: NSMenu) {
+            for i in m.items where i.identifier == MenuTable.mark {
+                if let a = i.action, i.target == nil, !i.isSeparatorItem {
+                    seen += 1
+                    let title = i.title.replacingOccurrences(of: "…", with: "...")
+                    if selectors[title] != NSStringFromSelector(a) { badSelectors.append("\(title): \(NSStringFromSelector(a)), want \(selectors[title] ?? "none")") }
+                }
+                if let s = i.submenu, i.title != "Services" { walkLive(s) }
+            }
+        }
+        walkLive(bar)
+        guard badSelectors.isEmpty, seen == selectors.count else { return finish(false, "nil-targeted items: \(seen) of \(selectors.count), wrong selectors \(badSelectors)") }
+        // Task Manager follows the engine: enabled exactly when it can execute IDC_TASK_MANAGER.
+        let canTaskManager = win?.activeTab?.canExecuteChromeCommandNamed("IDC_TASK_MANAGER") ?? false
+        let tm = menuItem("Task Manager"); tm?.menu?.update()
+        guard tm?.isEnabled == canTaskManager else { return finish(false, "Task Manager enabled \(String(describing: tm?.isEnabled)) but the engine's CanExecute is \(canTaskManager)") }
+        line("info", "IDC_TASK_MANAGER CanExecute \(canTaskManager)")
         let nilTargeted = got.filter { $0.hasSuffix("|r") }.count
         finish(violations.isEmpty, "\(got.count) lines (menus, items, separators and \(MenuTable.commands.count) key commands) equal menu-expected.txt, \(nilTargeted) nil-targeted responder items, every disabled item names a milestone \(violations)")
     }
@@ -164,7 +195,55 @@ extension SelfTest {
             if menuItem(title).map({ $0.menu?.update(); return $0.state != .on }) ?? true { bad.append("\(title) is not checked after choosing it") }
         }
         appearance("Dark", .darkAqua); appearance("Light", .aqua); appearance("Automatic", nil)
-        finish(bad.isEmpty && violations.isEmpty, "Duplicate (2 tabs, same address, new one active, one action), Show Full URL on and off with its checkmark, Appearance Dark, Light, Automatic with their checkmarks \(bad) \(violations)")
+        // File > Share...: the sharing picker is made with the tab's address as its only item and is not shown (hidden run).
+        BrowserWindowController.suppressChrome = true
+        BrowserWindowController.lastShare = nil
+        reset()
+        if !fire("Share...") { bad.append("File > Share... is not enabled on a web page") }
+        let shared = BrowserWindowController.lastShare?.items.compactMap { ($0 as? URL)?.absoluteString }
+        if shared != [active.url] || BrowserWindowController.lastShare?.items.count != 1 { bad.append("Share made a picker for \(String(describing: shared)), want [\(active.url)]") }
+        if BrowserWindowController.actionCounts != ["share": 1] { bad.append("Share acted \(BrowserWindowController.actionCounts)") }
+
+        // Help > Copy Diagnostics: the pasteboard text has Noche's version and build, the engine's cef_version and macOS's version, each read from outside the app.
+        BrowserWindowController.pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.noche.selftest"))
+        BrowserWindowController.pasteboard.clearContents()
+        reset()
+        fire("Copy Diagnostics")
+        let text = BrowserWindowController.pasteboard.string(forType: .string) ?? ""
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let engine = (try? String(contentsOf: repo.appendingPathComponent("vendor/CEF-VERSION.txt"), encoding: .utf8))?.split(separator: "\n").first { $0.hasPrefix("cef_version=") }.map { String($0.dropFirst("cef_version=".count)) } ?? "?"
+        let plist = (try? String(contentsOf: repo.appendingPathComponent("Resources/App/Info.plist.template"), encoding: .utf8)) ?? ""
+        func plistValue(_ key: String) -> String {
+            guard let r = plist.range(of: "<key>\(key)</key><string>"), let e = plist[r.upperBound...].range(of: "</string>") else { return "?" }
+            return String(plist[r.upperBound..<e.lowerBound])
+        }
+        let sw = Process(), swOut = Pipe()
+        sw.executableURL = URL(fileURLWithPath: "/usr/bin/sw_vers"); sw.arguments = ["-productVersion"]; sw.standardOutput = swOut
+        try? sw.run(); sw.waitUntilExit()
+        let macOS = String(data: swOut.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+        let lines = text.split(separator: "\n").map(String.init)
+        if lines.count != 3 || lines[0] != "Noche \(plistValue("CFBundleShortVersionString")) (build \(plistValue("CFBundleVersion")))" || lines[1] != "Engine (CEF) \(engine)" || !lines[2].hasPrefix("macOS ") || !lines[2].contains(macOS) {
+            bad.append("diagnostics text \(lines), want Noche \(plistValue("CFBundleShortVersionString")) (build \(plistValue("CFBundleVersion"))), Engine (CEF) \(engine), macOS ... \(macOS)")
+        }
+        if BrowserWindowController.actionCounts != ["copyDiagnostics": 1] { bad.append("Copy Diagnostics acted \(BrowserWindowController.actionCounts)") }
+
+        // Window > Task Manager: enabled exactly when the engine can execute IDC_TASK_MANAGER; executed for real, the windows that appear are recorded (and closed).
+        BrowserWindowController.suppressChrome = false
+        let can = active.canExecuteChromeCommandNamed("IDC_TASK_MANAGER")
+        let before = Set(NSApp.windows.map { ObjectIdentifier($0) })
+        reset()
+        let ran = fire("Task Manager")
+        if ran != can { bad.append("Task Manager fired \(ran) but CanExecute is \(can)") }
+        if can {
+            _ = await until(3, { NSApp.windows.contains { !before.contains(ObjectIdentifier($0)) } })
+            let fresh = NSApp.windows.filter { !before.contains(ObjectIdentifier($0)) }
+            line("info", "IDC_TASK_MANAGER CanExecute true, executed once, new windows \(fresh.count) \(fresh.map { NSStringFromClass(type(of: $0)) + ":" + $0.title })")
+            if BrowserWindowController.actionCounts != ["taskManager": 1] { bad.append("Task Manager acted \(BrowserWindowController.actionCounts)") }
+            fresh.forEach { $0.close() }
+        } else {
+            line("info", "IDC_TASK_MANAGER CanExecute false: the engine cannot run it on this tab, so the item is disabled and nothing was executed")
+        }
+        finish(bad.isEmpty && violations.isEmpty, "Duplicate (2 tabs, same address, new one active, one action), Show Full URL on and off with its checkmark, Appearance Dark, Light, Automatic with their checkmarks, Share (picker made with the address, not shown), Copy Diagnostics (3 lines checked against files and sw_vers), Task Manager (follows CanExecute) \(bad) \(violations)")
     }
 }
 #endif

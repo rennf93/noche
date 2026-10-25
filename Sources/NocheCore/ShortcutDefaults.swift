@@ -41,7 +41,7 @@ extension ShortcutDefaults {
             ("view.autoHideTabs", "Auto-Hide Tabs", Chord("s", c), nil),
             ("view.openSplitPane", "Open Split Pane", Chord("=", k | s), nil),
             ("view.focusNextSplitPane", "Focus Next Split Pane", Chord("'", k | s), nil),
-            ("view.focusPreviousSplitPane", "Focus Previous Split Pane", Chord(";", k | s), nil),
+            ("view.focusPreviousSplitPane", "Focus Previous Split Pane", Chord("[", k | s), nil),
             ("view.bookmarksBar.always", "Always", nil, nil),
             ("view.bookmarksBar.newTabOnly", "On New Tab Only", nil, nil),
             ("view.bookmarksBar.never", "Never", nil, nil),

@@ -1,5 +1,6 @@
 import AppKit
 import CefBridge
+import NocheCore
 
 /// The actions of the menu items that need the window: each counts once under its own name and acts on the active tab.
 extension BrowserWindowController {
@@ -34,14 +35,56 @@ extension BrowserWindowController {
         for tab in open { closing[tab.identifier] = now; tab.close() }
     }
 
-    /// Edit > Copy URL as Markdown: `[title](url)`, the title standing in for itself when the page has none.
+    /// Edit > Copy URL as Markdown: `[title](url)` (see `MarkdownLink` for the escaping).
     func copyURLMarkdown() {
         note("copyURLMarkdown")
         guard let tab = activeTab else { return }
-        let title = (tab.title.isEmpty ? tab.url : tab.title).replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
         let board = pasteboard
         board.clearContents()
-        board.setString("[\(title)](\(tab.url))", forType: .string)
+        board.setString(MarkdownLink.make(title: tab.title, url: tab.url), forType: .string)
+    }
+
+    /// File > Share...: the system sharing picker for the active tab's address, anchored to the toolbar.
+    func share() {
+        note("share")
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_SHARE"] == "1" { return }  // negative control
+#endif
+        guard let tab = activeTab, let url = URL(string: tab.url), let anchor = toolbar as NSView? else { return }
+        let picker = NSSharingServicePicker(items: [url])
+#if NOCHE_TESTHOOKS
+        Self.lastShare = (picker, [url])
+        if Self.suppressChrome { return }  // a hidden run creates the picker but never shows it
+#endif
+        picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    /// The pasteboard the menu writes to (a test pasteboard in hooks builds).
+    static var board: NSPasteboard {
+#if NOCHE_TESTHOOKS
+        pasteboard
+#else
+        NSPasteboard.general
+#endif
+    }
+
+    /// Help > Copy Diagnostics: Noche's version and build, the engine's version as compiled in, and macOS's, on the pasteboard.
+    static func diagnosticsText() -> String {
+        let info = Bundle.main.infoDictionary
+        return """
+        Noche \(info?["CFBundleShortVersionString"] as? String ?? "?") (build \(info?["CFBundleVersion"] as? String ?? "?"))
+        Engine (CEF) \(NCEngine.cefVersion())
+        macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+        """
+    }
+
+    static func copyDiagnostics() {
+        note("copyDiagnostics")
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_DIAG"] == "1" { return }  // negative control
+#endif
+        board.clearContents()
+        board.setString(diagnosticsText(), forType: .string)
     }
 
     func printPage() {

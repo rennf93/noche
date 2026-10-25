@@ -20,6 +20,8 @@ NC_EXPORT
 + (void)shutdown;
 /// The numeric id of a Chrome command (IDC_...) in this engine build, -1 when the name is unknown. Valid once the engine started.
 + (NSInteger)chromeCommandIdNamed:(NSString *)name;
+/// The CEF version string this app was compiled against (cef_version.h CEF_VERSION).
++ (NSString *)cefVersion;
 @end
 
 NC_EXPORT

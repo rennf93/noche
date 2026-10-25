@@ -88,6 +88,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var pasteboard = NSPasteboard.general
     /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
     static var suppressChrome = false
+    /// The last sharing picker File > Share... made and the items it was given.
+    static var lastShare: (picker: NSSharingServicePicker, items: [Any])?
     var toggleStart: TimeInterval = 0, toggleEnd: TimeInterval = 0
     var cardLog: [(t: TimeInterval, x: CGFloat)] = []
 #endif

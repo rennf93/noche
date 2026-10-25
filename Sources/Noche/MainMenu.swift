@@ -31,7 +31,13 @@ enum MainMenu {
 #else
         let drift = false
 #endif
-        let i = NSMenuItem(title: e.title, action: e.action, keyEquivalent: e.key)
+#if NOCHE_TESTHOOKS
+        // Negative control for menu-diff's selector check: Copy carries Paste's action.
+        let action = ProcessInfo.processInfo.environment["NOCHE_TEST_MENU_SELECTOR"] == "1" && e.title == "Copy" ? #selector(NSText.paste(_:)) : e.action
+#else
+        let action = e.action
+#endif
+        let i = NSMenuItem(title: e.title, action: action, keyEquivalent: e.key)
         i.keyEquivalentModifierMask = e.modifiers
         i.target = e.viaResponder ? nil : (e.action == nil ? nil : app)
         i.tag = e.tag
@@ -57,9 +63,27 @@ enum MainMenu {
 /// (the Shift item listed first), so an item whose key and full modifier set equal the event's wins; a key that matches nothing exactly is left to the page.
 /// Key commands that have no menu item (`MenuTable.commands`) are matched the same way after the items.
 final class ShortcutMenu: NSMenu {
-    private static let unshifted: [Character: Character] = ["{": "[", "}": "]", "+": "=", "_": "-"]
+    /// Every US shifted pair: the shifted character and its key. A chord typed with Shift (Cmd+Shift+; is ":" on a US layout, Ctrl+Shift+' is '"')
+    /// matches an item keyed by the shifted character that has no Shift of its own, and one keyed by the base key with Shift.
+    private static let unshifted: [Character: Character] = {
+        var m: [Character: Character] = ["{": "[", "}": "]", "+": "=", "_": "-", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "|": "\\", "~": "`"]
+        for (s, d) in zip("!@#$%^&*()", "1234567890") { m[s] = d }
+        return m
+    }()
     private static let shifted = Dictionary(uniqueKeysWithValues: unshifted.map { ($1, $0) })
     var commands: [(chord: Chord, title: String, run: () -> Void)] = []
+
+    /// The item whose key and full modifier set equal the event's, wherever it is in the bar.
+    func item(for event: NSEvent) -> NSMenuItem? {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let typed = [event.charactersIgnoringModifiers, event.characters].compactMap { $0?.lowercased() }.compactMap(\.first)
+        let keys = Set(typed + typed.compactMap { Self.unshifted[$0] } + typed.compactMap { Self.shifted[$0] })
+        var viaShift = Set(typed.compactMap { Self.shifted[$0] })
+#if NOCHE_TESTHOOKS
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_SHIFTMAP"] == "1" { viaShift = [] }  // negative control: no shifted-punctuation matching
+#endif
+        return match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil)
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -69,9 +93,7 @@ final class ShortcutMenu: NSMenu {
         // Negative control: AppKit's own matching only.
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NOEXACT"] == "1" { return super.performKeyEquivalent(with: event) }
 #endif
-        // A shifted key typed with Shift (Cmd+Shift+= is "+" on a US layout) matches the item keyed "+" that has no Shift of its own.
-        let viaShift = Set(typed.compactMap { Self.shifted[$0] })
-        if let item = match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil), let menu = item.menu {
+        if let item = item(for: event), let menu = item.menu {
             menu.update()
 #if NOCHE_TESTHOOKS
             // Negative control for menu-disabled: a disabled item acts anyway.

@@ -123,6 +123,12 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   return YES;
 }
 
+- (BOOL)canExecuteChromeCommandNamed:(NSString*)name {
+  if (!_browser) return NO;
+  const int id = cef_id_for_command_id_name(name.UTF8String);
+  return id >= 0 && _browser->GetHost()->CanExecuteChromeCommand(id);
+}
+
 #ifdef NOCHE_TESTHOOKS
 - (BOOL)testExecuteChromeCommandNamed:(NSString*)name { return [self executeChromeCommandNamed:name]; }
 #endif

@@ -32,7 +32,7 @@ final class ShortcutsTests: XCTestCase {
         "View|view.autoHideTabs|Auto-Hide Tabs|⌘S",
         "View|view.openSplitPane|Open Split Pane|⌃+",
         "View|view.focusNextSplitPane|Focus Next Split Pane|⌃⇧'",
-        "View|view.focusPreviousSplitPane|Focus Previous Split Pane|⌃⇧;",
+        "View|view.focusPreviousSplitPane|Focus Previous Split Pane|⌃⇧[",
         "View|view.bookmarksBar.always|Always|-",
         "View|view.bookmarksBar.newTabOnly|On New Tab Only|-",
         "View|view.bookmarksBar.never|Never|-",
@@ -251,7 +251,7 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertEqual(r.action(matching: Chord("=", Chord.cmd | Chord.shift)), "view.zoomIn")
         XCTAssertEqual(r.action(matching: Chord("+", Chord.ctrl | Chord.shift)), "view.openSplitPane")
         XCTAssertEqual(r.action(matching: Chord("\"", Chord.ctrl | Chord.shift)), "view.focusNextSplitPane")
-        XCTAssertEqual(r.action(matching: Chord(":", Chord.ctrl | Chord.shift)), "view.focusPreviousSplitPane")
+        XCTAssertEqual(r.action(matching: Chord("{", Chord.ctrl | Chord.shift)), "view.focusPreviousSplitPane")
         XCTAssertEqual(Chord("!", Chord.cmd), Chord("1", Chord.cmd | Chord.shift))
         let data = try! JSONEncoder().encode(Chord("+", Chord.cmd))
         XCTAssertEqual(try! JSONDecoder().decode(Chord.self, from: data), plus)

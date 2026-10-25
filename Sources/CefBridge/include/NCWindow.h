@@ -24,6 +24,9 @@ NS_SWIFT_UI_ACTOR
 /// Called synchronously inside CEF's command handler. YES: Noche handled it, CEF must not.
 - (BOOL)window:(NCWindow *)window shouldHandleChromeCommand:(NSInteger)commandId;
 - (void)windowDidClose:(NCWindow *)window;
+/// A key the engine would take as its own accelerator, which Noche owns instead (the page's JavaScript has already had its chance).
+/// Delivered on a later main-queue turn; the bridge has already told the engine the key is handled.
+- (void)window:(NCWindow *)window handlePreemptedKey:(NSEvent *)event;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR
@@ -63,6 +66,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)devToolsCreated;
 + (NSInteger)devToolsLoaded;
 + (NSInteger)devToolsClosed;
+/// Test support: keys the bridge claimed before the engine's accelerators (`preemptKey:`), all windows.
++ (NSInteger)testPreemptedKeys;
 #endif
 #ifdef NOCHE_TESTHOOKS
 /// Test support: how the beforeunload dialog is answered (0: Chrome's own dialog, 1: Stay, 2: Leave), and how many were asked.
@@ -103,6 +108,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)printPage;
 /// Runs the Chrome command with this IDC name on the tab when the engine can execute it; NO when it cannot.
 - (BOOL)executeChromeCommandNamed:(NSString *)name;
+/// Whether the engine says it can execute the Chrome command with this IDC name on the tab right now.
+- (BOOL)canExecuteChromeCommandNamed:(NSString *)name;
 #ifdef NOCHE_TESTHOOKS
 /// Test support (builds with NOCHE_TESTHOOKS only): runs the Chrome command with this IDC name on the tab, bypassing Noche's actions.
 - (BOOL)testExecuteChromeCommandNamed:(NSString *)name;

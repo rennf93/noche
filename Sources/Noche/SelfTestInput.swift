@@ -17,6 +17,13 @@ extension SelfTest {
         keyLog.append("\(ch)\(mods.contains(.shift) ? "+shift" : ""):window=\(byWindow),menu=\(byMenu) menuClass=\(NSApp.mainMenu.map { String(describing: type(of: $0)) } ?? "nil") ig=\(ev.charactersIgnoringModifiers ?? "nil") chars=\(ev.characters ?? "nil") mods=\(ev.modifierFlags.rawValue)")
         return byWindow || byMenu
     }
+    /// A key press through NSApplication.sendEvent (local event monitors first, then the window), the way a real press arrives.
+    func sendKey(_ ch: String, code: UInt16, _ mods: NSEvent.ModifierFlags, chars: String? = nil) {
+        guard let ns = ctl?.nsWindow, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                              windowNumber: ns.windowNumber, context: nil, characters: chars ?? ch, charactersIgnoringModifiers: ch,
+                                                              isARepeat: false, keyCode: code) else { return keyLog.append("no window for sendKey \(ch)") }
+        NSApp.sendEvent(ev)
+    }
     @discardableResult func cmdT() -> Bool { key("t", code: 17) }
     func cmdW() { key("w", code: 13) }
     // Shifted punctuation: the shifted character, and the plain one ignoring modifiers (the matcher accepts either).

@@ -1,7 +1,7 @@
 # Noche menu bar, transcribed by hand from live-ui.md section 9 (menu and shortcut inventory), the reference app's name replaced by Noche.
 # Line: <menu path>|<title>|<key>|<modifiers>|<enabled in a one-tab window>   ("---" is a separator, "bar" the top level)
 # Key: the US-layout key as AppKit stores it ("+" for Zoom In, ":" for Cmd+:); modifiers in the order ctrl+opt+shift+cmd.
-# Enabled: 1, 0, or r (nil-targeted: the responder chain decides, so it is not asserted; a hidden window is never key).
+# Enabled: 1, 0, r (nil-targeted: the responder chain decides, so it is not asserted; a hidden window is never key) or e (equals the engine's CanExecute for the command; Task Manager).
 # Items of a later milestone are present and 0. Layout glyph keys of section 1 are the US keys (Cmd+[ and Cmd+] for Go Back and Go Forward).
 # Omitted on purpose (no Noche counterpart, design section 3): the reference's invite item, plan label, Upgrade Plan..., Sign Out, Chat with Support,
 #   Video Tour, Status, Record Performance Issue..., the per-profile Window items (profiles arrive in M1.7), the installed-extensions list
@@ -46,7 +46,7 @@ File|Close Tab|w|cmd|1
 File|Close All Tabs|k|shift+cmd|1
 File|Clean Up Tabs|k|opt+cmd|0
 File|---|||-
-File|Share...|||0
+File|Share...|||1
 File|Print...|p|cmd|1
 Edit|Undo|z|cmd|r
 Edit|Redo|z|shift+cmd|r
@@ -109,7 +109,7 @@ View|Auto-Hide Tabs|s|cmd|1
 View|---|||-
 View|Open Split Pane|+|ctrl|0
 View|Focus Next Split Pane|'|ctrl+shift|0
-View|Focus Previous Split Pane|;|ctrl+shift|0
+View|Focus Previous Split Pane|[|ctrl+shift|0
 View|---|||-
 View|Show Bookmarks Bar|||1
 View/Show Bookmarks Bar|Always|||0
@@ -159,9 +159,9 @@ Window|Minimize All|m|opt+cmd|r
 Window|Arrange in Front|||1
 Window|---|||-
 Window|Downloads|j|shift+cmd|1
-Window|Task Manager|||0
+Window|Task Manager|||e
 Window|Merge All Windows|||0
-Help|Copy Diagnostics|||0
+Help|Copy Diagnostics|||1
 command|Select Tab 1|1|cmd|1
 command|Select Tab 2|2|cmd|1
 command|Select Tab 3|3|cmd|1

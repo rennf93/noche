@@ -84,7 +84,7 @@ enum MenuTable {
             later("Check for Updates...", "help.checkForUpdates", "M1.8"),
             sep,
             later("Settings...", "noche.settings", "M1.8"),
-            later("Import from Another Browser...", "unscheduled"),
+            later("Import from Another Browser...", "M1.10"),
             sep,
             menu("Services", [], role: .services),
             sep,
@@ -98,7 +98,7 @@ enum MenuTable {
             app("New Tab", "file.newTab", #selector(AppDelegate.newTab(_:)), enabled: always),
             later("New Tab in Group", "file.newTabInGroup", "M1.6"),
             app("New Window", "file.newWindow", #selector(AppDelegate.newWindowMenu(_:)), enabled: always),
-            later("New Incognito Window", "file.newIncognitoWindow", "unscheduled"),
+            later("New Incognito Window", "file.newIncognitoWindow", "M1.7"),
             app("Reopen Closed Tab", "file.reopenClosedTab", #selector(AppDelegate.reopenClosedTab(_:)),
                 enabled: { !$0.app.closing && ($0.app.writer?.hasClosed ?? false) }),  // disabled while the closed list is empty (M1.2)
             sep,
@@ -112,7 +112,8 @@ enum MenuTable {
             app("Close All Tabs", "file.closeAllTabs", #selector(AppDelegate.closeAllTabs(_:))),
             later("Clean Up Tabs", "file.cleanUpTabs", "M1.6"),
             sep,
-            later("Share...", "file.share", "unscheduled"),
+            app("Share...", "file.share", #selector(AppDelegate.share(_:)),
+                enabled: { $0.window?.activeTab.map { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") } ?? false }),
             app("Print...", "file.print", #selector(AppDelegate.printPage(_:))),
         ]),
         menu("Edit", [
@@ -222,7 +223,7 @@ enum MenuTable {
             later("New Group with Tab", "tabs.newGroupWithTabs", "M1.6"),
             later("Move to Group", "M1.6"),
             later("Move to Profile", "M1.7"),
-            later("Move to Window", "unscheduled"),
+            later("Move to Window", "M1.6"),
             sep,
             later("Rename...", "M1.6"),
             later("Change Icon...", "M1.6"),
@@ -248,11 +249,11 @@ enum MenuTable {
             app("Arrange in Front", nil, #selector(AppDelegate.arrangeWindowsInFront(_:)), enabled: always),  // not NSApp's own selector: AppKit retitles that one "Bring All to Front"
             sep,
             app("Downloads", "window.downloads", #selector(AppDelegate.showDownloads(_:)), enabled: always),  // chrome://downloads until M1.5
-            later("Task Manager", "unscheduled"),
-            later("Merge All Windows", "window.mergeAllWindows", "unscheduled"),
+            app("Task Manager", nil, #selector(AppDelegate.taskManager(_:)), enabled: { $0.window?.activeTab?.canExecuteChromeCommandNamed("IDC_TASK_MANAGER") ?? false }),
+            later("Merge All Windows", "window.mergeAllWindows", "M1.6"),
         ], role: .windows),
         menu("Help", [
-            later("Copy Diagnostics", "help.copyDiagnostics", "unscheduled"),
+            app("Copy Diagnostics", "help.copyDiagnostics", #selector(AppDelegate.copyDiagnostics(_:)), enabled: always),
         ], role: .help),
     ]
 
