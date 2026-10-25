@@ -24,7 +24,7 @@ NS_SWIFT_UI_ACTOR
 /// Called synchronously inside CEF's command handler. YES: Noche handled it, CEF must not.
 - (BOOL)window:(NCWindow *)window shouldHandleChromeCommand:(NSInteger)commandId;
 - (void)windowDidClose:(NCWindow *)window;
-/// A key the engine would take as its own accelerator, which Noche owns instead (the page's JavaScript has already had its chance).
+/// A key the engine would take as its own accelerator, which Noche owns instead. The page never sees it: the monitor takes it ahead of the window and the renderer.
 /// Delivered on a later main-queue turn; the bridge has already told the engine the key is handled.
 - (void)window:(NCWindow *)window handlePreemptedKey:(NSEvent *)event;
 @end

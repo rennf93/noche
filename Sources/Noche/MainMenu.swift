@@ -9,7 +9,10 @@ enum MainMenu {
     /// The item's table row, kept on the item (representedObject) so validation and the checks can read its rule.
     final class Rule: NSObject {
         let entry: MenuEntry
-        init(_ entry: MenuEntry) { self.entry = entry }
+        /// The table's US key for the item. AppKit rewrites `keyEquivalent` for the machine's layout (a Spanish layout turns "[" into "ñ"), so
+        /// `ShortcutMenu` matches an event against both.
+        nonisolated let usKey: String
+        @MainActor init(_ entry: MenuEntry) { self.entry = entry; usKey = entry.key }
     }
 
     static func build(app: AppDelegate) -> NSMenu {
@@ -73,16 +76,21 @@ final class ShortcutMenu: NSMenu {
     private static let shifted = Dictionary(uniqueKeysWithValues: unshifted.map { ($1, $0) })
     var commands: [(chord: Chord, title: String, run: () -> Void)] = []
 
-    /// The item whose key and full modifier set equal the event's, wherever it is in the bar.
+    /// The item whose key and full modifier set equal the event's, wherever it is in the bar. In three steps, so a chord never lands on a neighbour:
+    /// the exact typed key (Cmd+; is Check Document Now, never Show Spelling, which sits earlier in the menu), then the mapped keys, then the
+    /// shifted symbol of any of them with Shift taken out (Shift+Cmd+; is Cmd+:). Real events come in two shapes, Shift kept in
+    /// charactersIgnoringModifiers (":") or folded (";"); both land on the same item.
     func item(for event: NSEvent) -> NSMenuItem? {
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let typed = [event.charactersIgnoringModifiers, event.characters].compactMap { $0?.lowercased() }.compactMap(\.first)
         let keys = Set(typed + typed.compactMap { Self.unshifted[$0] } + typed.compactMap { Self.shifted[$0] })
-        var viaShift = Set(typed.compactMap { Self.shifted[$0] })
+        var viaShift = Set(keys.compactMap { Self.shifted[$0] })
+        var exact: NSMenuItem? = match(self, Set(typed), mods)
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_SHIFTMAP"] == "1" { viaShift = [] }  // negative control: no shifted-punctuation matching
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_EXACTFIRST"] == "1" { exact = nil }  // negative control: mapped keys at once, first item in menu order wins
 #endif
-        return match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil)
+        return exact ?? match(self, keys, mods) ?? (mods.contains(.shift) ? match(self, viaShift, mods.subtracting(.shift)) : nil)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -116,7 +124,8 @@ final class ShortcutMenu: NSMenu {
     private func match(_ menu: NSMenu, _ keys: Set<Character>, _ mods: NSEvent.ModifierFlags) -> NSMenuItem? {
         for item in menu.items {
             if let sub = item.submenu, let hit = match(sub, keys, mods) { return hit }
-            if let c = item.keyEquivalent.lowercased().first, keys.contains(c), item.keyEquivalentModifierMask == mods { return item }
+            let own = [item.keyEquivalent, (item.representedObject as? MainMenu.Rule)?.usKey ?? ""].compactMap { $0.lowercased().first }
+            if own.contains(where: keys.contains), item.keyEquivalentModifierMask == mods { return item }
         }
         return nil
     }

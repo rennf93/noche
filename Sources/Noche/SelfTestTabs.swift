@@ -280,6 +280,8 @@ extension SelfTest {
         reset(); key("0", code: 29); await settle(); verify("Cmd+0 (Actual Size)", "zoom")
         if tab.zoomLevel != 0 { bad.append("Zoom Out and Actual Size left the zoom at \(tab.zoomLevel)") }
         // Shift+Cmd+C is Inspect in the engine's own table (global_keyboard_shortcuts_mac.mm) and Copy URL here: the bridge claims it, so it runs once with no DevTools window.
+        // The page must never see a claimed chord (the monitor takes it before the window and the renderer): a keydown listener records what reaches it.
+        _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
         let claimsAtCopy = NCWindow.testPreemptedKeys(), devToolsAtCopy = NCWindow.devToolsCreated()
         reset(); sendKey("c", code: 8, [.command, .shift], chars: "C"); await settle(); verify("Shift+Cmd+C", "copyURL")
         if NCWindow.testPreemptedKeys() - claimsAtCopy != 1 || NCWindow.devToolsCreated() != devToolsAtCopy { bad.append("Shift+Cmd+C: claims \(NCWindow.testPreemptedKeys() - claimsAtCopy) (want 1), DevTools created \(NCWindow.devToolsCreated() - devToolsAtCopy) (want 0)") }
@@ -322,7 +324,9 @@ extension SelfTest {
         // Cmd+C is not claimed: the page sees the keydown, and no Noche action runs.
         if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8) {
-            _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key + (e.metaKey ? "+meta" : "")); }); 1"#)
+            let seenByClaimed = await evaluate(tab, "JSON.stringify(window.__keys || [])") ?? ""
+            if seenByClaimed != "\"[]\"" { bad.append("a claimed chord reached the page: \(seenByClaimed)") } else { passed.append("Shift+Cmd+C and Opt+Shift+Cmd+C never reached the page") }
+            _ = await evaluate(tab, "window.__keys = []; 1")
             ns.makeFirstResponder(page); reset()
             NSApp.sendEvent(ev)  // not claimed by Noche: no action runs
             let claimed = BrowserWindowController.actionCounts
@@ -335,27 +339,31 @@ extension SelfTest {
             }
             if keys.contains("c+meta"), claimed.isEmpty, NCWindow.testPreemptedKeys() - claimsBefore == 1 { passed.append("Cmd+C reached the page") } else { bad.append("Cmd+C: page saw \(keys), Noche actions \(BrowserWindowController.actionCounts)") }
         } else { bad.append("no web view for the Cmd+C case") }
-        // Shifted punctuation: the menu resolves each chord of the table that is typed with Shift (US layout: the shifted character, and the plain key ignoring modifiers).
+        // Shifted punctuation on a US layout, in both shapes a real event comes in (Shift kept in charactersIgnoringModifiers, or folded into the base key), whatever
+        // this machine's layout is: the events are made here, not read from the live items. Cmd+; and Cmd+Shift+; must land on different items.
         if let menu = NSApp.mainMenu as? ShortcutMenu, let ns = ctl.nsWindow {
-            // AppKit rewrites some keys for the machine's layout once an item is in the menu (a Spanish layout turns "[" into "ñ"): a press there types the live key.
-            func resolves(_ name: String, _ usPlain: String, _ usShifted: String, _ mods: NSEvent.ModifierFlags, _ title: String) {
-                let plain = menuItem(title)?.keyEquivalent.replacingOccurrences(of: "+", with: "=") ?? usPlain
-                let direct = plain != usPlain && plain != "="
-                let shifted = direct ? plain : usShifted
-                let mods = direct ? (menuItem(title)?.keyEquivalentModifierMask ?? mods) : mods
+            func resolves(_ name: String, _ ig: String, _ chars: String, _ mods: NSEvent.ModifierFlags, _ title: String) {
                 guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber,
-                                                context: nil, characters: shifted, charactersIgnoringModifiers: plain, isARepeat: false, keyCode: 0) else { return bad.append("\(name): no event") }
+                                                context: nil, characters: chars, charactersIgnoringModifiers: ig, isARepeat: false, keyCode: 0) else { return bad.append("\(name): no event") }
                 let got = menu.item(for: ev)?.title
                 if got == title { passed.append("\(name) is \(title)") } else { bad.append("\(name) resolved \(got ?? "nothing"), want \(title)") }
             }
-            resolves("Cmd+: (Shift+Cmd+;)", ";", ":", [.command, .shift], "Show Spelling and Grammar")
-            resolves("Cmd+;", ";", ";", .command, "Check Document Now")
-            resolves("Cmd++ (Shift+Cmd+=)", "=", "+", [.command, .shift], "Zoom In")
-            resolves("Ctrl++ (Ctrl+Shift+=)", "=", "+", [.control, .shift], "Open Split Pane")
-            resolves("Ctrl+Shift+'", "'", "\"", [.control, .shift], "Focus Next Split Pane")
-            resolves("Ctrl+Shift+[", "[", "{", [.control, .shift], "Focus Previous Split Pane")
-            resolves("Shift+Cmd+]", "]", "}", [.command, .shift], "Next Tab")
-            resolves("Shift+Cmd+[", "[", "{", [.command, .shift], "Previous Tab")
+            let cs: NSEvent.ModifierFlags = [.command, .shift], ks: NSEvent.ModifierFlags = [.control, .shift]
+            resolves("Cmd+; ", ";", ";", .command, "Check Document Now")
+            resolves("Cmd+: kept", ":", ":", cs, "Show Spelling and Grammar")
+            resolves("Cmd+: folded", ";", ":", cs, "Show Spelling and Grammar")
+            resolves("Cmd++ kept", "+", "+", cs, "Zoom In")
+            resolves("Cmd++ folded", "=", "+", cs, "Zoom In")
+            resolves("Ctrl++ kept", "+", "+", ks, "Open Split Pane")
+            resolves("Ctrl++ folded", "=", "+", ks, "Open Split Pane")
+            resolves("Ctrl+Shift+' kept", "\"", "\"", ks, "Focus Next Split Pane")
+            resolves("Ctrl+Shift+' folded", "'", "\"", ks, "Focus Next Split Pane")
+            resolves("Ctrl+Shift+[ kept", "{", "{", ks, "Focus Previous Split Pane")
+            resolves("Ctrl+Shift+[ folded", "[", "{", ks, "Focus Previous Split Pane")
+            resolves("Shift+Cmd+] kept", "}", "}", cs, "Next Tab")
+            resolves("Shift+Cmd+] folded", "]", "}", cs, "Next Tab")
+            resolves("Shift+Cmd+[ kept", "{", "{", cs, "Previous Tab")
+            resolves("Shift+Cmd+[ folded", "[", "{", cs, "Previous Tab")
         } else { bad.append("no ShortcutMenu or window for the shifted punctuation rows") }
         reset(); key("p", code: 35); await settle(); verify("Cmd+P", "print")
         reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
