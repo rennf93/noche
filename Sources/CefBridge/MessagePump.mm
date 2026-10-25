@@ -63,9 +63,21 @@ class NCApp : public CefApp, public CefBrowserProcessHandler {
     // (its own tab groups arrive in M1.6, independent of Chrome's sync). While on, a task posted at startup
     // (TabGroupSyncServiceImpl::NotifyServiceInitialized) reaches SharedTabGroupFeedbackController::MaybeShowFeedbackActionInToolbar
     // after its browser was torn down and crashes the engine in CefShutdown when the user quits within seconds of launch.
+    std::string disable = "MacAppCodeSignClone,DataSharing,DataSharingJoinOnly";
+#ifdef NOCHE_TESTHOOKS
+    // Step 3b proof (quit-early with DataSharing left on): test builds only.
+    if (getenv("NOCHE_TEST_DATASHARING_ON")) disable = "MacAppCodeSignClone";
+#endif
     std::string features = line->GetSwitchValue("disable-features").ToString();
-    line->AppendSwitchWithValue("disable-features", (features.empty() ? "" : features + ",") +
-                                                        "MacAppCodeSignClone,DataSharing,DataSharingJoinOnly");
+    line->AppendSwitchWithValue("disable-features", (features.empty() ? "" : features + ",") + disable);
+    // Features Noche relies on, enabled by name (the engine runs without the field trial testing config, so none is on by default).
+    // WebContentsDiscard: patch 0009 DiscardTab. KeepPausedDownloadsAtShutdown: patch 0008 paused downloads survive quit.
+    // PrepopulatedEnginesMigration + ApplySearchEngineTypeMigration: keep the keywords DB migration bits consistent
+    // (the rollback check in template_url_prepopulate_data_resolver.cc is fatal when the bits are set and the feature is off).
+    std::string enable = line->GetSwitchValue("enable-features").ToString();
+    line->AppendSwitchWithValue("enable-features",
+                                (enable.empty() ? "" : enable + ",") +
+                                    "WebContentsDiscard,KeepPausedDownloadsAtShutdown,PrepopulatedEnginesMigration,ApplySearchEngineTypeMigration");
   }
 
   // May arrive on any thread.
