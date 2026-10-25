@@ -1,0 +1,251 @@
+# M1.7 engine run: patch 0010 (clear browsing data per request context, multi-profile), CEF 156.0.18-noche.3663
+Engine receipt (vendor/CEF-VERSION.txt):
+source=local
+cef_version=156.0.18-noche.3663+g50b4e3d+chromium-156.0.8078.48
+path=/Volumes/K3Trunk/noche-engine/distrib/cef_binary_156.0.18-noche.3663+g50b4e3d+chromium-156.0.8078.48_macosarm64_minimal
+framework=622733680-1792900473
+fetched=2026-10-25T04:43:59Z
+CEF branch noche HEAD 50b4e3dbe. App repo git HEAD at the run: d3d06bc (rewrite). Working tree at the run also held the uncommitted Step 1 change to Sources/CefBridge/MessagePump.mm (features by name; committed after this file).
+Hidden runs only (probe-engine.sh, app-test.sh), 1-minute load recorded per launch (runs waited for load under 12). Env for every probe launch: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 NOCHE_DOWNLOAD_API=1 NOCHE_DISCARD_API=1 NOCHE_CLEAR_API=1.
+Run date 2026-10-25. Lines below are verbatim script output unless marked (note).
+
+## RED
+Dry run on the previous distrib (.superpowers/sdd/engine-green-dry-run.md), before probe fix 6cfccbb: "PROBE profile-clear fail profile-clear: FAILED assertions range-storage" (probe timing, not an engine fault; rerun after the fix passed).
+Without NOCHE_CLEAR_API=1 the time-range part is a failed "clear-api" assertion (script header).
+
+## GREEN now
+batch b7 load before: 6.39 6.98 7.85
+- profile-dirs rc=0 load=6.39
+PROBE profile-dirs info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-dirs info CreateContext(/Users/renzof/Library/Application Support/Noche Probe/Profile 1) GetCachePath right after the call: '/Users/renzof/Library/Application Support/Noche Probe/Profile 1'
+PROBE profile-dirs info assert context-initialized PASS: GetCookieManager callback ran
+PROBE profile-dirs info assert cache-path-equals-requested PASS: GetCachePath '/Users/renzof/Library/Application Support/Noche Probe/Profile 1' requested '/Users/renzof/Library/Application Support/Noche Probe/Profile 1'
+PROBE profile-dirs info assert preferences-file PASS: /Users/renzof/Library/Application Support/Noche Probe/Profile 1/Preferences exists=1 after 10.0 s (window open in the context)
+PROBE profile-dirs info deeper path /Users/renzof/Library/Application Support/Noche Probe/Profile 1/x: GetCachePath '/Users/renzof/Library/Application Support/Noche Probe/Profile 1/x' (callback ran=1)
+PROBE profile-dirs info assert deeper-path-not-a-profile PASS: GetCachePath '/Users/renzof/Library/Application Support/Noche Probe/Profile 1/x', Profile 1/x exists=1, Profile 1/x/Preferences exists=0 (documents the silent in-memory fallback)
+PROBE profile-dirs info path outside the root /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/noche-profile-outside: GetCachePath '' exists=0
+PROBE profile-dirs info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-dirs info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-dirs info alpha-guard hooked calls=4
+PROBE profile-dirs info activate calls blocked=0
+PROBE profile-dirs pass profile-dirs: every assertion held
+PROBE profile-dirs info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-dirs info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-dirs info frontmost samples=37 probe-frontmost=0 unknown=0
+PROBE profile-dirs info crash reports: none new
+- profile-cookie profile-cookie-2 rc=0 load=6.83
+PROBE profile-cookie info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-cookie info assert both-windows-loaded PASS: profile B window and A's localhost page loaded
+PROBE profile-cookie info assert set-cookie-A PASS: SetCookie in A (Default context)
+PROBE profile-cookie info assert A-cookie-visible-in-A PASS: document.cookie in A: nocheA=1
+PROBE profile-cookie info assert A-cookie-absent-in-B PASS: document.cookie in B: (empty)
+PROBE profile-cookie info assert set-cookie-B PASS: SetCookie in B (Profile 1 context)
+PROBE profile-cookie info assert B-cookie-visible-in-B PASS: document.cookie in B: nocheB=1
+PROBE profile-cookie info assert B-cookie-absent-in-A PASS: document.cookie in A: nocheA=1
+PROBE profile-cookie info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie info alpha-guard hooked calls=4
+PROBE profile-cookie info activate calls blocked=0
+PROBE profile-cookie pass profile-cookie (relaunch half: profile-cookie-2): every assertion held
+PROBE profile-cookie info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie info frontmost samples=14 probe-frontmost=0 unknown=0
+PROBE profile-cookie info crash reports: none new
+PROBE profile-cookie-2 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-cookie-2 info assert phase-1-ran PASS: marker file from profile-cookie present
+PROBE profile-cookie-2 info assert A-keeps-cookie-after-relaunch PASS: A cookies: nocheA@localhost
+PROBE profile-cookie-2 info assert B-keeps-only-its-cookie-after-relaunch PASS: B cookies: nocheB@localhost
+PROBE profile-cookie-2 info cleanup deleted 1 cookies in A, 1 in B
+PROBE profile-cookie-2 info FlushStore of B: callback did not arrive in 6 s
+PROBE profile-cookie-2 info alpha-guard hooked calls=1
+PROBE profile-cookie-2 info activate calls blocked=0
+PROBE profile-cookie-2 pass profile-cookie-2: every assertion held
+PROBE profile-cookie-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-cookie-2 info frontmost samples=15 probe-frontmost=0 unknown=0
+PROBE profile-cookie-2 info crash reports: none new
+- profile-storage rc=0 load=11.45
+PROBE profile-storage info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-storage info assert B-page-loaded PASS: profile storage fixture loaded in B and in A
+PROBE profile-storage info assert A-page-loaded PASS: fixture API in A: ready
+PROBE profile-storage info A after set(): {"ls":"fromA","idb":["nocheDb"],"sw":1,"caches":["nocheCache"]}
+PROBE profile-storage info assert A-holds-all-four PASS: A: {"ls":"fromA","idb":["nocheDb"],"sw":1,"caches":["nocheCache"]}
+PROBE profile-storage info B get(): {"ls":null,"idb":[],"sw":0,"caches":[]}
+PROBE profile-storage info assert B-holds-none PASS: B: {"ls":null,"idb":[],"sw":0,"caches":[]} (same origin, other profile)
+PROBE profile-storage info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-storage info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-storage info alpha-guard hooked calls=4
+PROBE profile-storage info activate calls blocked=0
+PROBE profile-storage pass profile-storage: every assertion held
+PROBE profile-storage info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-storage info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-storage info frontmost samples=14 probe-frontmost=0 unknown=0
+PROBE profile-storage info crash reports: none new
+- profile-ext rc=0 load=11.69
+PROBE profile-ext info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-ext info assert windows-set-up PASS: B tabs 3 (want 3), A tabs 2 (want 2)
+PROBE profile-ext info before removal: content scripts in A first tab 1/1, in B first tab 1/1 (X/Y); actions A=Noche engine probe extension|Noche second probe extension B=Noche engine probe extension|Noche second probe extension
+PROBE profile-ext info assert premise-both-fixtures-in-both-profiles PASS: content scripts X/Y: A 1/1, B 1/1 (the command line loads both fixtures into every profile)
+PROBE profile-ext info assert A-registry-has-only-X PASS: A toolbar actions after Y's uninstallSelf: Noche engine probe extension
+PROBE profile-ext info assert B-registry-has-only-Y-no-X-entry PASS: B toolbar actions after X's uninstallSelf: Noche second probe extension (an empty or Y-only list: X has no entry in B)
+PROBE profile-ext info assert content-scripts-per-profile PASS: content scripts X/Y on a fresh A page 1/- (want 1/-), on a fresh B page -/1 (want -/1)
+PROBE profile-ext info X chrome.tabs.query in A: http://127.0.0.1:56382/index.html?side=A&n=1 http://127.0.0.1:56382/index.html?side=A&n=2&nav=1 ; Y chrome.tabs.query in B: http://localhost:56382/index.html?side=B&n=1 http://localhost:56382/index.html?side=B&n=2&nav=1 http://localhost:56382/index.html?side=B&n=3
+PROBE profile-ext info assert A-tabs-query-lists-only-A PASS: X in A sees 2 tabs: 2 of A, 0 of B
+PROBE profile-ext info assert B-tabs-query-never-returns-A-tab PASS: Y in B sees 3 tabs: 3 of B, 0 of A
+PROBE profile-ext info X windows in A: (
+PROBE profile-ext info assert window-identity-per-profile PASS: A: 1 normal window(s) with 2 tabs, id 1055819698; B: 1 with 3 tabs, id 1055819713 (want 1 and 2, 1 and 3, ids differ)
+PROBE profile-ext info badges: X in A 'A', Y in B 'B', X in B '(no action)', Y in A '(no action)'; observer updates: A saw X=3 Y=0, B saw X=0 Y=3
+PROBE profile-ext info assert badges-stay-in-their-profile PASS: X in A 'A', Y in B 'B', X in B '(no action)', Y in A '(no action)'; B observer updates for X 0, A observer updates for Y 0 (want 0)
+PROBE profile-ext info install in B and the dialog's anchor window (patch 0004): NOT RUN by this check; see the report (no hidden-run install path reaches ExtensionInstallUIDesktop; owner check)
+PROBE profile-ext info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-ext info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-ext info alpha-guard hooked calls=4
+PROBE profile-ext info activate calls blocked=0
+PROBE profile-ext pass profile-ext: every assertion held
+PROBE profile-ext info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-ext info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-ext info frontmost samples=32 probe-frontmost=0 unknown=0
+PROBE profile-ext info crash reports: none new
+- profile-close rc=0 load=11.21
+PROBE profile-close info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-close info assert windows-loaded PASS: B first tab loaded, A has two tabs
+PROBE profile-close info assert set-cookie-B PASS: cookie in B
+PROBE profile-close info A switch+round trip median before (A idle): 6.4 ms
+PROBE profile-close info assert A-two-tabs-loading-before-B-closes PASS: A tabs IsLoading (id=value): 1=1 2=1 (hold page held open by the fixture server)
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info assert B-closed-callbacks PASS: window destroyed=1, OnBeforeClose for 1 of 1 B browsers
+PROBE profile-close info assert A-interactive-and-still-loading-after-B-closed PASS: A eval round trip 'alive:2'; A tabs IsLoading: 1=1 2=1
+PROBE profile-close info A switch+round trip median after (A loading): 8.3 ms (before 6.4 ms)
+PROBE profile-close info assert A-switch-latency-unchanged PASS: median before 6.4 ms, after 8.3 ms (limit 3x + 30 ms, eval round trip includes noise)
+PROBE profile-close info assert B-reopened-keeps-cookie PASS: reopened B document.cookie: nocheB=1
+PROBE profile-close info assert B-two-tabs-loading-before-A-closes PASS: B tabs IsLoading (id=value): 4=1 5=1 (hold page held open by the fixture server)
+PROBE profile-close info closing the main window (A, 2 tabs) while B has 2 loading tabs
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info assert A-closed-callbacks PASS: A window destroyed=1, OnBeforeClose for all 2 A browsers=1
+PROBE profile-close info assert B-interactive-and-still-loading-after-A-closed PASS: B eval round trip 'alive:2'; B tabs IsLoading: 4=1 5=1
+PROBE profile-close info assert B-still-has-cookie PASS: B cookies two seconds later (cookie manager, the pages are on the hold origin): nocheB@localhost
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-close info alpha-guard hooked calls=9
+PROBE profile-close info activate calls blocked=0
+PROBE profile-close pass profile-close: every assertion held
+PROBE profile-close info frontmost samples=28 probe-frontmost=0 unknown=0
+PROBE profile-close info crash reports: none new
+- profile-incognito profile-incognito-2 rc=0 load=10.21
+PROBE profile-incognito info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-incognito info assert incognito-cache-path-empty PASS: GetCachePath ''
+PROBE profile-incognito info assert set-cookie-A PASS: cookie in A, A visited the normal page
+PROBE profile-incognito info assert incognito-window-loaded PASS: incognito window loaded
+PROBE profile-incognito info assert A-cookie-invisible-in-incognito PASS: incognito document.cookie: (empty)
+PROBE profile-incognito info assert incognito-cookie-visible-in-incognito PASS: incognito document.cookie: nocheI=1
+PROBE profile-incognito info assert incognito-cookie-absent-in-A PASS: A document.cookie: nocheA=1
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info assert incognito-cookie-gone-after-window-closed PASS: a new empty-path context's document.cookie: (empty)
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info alpha-guard hooked calls=7
+PROBE profile-incognito info activate calls blocked=0
+PROBE profile-incognito pass profile-incognito (relaunch half: profile-incognito-2): every assertion held
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito info frontmost samples=18 probe-frontmost=0 unknown=0
+PROBE profile-incognito info crash reports: none new
+PROBE profile-incognito-2 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-incognito-2 info assert phase-1-ran PASS: marker file from profile-incognito present
+PROBE profile-incognito-2 info assert incognito-cookie-absent-after-relaunch PASS: incognito document.cookie: (empty)
+PROBE profile-incognito-2 info assert A-cookie-persisted-incognito-cookie-not PASS: A cookies after relaunch: nocheA@localhost
+PROBE profile-incognito-2 info assert history-positive-control PASS: urls rows for the normal A visit norm=4947ddf33d403966: 1 (control: the query can see rows)
+PROBE profile-incognito-2 info assert history-has-no-incognito-visit PASS: urls rows for the incognito visit incog=4947ddf33d403966: 0
+PROBE profile-incognito-2 info cleanup deleted 1 cookies in A
+PROBE profile-incognito-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito-2 info alpha-guard hooked calls=4
+PROBE profile-incognito-2 info activate calls blocked=0
+PROBE profile-incognito-2 pass profile-incognito-2: every assertion held
+PROBE profile-incognito-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-incognito-2 info frontmost samples=4 probe-frontmost=0 unknown=0
+PROBE profile-incognito-2 info crash reports: none new
+- profile-clear rc=0 load=8.95
+PROBE profile-clear info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-clear info assert windows-loaded PASS: B fixture page loaded
+PROBE profile-clear info assert cookies-set PASS: clearA in A, clearB in B
+PROBE profile-clear info assert cache-control-both-hit PASS: transferSize of the force-cache fetch before clearing: A 0, B 0 (0 = served by the HTTP cache)
+PROBE profile-clear info assert A-DeleteCookies PASS: DeleteCookies("","") in A deleted 1
+PROBE profile-clear info A ClearHttpCache completed
+PROBE profile-clear info assert A-ClearHttpAuthCredentials-completed PASS: callback ran (no observable effect without an authenticated page)
+PROBE profile-clear info assert A-cookies-empty PASS: A cookies: (none)
+PROBE profile-clear info assert B-keeps-its-cookie PASS: B cookies: clearB@localhost
+PROBE profile-clear info assert A-cache-cleared PASS: force-cache fetch in A after ClearHttpCache: transferSize 349 (>0 means a network fetch)
+PROBE profile-clear info assert B-cache-kept PASS: force-cache fetch in B: transferSize 0 (0 = still cached)
+PROBE profile-clear info form fixture: focused 'q', typed 'noche-form-ba3fc2ee7caf3190' and submitted
+PROBE profile-clear info assert history-witness-B PASS: Profile 1/History urls rows for histB=ba3fc2ee7caf3190: 1
+PROBE profile-clear info assert history-witness-A PASS: Default/History urls rows for histA=ba3fc2ee7caf3190: 1
+PROBE profile-clear info assert download-witness-B PASS: Profile 1/History downloads_url_chains rows for small.bin: 1 (the download ran through B's client handler into the temp dir)
+PROBE profile-clear info form data witness: Profile 1/Web Data autocomplete rows for ba3fc2ee7caf3190: 0, NOT created in a hidden run (the programmatic submit was not recorded as a user entry): FORM_DATA is source-read only here, no assertion
+PROBE profile-clear info assert password-witness-seeded-rows-survive-startup PASS: logins rows after engine start: Profile 1 'nochetest-B' 1, Default 'nochetest-A' 1 (want >= 1 each; the rows were inserted into Login Data files before CefInitialize)
+PROBE profile-clear info assert downloads-clear-removes-B-download-rows PASS: after ClearBrowsingData(DOWNLOADS) on B: downloads_url_chains rows 0 (want 0), B visited-page rows 1 (want >= 1, untouched)
+PROBE profile-clear info assert history-clear-removes-B-rows-and-keeps-A PASS: after ClearBrowsingData(HISTORY) on B: B urls rows 0 (want 0), A urls rows 1 (want >= 1)
+PROBE profile-clear info assert passwords-clear-removes-B-rows-and-keeps-A PASS: after ClearBrowsingData(PASSWORDS) on B: B logins rows 0 (want 0), A logins rows 1 (want >= 1)
+PROBE profile-clear info A ClearBrowsingData(cookies|cache|site storage, since t0) completed
+PROBE profile-clear info assert range-cookie-before-t0-kept PASS: A cookies: oldCk@localhost
+PROBE profile-clear info assert range-cookie-after-t0-removed PASS: A cookies: oldCk@localhost
+PROBE profile-clear info assert range-B-cookie-kept PASS: B cookies: clearB@localhost
+PROBE profile-clear info assert range-storage PASS: localStorage: before-t0 origin '1' (want 1), after-t0 origin 'null' (want null), B '1' (want 1)
+PROBE profile-clear info assert range-cache PASS: force-cache transferSize: before-t0 entry 0 (want 0), after-t0 entry 349 (want >0)
+PROBE profile-clear info assert everything-clears-Default-data PASS: ClearBrowsingData(all, since 0) on Default: cookies (none), localStorage old 'null'
+PROBE profile-clear info assert everything-in-A-leaves-B PASS: B cookies after Default was cleared: clearB@localhost
+PROBE profile-clear info assert everything-in-A-leaves-B-storage-and-cache PASS: after ClearBrowsingData(all, since 0) on Default: B localStorage 'bkey' '1' (want 1), B force-cache transferSize for its primed URL 0 (want 0 = still cached)
+PROBE profile-clear info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear info alpha-guard hooked calls=5
+PROBE profile-clear info activate calls blocked=0
+PROBE profile-clear pass profile-clear: every assertion held
+PROBE profile-clear info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-clear info frontmost samples=135 probe-frontmost=0 unknown=0
+PROBE profile-clear info crash reports: none new
+- profile-delete profile-delete-2 rc=0 load=5.16
+PROBE profile-delete info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-delete info assert P2-window-loaded PASS: Profile 2 window loaded
+PROBE profile-delete info assert set-cookie-P2 PASS: cookie in Profile 2
+PROBE profile-delete info assert P2-dir-and-preferences-exist PASS: /Users/renzof/Library/Application Support/Noche Probe/Profile 2/Preferences exists=1 (waited up to 25 s)
+PROBE profile-delete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete info assert dir-survives-release PASS: after releasing every ref: Profile 2 exists=1, Default/Preferences exists=1 (no in-session removal)
+PROBE profile-delete info alpha-guard hooked calls=4
+PROBE profile-delete info activate calls blocked=0
+PROBE profile-delete pass profile-delete (relaunch half: profile-delete-2): every assertion held
+PROBE profile-delete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete info frontmost samples=38 probe-frontmost=0 unknown=0
+PROBE profile-delete info crash reports: none new
+PROBE profile-delete-2 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE profile-delete-2 info assert phase-1-ran PASS: pre-engine sweep log: 'Profile 2' existed=1 removed=1; 
+PROBE profile-delete-2 info assert tombstoned-dir-swept PASS: sweep log ''Profile 2' existed=1 removed=1; ', Profile 2 exists now=0
+PROBE profile-delete-2 info assert Default-intact PASS: Default/Preferences=1 Local State=1
+PROBE profile-delete-2 info alpha-guard hooked calls=1
+PROBE profile-delete-2 info activate calls blocked=0
+PROBE profile-delete-2 pass profile-delete-2: every assertion held
+PROBE profile-delete-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE profile-delete-2 info frontmost samples=3 probe-frontmost=0 unknown=0
+PROBE profile-delete-2 info crash reports: none new
+batch b7 load after: 5.81 8.93 9.00
+
+## profile-upgrade (profile made by the OLD engine 156.0.14-noche.3659+g18b1359, opened by the new one)
+Seeding: scratch git worktree of the repo at e65a478 under /Volumes/K3Trunk/noche-engine/worktrees/scratch-old, old distrib vendored there with CEF_DIST=.../cef_binary_156.0.14-noche.3659+g18b1359+...; NOCHE_PROBE_ROOT=<scratch root> NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 scripts/probe-engine.sh profile-upgrade -> rc=0, "PROBE profile-upgrade pass profile-upgrade: every assertion held" (seed load 5.97). Worktree and scratch roots removed afterwards.
+Each of the three runs below used its own fresh copy of that seeded profile.
+- profile-upgrade RED (MessagePump.mm temporarily reverted to HEAD, so no features by name, no NOCHE_PROBE_UPGRADE_FEATURES; fresh copy of old-engine 3659 profile) rc=1 load=6.20
+PROBE profile-upgrade fail exit-rc=134 watchdog=0
+(note) RED above is the app WITHOUT the new Step 1 line: MessagePump.mm was temporarily reverted to HEAD for this one launch (then restored), because the bridge now enables PrepopulatedEnginesMigration and ApplySearchEngineTypeMigration by name for every launch, probe included. rc=1 is the script's verdict, 134 is the SIGABRT of the engine (the fatal NOTREACHED in template_url_prepopulate_data_resolver.cc:103 found in the dry run).
+(note) The two runs below use the working tree with the features by name in MessagePump.mm. The first sets NO env (the app fix alone is enough); the second also sets NOCHE_PROBE_UPGRADE_FEATURES=1 (belt and braces, adds the same features to the command line).
+- profile-upgrade GREEN A (features by name from the bridge, NO NOCHE_PROBE_UPGRADE_FEATURES, fresh copy of the old-engine profile) rc=0 load=7.72
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+- profile-upgrade GREEN B (same, plus NOCHE_PROBE_UPGRADE_FEATURES=1, second fresh copy) rc=0 load=7.06
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+(note) GREEN A was first logged by my runner under the label "RED" because I expected the env switch alone to decide it; the runner label was wrong, the run itself is as described here. The real RED is the reverted-MessagePump run above.

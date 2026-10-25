@@ -1,0 +1,295 @@
+From 0222610e219979a91f9b75bf937a04c703d84d84 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 03:33:24 +0100
+Subject: [PATCH] views: clear browsing data per request context
+
+---
+ include/cef_request_context.h          |  24 +++++
+ include/internal/cef_types.h           |  44 ++++++++++
+ libcef/browser/request_context_impl.cc | 117 +++++++++++++++++++++++++
+ libcef/browser/request_context_impl.h  |   9 ++
+ 4 files changed, 194 insertions(+)
+
+diff --git a/include/cef_request_context.h b/include/cef_request_context.h
+index e60fae3de..c9c9a0d90 100644
+--- a/include/cef_request_context.h
++++ b/include/cef_request_context.h
+@@ -380,6 +380,30 @@ class CefRequestContext : public CefPreferenceManager {
+   ///
+   /*--cef(added=experimental,optional_param=handler)--*/
+   virtual void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) = 0;
++
++  ///
++  /// Removes browsing data of this request context's profile. |remove_mask| is
++  /// a combination of cef_browsing_data_mask_t values; bits that are not
++  /// defined are ignored. Only data created at or after |since| is removed; a
++  /// zero |since| (CefBaseTime()) means all time. The end of the range is
++  /// always now. Data of other profiles is untouched. The history, form data
++  /// and passwords bits only act with Chrome style contexts. This method may
++  /// be called on any thread in the browser process. If |callback| is non-NULL
++  /// it is executed exactly once, always asynchronously (posted, never from
++  /// inside this call), on the browser process UI thread, when removal has
++  /// finished. It is also executed when the mask holds no known bit and when
++  /// the context is destroyed before or during the removal; in the latter case
++  /// the removal did not complete and the callback may run after profile
++  /// teardown has begun (it is queued from the remover's destructor path), so
++  /// do not assume this context is still usable inside it. Like the other
++  /// request context methods that take a completion callback, the callback is
++  /// not executed if the context never finishes initializing (there is no
++  /// failure result in CefCompletionCallback to deliver instead).
++  ///
++  /*--cef(added=experimental,optional_param=callback)--*/
++  virtual void ClearBrowsingData(int remove_mask,
++                                 CefBaseTime since,
++                                 CefRefPtr<CefCompletionCallback> callback) = 0;
+ #endif
+ };
+ 
+diff --git a/include/internal/cef_types.h b/include/internal/cef_types.h
+index 8c2c81fac..e1cf618b6 100644
+--- a/include/internal/cef_types.h
++++ b/include/internal/cef_types.h
+@@ -4180,6 +4180,50 @@ typedef enum {
+   CEF_COLOR_VARIANT_NUM_VALUES,
+ } cef_color_variant_t;
+ 
++#if CEF_API_ADDED(CEF_EXPERIMENTAL)
++///
++/// Bits for the |remove_mask| argument of CefRequestContext::ClearBrowsingData.
++/// Combine with bitwise OR.
++///
++typedef enum {
++  ///
++  /// Cookies.
++  ///
++  CEF_BROWSING_DATA_COOKIES = 1 << 0,
++
++  ///
++  /// The HTTP cache.
++  ///
++  CEF_BROWSING_DATA_CACHE = 1 << 1,
++
++  ///
++  /// Site storage: local storage, IndexedDB, service workers and cache
++  /// storage (the Cache API).
++  ///
++  CEF_BROWSING_DATA_SITE_STORAGE = 1 << 2,
++
++  ///
++  /// Browsing history. Chrome style only.
++  ///
++  CEF_BROWSING_DATA_HISTORY = 1 << 3,
++
++  ///
++  /// The download list (finished and cancelled items; files on disk are kept).
++  ///
++  CEF_BROWSING_DATA_DOWNLOADS = 1 << 4,
++
++  ///
++  /// Autofill form data. Chrome style only.
++  ///
++  CEF_BROWSING_DATA_FORM_DATA = 1 << 5,
++
++  ///
++  /// Saved passwords. Chrome style only.
++  ///
++  CEF_BROWSING_DATA_PASSWORDS = 1 << 6,
++} cef_browsing_data_mask_t;
++#endif
++
+ ///
+ /// Specifies the task type variants supported by CefTaskManager.
+ /// Should be kept in sync with Chromium's task_manager::Task::Type type.
+diff --git a/libcef/browser/request_context_impl.cc b/libcef/browser/request_context_impl.cc
+index ae85f6b56..425eda971 100644
+--- a/libcef/browser/request_context_impl.cc
++++ b/libcef/browser/request_context_impl.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "base/atomic_sequence_num.h"
+ #include "base/logging.h"
++#include "base/memory/raw_ptr.h"
+ #include "base/strings/stringprintf.h"
+ #include "cef/libcef/browser/browser_context.h"
+ #include "cef/libcef/browser/context.h"
+@@ -16,6 +17,7 @@
+ #include "cef/libcef/common/app_manager.h"
+ #include "cef/libcef/common/task_runner_impl.h"
+ #include "cef/libcef/common/values_impl.h"
++#include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
+ #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/themes/theme_service.h"
+@@ -23,6 +25,7 @@
+ #include "components/content_settings/core/browser/host_content_settings_map.h"
+ #include "components/prefs/pref_service.h"
+ #include "content/public/browser/browser_task_traits.h"
++#include "content/public/browser/browsing_data_remover.h"
+ #include "content/public/browser/child_process_host.h"
+ #include "content/public/browser/ssl_host_state_delegate.h"
+ #include "mojo/public/cpp/bindings/receiver.h"
+@@ -38,6 +41,83 @@ namespace {
+ 
+ base::AtomicSequenceNumber g_next_id;
+ 
++// Maps cef_browsing_data_mask_t to BrowsingDataRemover data types. History,
++// form data and passwords are Chrome layer types: they act through the
++// ChromeBrowsingDataRemoverDelegate that ProfileImpl and OffTheRecordProfileImpl
++// (Chrome style contexts) register as the remover's embedder delegate.
++uint64_t ToRemoveMask(int mask) {
++  using Remover = content::BrowsingDataRemover;
++  uint64_t out = 0;
++  if (mask & CEF_BROWSING_DATA_COOKIES) {
++    out |= Remover::DATA_TYPE_COOKIES;
++  }
++  if (mask & CEF_BROWSING_DATA_CACHE) {
++    out |= Remover::DATA_TYPE_CACHE;
++  }
++  if (mask & CEF_BROWSING_DATA_SITE_STORAGE) {
++    out |= Remover::DATA_TYPE_LOCAL_STORAGE | Remover::DATA_TYPE_INDEXED_DB |
++           Remover::DATA_TYPE_SERVICE_WORKERS |
++           Remover::DATA_TYPE_CACHE_STORAGE;
++  }
++  if (mask & CEF_BROWSING_DATA_HISTORY) {
++    out |= chrome_browsing_data_remover::DATA_TYPE_HISTORY;
++  }
++  if (mask & CEF_BROWSING_DATA_DOWNLOADS) {
++    out |= Remover::DATA_TYPE_DOWNLOADS;
++  }
++  if (mask & CEF_BROWSING_DATA_FORM_DATA) {
++    out |= chrome_browsing_data_remover::DATA_TYPE_FORM_DATA;
++  }
++  if (mask & CEF_BROWSING_DATA_PASSWORDS) {
++    out |= chrome_browsing_data_remover::DATA_TYPE_PASSWORDS;
++  }
++  return out;
++}
++
++// Always completes asynchronously: the caller is never re-entered, and when the
++// remover calls back from its destructor the client code runs after that
++// teardown call stack has unwound.
++void PostComplete(CefRefPtr<CefCompletionCallback> callback) {
++  if (callback) {
++    content::GetUIThreadTaskRunner({})->PostTask(
++        FROM_HERE, base::BindOnce(&CefCompletionCallback::OnComplete, callback));
++  }
++}
++
++// Posts |callback| once one removal finished, then unregisters and deletes
++// itself. BrowsingDataRemoverImpl also calls it, with the whole mask as failed
++// types, from its destructor when the profile goes away mid-removal, so the
++// callback always runs and nothing is left registered.
++class ClearBrowsingDataObserver : public content::BrowsingDataRemover::Observer {
++ public:
++  ClearBrowsingDataObserver(content::BrowsingDataRemover* remover,
++                            CefRefPtr<CefCompletionCallback> callback)
++      : remover_(remover), callback_(callback) {
++    CEF_REQUIRE_UIT();
++    remover_->AddObserver(this);
++  }
++
++  ClearBrowsingDataObserver(const ClearBrowsingDataObserver&) = delete;
++  ClearBrowsingDataObserver& operator=(const ClearBrowsingDataObserver&) =
++      delete;
++
++  void OnBrowsingDataRemoverDone(uint64_t failed_data_types) override {
++    CEF_REQUIRE_UIT();
++    LOG_IF(WARNING, failed_data_types != 0)
++        << "ClearBrowsingData: data types not removed: 0x" << std::hex
++        << failed_data_types;
++    remover_->RemoveObserver(this);
++    PostComplete(callback_);
++    delete this;
++  }
++
++ private:
++  ~ClearBrowsingDataObserver() override = default;
++
++  const raw_ptr<content::BrowsingDataRemover> remover_;
++  CefRefPtr<CefCompletionCallback> callback_;
++};
++
+ class ResolveHostHelper : public network::ResolveHostClientBase {
+  public:
+   explicit ResolveHostHelper(CefRefPtr<CefResolveCallback> callback)
+@@ -653,6 +733,17 @@ void CefRequestContextImpl::SetDownloadHandler(
+                      handler));
+ }
+ 
++void CefRequestContextImpl::ClearBrowsingData(
++    int remove_mask,
++    CefBaseTime since,
++    CefRefPtr<CefCompletionCallback> callback) {
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  GetBrowserContext(
++      content::GetUIThreadTaskRunner({}),
++      base::BindOnce(&CefRequestContextImpl::ClearBrowsingDataInternal, this,
++                     remove_mask, since, callback));
++}
++
+ cef_color_variant_t CefRequestContextImpl::GetChromeColorSchemeMode() {
+   if (!VerifyBrowserContext()) {
+     return CEF_COLOR_VARIANT_SYSTEM;
+@@ -1007,6 +1098,32 @@ void CefRequestContextImpl::SetDownloadHandlerInternal(
+   }
+ }
+ 
++void CefRequestContextImpl::ClearBrowsingDataInternal(
++    int remove_mask,
++    CefBaseTime since,
++    CefRefPtr<CefCompletionCallback> callback,
++    CefBrowserContext::Getter browser_context_getter) {
++  CEF_REQUIRE_UIT();
++  auto* browser_context = browser_context_getter.Run();
++  const uint64_t mask = ToRemoveMask(remove_mask);
++  if (!browser_context || mask == 0) {
++    // Context already destroyed, or nothing to remove.
++    PostComplete(callback);
++    return;
++  }
++
++  auto* remover = browser_context->AsBrowserContext()->GetBrowsingDataRemover();
++  // The observer must be registered before the removal starts; it deletes
++  // itself when the removal is done.
++  auto* observer = new ClearBrowsingDataObserver(remover, callback);
++  const base::Time begin = since;
++  remover->RemoveAndReply(
++      begin, base::Time::Max(), mask,
++      content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB |
++          content::BrowsingDataRemover::ORIGIN_TYPE_PROTECTED_WEB,
++      observer);
++}
++
+ void CefRequestContextImpl::SetChromeColorSchemeInternal(
+     cef_color_variant_t variant,
+     cef_color_t user_color,
+diff --git a/libcef/browser/request_context_impl.h b/libcef/browser/request_context_impl.h
+index f493d9729..ac1ca7e16 100644
+--- a/libcef/browser/request_context_impl.h
++++ b/libcef/browser/request_context_impl.h
+@@ -148,6 +148,9 @@ class CefRequestContextImpl : public CefRequestContext {
+   cef_color_t GetChromeColorSchemeColor() override;
+   cef_color_variant_t GetChromeColorSchemeVariant() override;
+   void SetDownloadHandler(CefRefPtr<CefDownloadHandler> handler) override;
++  void ClearBrowsingData(int remove_mask,
++                         CefBaseTime since,
++                         CefRefPtr<CefCompletionCallback> callback) override;
+ 
+   const CefRequestContextSettings& settings() const { return config_.settings; }
+ 
+@@ -229,6 +232,12 @@ class CefRequestContextImpl : public CefRequestContext {
+       CefRefPtr<CefDownloadHandler> handler,
+       CefBrowserContext::Getter browser_context_getter);
+ 
++  void ClearBrowsingDataInternal(
++      int remove_mask,
++      CefBaseTime since,
++      CefRefPtr<CefCompletionCallback> callback,
++      CefBrowserContext::Getter browser_context_getter);
++
+   void InitializeCookieManagerInternal(
+       CefRefPtr<CefCookieManagerImpl> cookie_manager,
+       CefRefPtr<CefCompletionCallback> callback);
+-- 
+2.56.0
+
