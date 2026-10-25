@@ -150,7 +150,16 @@ extension SelfTest {
         key("r", code: 15, menuOnly: true)
         try? await Task.sleep(for: .milliseconds(300))
         guard BrowserWindowController.actionCounts == ["reload": 1] else { return finish(false, "positive control: Cmd+R acted \(BrowserWindowController.actionCounts), want [reload: 1]") }
-        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once \(violations)")
+        // The blank state: with one blank tab Close All Tabs would close nothing, so the row is disabled and its key does nothing.
+        ctl.window.activeTab?.loadURL("about:blank")
+        guard await until(10, { ctl.hasOnlyBlankTab }) else { return finish(false, "the tab never became blank (\(ctl.window.activeTab?.url ?? "nil"))") }
+        _ = menuLines(bar, path: "bar")
+        guard let closeAll = menuItem("Close All Tabs"), !closeAll.isEnabled else { return finish(false, "Close All Tabs is enabled in a window with one blank tab") }
+        BrowserWindowController.actionCounts = [:]
+        key("k", code: 40, [.command, .shift], menuOnly: true)
+        try? await Task.sleep(for: .milliseconds(300))
+        guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "Close All Tabs acted on a blank tab: \(BrowserWindowController.actionCounts)") }
+        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs is disabled and its key does nothing \(violations)")
     }
 
     /// The items with no shortcut, plus Appearance. (The keyed ones are in shortcuts-once.)

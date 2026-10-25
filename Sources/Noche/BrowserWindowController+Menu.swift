@@ -22,14 +22,20 @@ extension BrowserWindowController {
         intendedActive = window.addTab(withURL: shownURL(tab), activate: true)
     }
 
+    /// The window holds one blank tab: Close All Tabs would close nothing (the menu rule, live-ui.md shows it disabled then).
+    var hasOnlyBlankTab: Bool {
+        let open = orderedTabs().filter { !isClosing($0) }
+        return open.count == 1 && open[0].url == "about:blank"
+    }
+
     /// File > Close All Tabs: every tab of the window closes but one blank tab (a lone blank tab is left as it is).
     func closeAllTabs() {
         note("closeAllTabs")
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_CLOSEALL"] == "1" { return }  // negative control
 #endif
+        if hasOnlyBlankTab { return }
         let open = orderedTabs().filter { !isClosing($0) }
-        if open.count == 1, open[0].url == "about:blank" { return }
         closeNext.removeAll()
         intendedActive = window.addTab(withURL: "about:blank", activate: true)
         let now = ProcessInfo.processInfo.systemUptime

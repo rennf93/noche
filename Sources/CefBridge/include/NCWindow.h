@@ -85,6 +85,9 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)devToolsClosed;
 /// Test support: keys the bridge claimed before the engine's accelerators (`preemptKey:`), all windows.
 + (NSInteger)testPreemptedKeys;
+/// Test support: Continue and Cancel calls made on the engine's page context menu callbacks, all windows (each shown menu must make exactly one).
++ (NSInteger)testContextMenuContinues;
++ (NSInteger)testContextMenuCancels;
 #endif
 #ifdef NOCHE_TESTHOOKS
 /// Test support: how the beforeunload dialog is answered (0: Chrome's own dialog, 1: Stay, 2: Leave), and how many were asked.

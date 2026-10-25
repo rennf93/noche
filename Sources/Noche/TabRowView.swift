@@ -79,7 +79,10 @@ final class TabRowView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
-    override func mouseDown(with event: NSEvent) { onSelect?() }
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
+        onSelect?()
+    }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }

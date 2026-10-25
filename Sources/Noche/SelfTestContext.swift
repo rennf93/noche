@@ -23,13 +23,13 @@ extension SelfTest {
 
     /// A right click on |v| (or on |at|, a point of |v|): the view the window would hit gets `rightMouseDown`, as AppKit's `sendEvent` does.
     @discardableResult
-    func rightClick(_ v: NSView, at point: NSPoint? = nil) -> NSView? {
+    func rightClick(_ v: NSView, at point: NSPoint? = nil, control: Bool = false) -> NSView? {
         guard let ns = ctl?.nsWindow, let host = ctl?.window.chromeHost else { return nil }
         let p = v.convert(point ?? NSPoint(x: v.bounds.midX, y: v.bounds.midY), to: nil)
         guard let hit = host.hitTest(host.convert(p, from: nil)),
-              let ev = NSEvent.mouseEvent(with: .rightMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+              let ev = NSEvent.mouseEvent(with: control ? .leftMouseDown : .rightMouseDown, location: p, modifierFlags: control ? .control : [], timestamp: ProcessInfo.processInfo.systemUptime,
                                           windowNumber: ns.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return nil }
-        hit.rightMouseDown(with: ev)
+        if control { hit.mouseDown(with: ev) } else { hit.rightMouseDown(with: ev) }
         return hit
     }
 
@@ -43,7 +43,7 @@ extension SelfTest {
 
     func ctxPage() async {
         guard await ready(), let win, let tab = win.activeTab else { return }
-        ContextMenus.pending = nil
+        ContextMenus.dismiss(choosing: nil)  // a menu still held is ended first, never dropped
         // The probe extension (its worker makes the item) may come up after the first page: ask until its content script answers, then
         // right click until the model carries its item.
         guard await extensionTabCount(tab) != nil else { return finish(false, "the probe extension never answered: \(lastExtensionReply)") }
@@ -101,7 +101,10 @@ extension SelfTest {
         let shownBefore = ContextMenus.shown
         guard await pageRightClick(tab) != nil, ContextMenus.shown > shownBefore else { return finish(false, "no menu after a cancelled one") }
         ContextMenus.dismiss(choosing: nil)
-        finish(violations.isEmpty && ownWindows() == 1, "page menu equals Chromium's model (\(want.count) rows, labels Back, Forward, Reload ...), Reload reloaded, probe item 49000 ran onClicked with active tab \(clicked), a dismissed menu was cancelled and the next right click opened another (\(ContextMenus.shown) menus) \(violations)")
+        // The engine's callback was answered exactly once per menu shown: two Continues (Reload, the extension item) and a Cancel for each other.
+        let continues = Int(NCWindow.testContextMenuContinues()), cancels = Int(NCWindow.testContextMenuCancels())
+        guard continues == 2, cancels == ContextMenus.shown - 2 else { return finish(false, "\(ContextMenus.shown) menus shown but the engine's callbacks got \(continues) Continue and \(cancels) Cancel calls, want 2 and \(ContextMenus.shown - 2)") }
+        finish(violations.isEmpty && ownWindows() == 1, "page menu equals Chromium's model (\(want.count) rows, labels Back, Forward, Reload ...), Reload reloaded, probe item 49000 ran onClicked with active tab \(clicked), and across \(ContextMenus.shown) menus shown the engine's callback got exactly one answer each (\(continues) Continue, \(cancels) Cancel, counted in the bridge) \(violations)")
     }
 
     func ctxTab() async {
@@ -115,7 +118,7 @@ extension SelfTest {
         BrowserWindowController.pasteboard.clearContents()
         func row() -> Int { ctl.list.items.firstIndex { $0.engineID == t1.identifier } ?? -1 }
         func open() async -> ContextMenus.Pending? {
-            ContextMenus.pending = nil
+            ContextMenus.dismiss(choosing: nil)  // a menu still held is ended first, never dropped
             guard row() >= 0, rightClick(ctl.sidebar.rows[row()]) != nil else { return nil }
             return await ctxMenu("tab", seconds: 3)
         }
@@ -130,6 +133,10 @@ extension SelfTest {
         BrowserWindowController.actionCounts = [:]
         ContextMenus.dismiss(choosing: item(m.menu, "Pin"))  // a disabled item does nothing
         guard BrowserWindowController.actionCounts.isEmpty, rowCount == 3 else { return finish(false, "a disabled item acted: \(BrowserWindowController.actionCounts)") }
+        // Control-click on a row is a right click: the menu is requested and the tab is not selected.
+        ContextMenus.dismiss(choosing: nil)
+        guard row() >= 0, rightClick(ctl.sidebar.rows[row()], control: true) != nil, await ctxMenu("tab", seconds: 3) != nil else { return finish(false, "a Control-click on row 1 did not request the tab menu") }
+        guard win.activeTab === active else { return finish(false, "a Control-click selected the tab") }
         // Copy Link copies the right-clicked tab's address (b.html), not the active tab's.
         guard let c = await open() else { return finish(false, "no menu for Copy Link") }
         ContextMenus.dismiss(choosing: item(c.menu, "Copy Link"))
@@ -158,7 +165,7 @@ extension SelfTest {
         let want = ["New Tab", "Reopen Closed Tab", "---", "New Group", "New Live Group", "New Profile...", "---", "Bookmark All Tabs", "---",
                     "Show Tabs in Sidebar", "Auto-Hide Tabs", "---", "Close All Tabs"]
         func open() async -> ContextMenus.Pending? {
-            ContextMenus.pending = nil
+            ContextMenus.dismiss(choosing: nil)  // a menu still held is ended first, never dropped
             let sidebar = ctl.sidebar
             guard let hit = rightClick(sidebar, at: NSPoint(x: sidebar.bounds.midX, y: sidebar.bounds.height - 60)), !(hit is TabRowView), hit.isDescendant(of: sidebar) else { return nil }
             return await ctxMenu("sidebar", seconds: 3)

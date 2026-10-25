@@ -49,6 +49,7 @@ enum ContextMenus {
         guard let p = pending else { return }
         pending = nil
         if let item, item.isEnabled, let menu = item.menu, let i = menu.items.firstIndex(of: item) { menu.performActionForItem(at: i) }
+        if item == nil, env("NOCHE_TEST_CTX_NOCANCEL") { return }  // negative control: a dismissed menu is dropped without its completion
         p.finish()
     }
     static func env(_ name: String) -> Bool { ProcessInfo.processInfo.environment[name] == "1" }
@@ -58,11 +59,12 @@ enum ContextMenus {
     static func present(_ menu: NSMenu, kind: String, model: [NCMenuItem]? = nil, in c: BrowserWindowController, at point: NSPoint, done: @escaping () -> Void) {
 #if NOCHE_TESTHOOKS
         shown += 1
+        if let old = pending { pending = nil; old.finish() }  // a menu replaced by the next one ends first, never dropped
         pending = Pending(kind: kind, menu: menu, model: model, point: point, finish: done)
         return
 #else
         guard let host = c.window.chromeHost else { return done() }
-        menu.popUp(positioning: nil, at: point, in: host)
+        menu.popUp(positioning: nil, at: host.convert(point, from: nil), in: host)
         done()
 #endif
     }
@@ -96,14 +98,15 @@ enum ContextMenus {
             if env("NOCHE_TEST_CTX_NOENABLE") { item.isEnabled = true }  // negative control: the model's enabled flag is ignored
 #endif
             if m.type == .check || m.type == .radio { item.state = m.checked ? .on : .off }
-            if m.type == .submenu, let sub = m.submenu {
-                item.submenu = pageMenu(sub, chosen: chosen)
+            if m.type == .submenu {
+                if let sub = m.submenu { item.submenu = pageMenu(sub, chosen: chosen) }
                 item.action = nil
             } else {
                 let id = m.commandId
                 var run = { chosen(id) }
 #if NOCHE_TESTHOOKS
                 if env("NOCHE_TEST_CTX_NOCHOOSE") { run = {} }  // negative control: a chosen item is never reported back
+                if env("NOCHE_TEST_CTX_NOEXT"), id >= 49000 { run = { chosen(-1) } }  // negative control: an extension item is reported as a cancel
 #endif
                 item.representedObject = Run(run)
             }
@@ -185,9 +188,7 @@ extension BrowserWindowController {
     }
 
     func sidebarMenuEntries() -> [CtxEntry] {
-        let open = orderedTabs().filter { !isClosing($0) }
-        var closeAll = tableRow("file.closeAllTabs") { [weak self] in self?.closeAllTabs() }
-        closeAll.enabled = !(open.count == 1 && open[0].url == "about:blank")  // closing a lone blank tab changes nothing
+        var closeAll = tableRow("file.closeAllTabs") { [weak self] in self?.closeAllTabs() }  // its enable rule is the table's
 #if NOCHE_TESTHOOKS
         if ContextMenus.env("NOCHE_TEST_CTX_CLOSEALLBLANK") { closeAll.enabled = true }  // negative control: enabled on a lone blank tab
 #endif

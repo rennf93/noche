@@ -59,6 +59,9 @@
 namespace {
 
 NSInteger g_devtools_created = 0, g_devtools_closed = 0;
+#ifdef NOCHE_TESTHOOKS
+NSInteger g_ctx_continues = 0, g_ctx_cancels = 0;
+#endif
 // DevTools has its own client, so its load end never reaches ours: loaded is read off the browser (polled by the checks).
 std::map<int, CefRefPtr<CefBrowser>> g_devtools_browsers;
 std::set<int> g_devtools_loaded_ids;
@@ -339,14 +342,21 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     NSView* content = _nsWindow.contentView;
     point = NSMakePoint(_webInsets.left + x, content.bounds.size.height - _webInsets.top - y);
   }
+  // The one completion every path ends in: Continue or Cancel on the saved callback, exactly once, explicitly.
   __block BOOL answered = NO;
-  [self post:^(id<NCWindowDelegate> d) {
-    [d window:self tab:tab showContextMenu:items atWindowPoint:point completion:^(NSInteger commandId) {
-      if (answered) return;
-      answered = YES;
-      if (commandId < 0) callback->Cancel(); else callback->Continue((int)commandId, EVENTFLAG_NONE);
-    }];
-  }];
+  void (^complete)(NSInteger) = [^(NSInteger commandId) {
+    if (answered) return;
+    answered = YES;
+#ifdef NOCHE_TESTHOOKS
+    if (commandId < 0) g_ctx_cancels++; else g_ctx_continues++;
+#endif
+    if (commandId < 0) callback->Cancel(); else callback->Continue((int)commandId, EVENTFLAG_NONE);
+  } copy];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    id<NCWindowDelegate> d = self->_delegate;
+    if (!d) { complete(-1); return; }  // no host left to show the menu
+    [d window:self tab:tab showContextMenu:items atWindowPoint:point completion:complete];
+  });
   return YES;
 }
 
@@ -811,6 +821,8 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
 
 #ifdef NOCHE_TESTHOOKS
 static NSInteger g_preempted = 0;
++ (NSInteger)testContextMenuContinues { return g_ctx_continues; }
++ (NSInteger)testContextMenuCancels { return g_ctx_cancels; }
 + (NSInteger)testPreemptedKeys { return g_preempted; }
 #endif
 
