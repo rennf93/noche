@@ -78,6 +78,28 @@ extension SelfTest {
         return true
     }
 
+    /// Waits until the page takes keys, then says how long it took. After a navigation Chromium keeps the page's input router inactive
+    /// (paint holding, RenderInputRouter::FilterInputEvent answers "no consumer") until the new page's first frame or a 4 s timeout
+    /// (blink::kNewContentRenderingDelay); a hidden window gets no frames, so a key sent at once never reaches the listener, and no
+    /// signal says when the hold ends. A plain "z" is the probe: it is sent until the page's listener sees one, and only then does the
+    /// check send the key it is about.
+    func pageTakesKeys(_ tab: NCTab, _ page: NSView, _ label: String) async -> Bool {
+        guard let ns = ctl?.nsWindow, let z = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                              windowNumber: ns.windowNumber, context: nil, characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6) else { return false }
+        _ = await evaluate(tab, #"window.__probe = 0; document.addEventListener("keydown", (e) => { if (e.key === "z") window.__probe++; }); 1"#)
+        let start = Date()
+        for _ in 0..<60 {
+            ns.makeFirstResponder(page)
+            ns.firstResponder?.keyDown(with: z)
+            try? await Task.sleep(for: .milliseconds(250))
+            if await evaluate(tab, "window.__probe") != "0" {
+                line("info", "\(label) page takes keys after \(Int(Date().timeIntervalSince(start) * 1000)) ms (hasFocus \(await evaluate(tab, "document.hasFocus()") ?? "nil"), key window \(ns.isKeyWindow))")
+                return true
+            }
+        }
+        return false
+    }
+
     func findView(ofClass name: String, in view: NSView?) -> NSView? {
         guard let view else { return nil }
         if NSStringFromClass(type(of: view)) == name { return view }

@@ -247,6 +247,7 @@ extension SelfTest {
         if let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: ns.windowNumber, context: nil, characters: "k",
                charactersIgnoringModifiers: "k", isARepeat: false, keyCode: 40) {
+            guard await pageTakesKeys(tab, page, "shortcuts-once") else { return finish(false, "the page took no key in 15 s, so Cmd+K cannot be judged") }
             ns.makeFirstResponder(page)
             if !ns.performKeyEquivalent(with: ev), NSApp.mainMenu?.performKeyEquivalent(with: ev) != true { ns.firstResponder?.keyDown(with: ev) }
             var keys = ""

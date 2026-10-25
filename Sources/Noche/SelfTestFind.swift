@@ -387,6 +387,7 @@ extension SelfTest {
         guard ctl.findBar.isHidden else { return finish(false, "the pill shows") }
         // Not claimed; the page gets the keydown (a hidden window is never key, so the fall-through is made as in shortcuts-once).
         _ = await evaluate(tab, #"window.__keys = []; document.addEventListener("keydown", (e) => { window.__keys.push(e.key); }); 1"#)
+        guard await pageTakesKeys(tab, page, "find-escape-page") else { return finish(false, "the page took no key in 15 s, so Escape cannot be judged") }
         let claims1 = NCWindow.testPreemptedKeys()
         NSApp.sendEvent(ev)
         ns.makeFirstResponder(page)
