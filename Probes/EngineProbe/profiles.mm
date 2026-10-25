@@ -1114,7 +1114,7 @@ void CheckClearCallbacks(H h) {
         (*cC)->ClearBrowsingData(kAll, CefBaseTime(), new CB([=] { ++*nDestroyed; }));
         *cC = nullptr;  // the last reference
         Later(3.0, [=] {
-          g_c.Ok("destroyed-context-callback-at-most-once", *nDestroyed <= 1, [NSString stringWithFormat:@"callbacks after the context was released mid-removal and 3 s: %d (want <= 1; the engine is still running, so no crash)", *nDestroyed]);
+          g_c.Ok("destroyed-context-callback-once", *nDestroyed == 1, [NSString stringWithFormat:@"callbacks after the context was released mid-removal and 3 s: %d (want exactly 1, measured; the engine is still running, so no crash)", *nDestroyed]);
           PI(@"destroyed-context callback ran %d time(s)", *nDestroyed);
           End(h, @"profile-clear-callbacks");
         });
@@ -1122,6 +1122,43 @@ void CheckClearCallbacks(H h) {
     });
   });
 #endif
+}
+
+// ---- download-keep-quit (0008: a kept request must not pin a request context past CefShutdown) ----
+// Profile 1's window navigates to mid.bin (24 MB at about 2 MB/s) and is closed mid-download: the download is kept, the request holds its CefBrowser and with it the
+// browser's request context. The probe releases every reference of its own and finishes, so the engine shuts down with the kept download running. Before the 0008
+// kept-state release the quit aborted: "DCHECK failed: all_.empty()" at cef/libcef/browser/browser_context.cc:45, rc 134 (docs/engine/evidence/m1-5-engine-run.txt).
+// EXPECTED RED until the engine is rebuilt with the amended 0008 patch; the check's own pass line prints before the engine shuts down, the script then reports rc 134.
+unsigned long long DirBytesOf(NSString* dir) {
+  unsigned long long t = 0;
+  for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil]) t += [NSFileManager.defaultManager attributesOfItemAtPath:[dir stringByAppendingPathComponent:n] error:nil].fileSize;
+  return t;
+}
+void CheckKeepQuit(H h) {
+  const char* mid = getenv("NOCHE_PROBE_MID_URL");
+  const char* dl = getenv("NOCHE_PROBE_DL_DIR");
+  if (!mid || !dl) { h->finish(false, @"NOCHE_PROBE_MID_URL / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)"); return; }
+  NSString* midUrl = @(mid);
+  NSString* dir = @(dl);
+  auto cB = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 1")));
+  auto wB = std::make_shared<WP>(Open(*cB, Localhost(Page(h, @"index.html?side=B"))));
+  WaitFor(h, 20000, [=] { return Loaded(*wB, (*wB)->first()); }, [=](bool loaded) {
+    g_c.Ok("window-loaded", loaded, @"B first tab loaded");
+    TabOf((*wB)->view, (*wB)->first())->GetMainFrame()->LoadURL(midUrl.UTF8String);  // becomes the download
+    WaitFor(h, 30000, [=] { return DirBytesOf(dir) > 1000000; }, [=](bool started) {
+      g_c.Ok("download-started", started, [NSString stringWithFormat:@"download dir holds %llu bytes", DirBytesOf(dir)]);
+      (*wB)->window->Close();
+      WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
+        const unsigned long long b0 = DirBytesOf(dir);
+        Later(2.5, [=] {
+          const unsigned long long b1 = DirBytesOf(dir);
+          g_c.Ok("window-closed-download-kept", destroyed && b1 > b0 + 500000, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes over 2.5 s with no window (want growth)", (int)destroyed, b0, b1]);
+          g_wins.clear(); *wB = nullptr; *cB = nullptr;  // every reference of the probe is released; the download still runs when the engine shuts down
+          Later(0.5, [=] { End(h, @"download-keep-quit"); });
+        });
+      });
+    });
+  });
 }
 
 // ---- profile-upgrade ----
@@ -1176,7 +1213,7 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
 
 bool RunProfilesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{ @"profile-dirs" : @0, @"profile-cookie" : @1, @"profile-cookie-2" : @2, @"profile-storage" : @3, @"profile-ext" : @4, @"profile-close" : @5,
-                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12 };
+                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12, @"download-keep-quit" : @13 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1195,6 +1232,7 @@ bool RunProfilesCheck(NSString* check, const SurfHost& host) {
     case 9: CheckDelete(h); break;
     case 11: CheckUpgrade(h); break;
     case 12: CheckClearCallbacks(h); break;
+    case 13: CheckKeepQuit(h); break;
     default: CheckDelete2(h); break;
   }
   return true;

@@ -22,7 +22,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -555,7 +555,7 @@ void KeepStream(H h) {
   S->push_back(Sleep(2.0));
   S->push_back([=](Next) {
     auto recs = rec->Recs("hold.html?keep=");
-    A->Check("d-on-resource-load-complete-at-most-once", recs.size() <= 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for the held request (want <= 1): %@", recs.size(), RecFacts(recs)]);
+    A->Check("d-on-resource-load-complete-exactly-once", recs.size() == 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for the held request (want exactly 1, measured on 3659 and 3663): %@", recs.size(), RecFacts(recs)]);
     A->Check("e-tab-gone", ById(h, *id) == nullptr, @"the closed tab is no longer listed");
     NSString* sum = A->Summary();
     rec->Clear();
@@ -587,7 +587,9 @@ void KeepComplete(H h) {
         return;
       }
       PI(@"download started from tab %d: %s", *id, DlStr(g_dl_events.back()).c_str());
-      if (auto t = ById(h, *id)) t->GetHost()->CloseBrowser(true);
+      auto t = ById(h, *id);
+      PI(@"tab %d still listed when the probe closes it: %d (0 means the engine already closed it when the navigation became a download)", *id, (int)(t != nullptr));
+      if (t) t->GetHost()->CloseBrowser(true);
       n();
     });
   });
@@ -1162,7 +1164,7 @@ void CheckDiscard(H h) {
   });
 }
 
-// discard-p1b and discard-p1b-off: the feature is truly off. The bridge enables WebContentsDiscard on every launch, and the probe adds --disable-features=WebContentsDiscard;
+// discard-p1b and discard-p1b-off run this same check on purpose: both names stay for continuity with the evidence files and usage lines; the feature is truly off. The bridge enables WebContentsDiscard on every launch, and the probe adds --disable-features=WebContentsDiscard;
 // the disable list wins (base/feature_list.cc:454 registers --disable-features before --enable-features, and RegisterOverride at :1470 keeps only the first override of a name).
 // Asserts the switch is on the command line, then that DiscardTab() on a loaded background tab returns false, the browser stays valid and OnTabDiscarded never runs.
 void CheckDiscardOff(H h) {

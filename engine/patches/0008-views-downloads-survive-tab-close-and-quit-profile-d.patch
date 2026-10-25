@@ -1,4 +1,4 @@
-From f5ee8b0ca9d271757b96b62dba1ccd98ee357f8c Mon Sep 17 00:00:00 2001
+From 1a298272e5ae81d319507b78b22d01381a485159 Mon Sep 17 00:00:00 2001
 From: Renn F <rennf93@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 02:52:12 +0200
 Subject: [PATCH] views: downloads survive tab close and quit, profile download
@@ -6,24 +6,24 @@ Subject: [PATCH] views: downloads survive tab close and quit, profile download
 
 ---
  include/cef_download_handler.h                |   6 +-
- include/cef_request_context.h                 |  16 +++
+ include/cef_request_context.h                 |  16 ++
  include/cef_resource_request_handler.h        |   6 +
- libcef/browser/browser_context.cc             |  22 ++++
+ libcef/browser/browser_context.cc             |  22 +++
  libcef/browser/browser_context.h              |  11 ++
- .../browser/download_manager_delegate_impl.cc | 121 ++++++++++++++++--
+ .../browser/download_manager_delegate_impl.cc | 137 ++++++++++++++++--
  .../browser/download_manager_delegate_impl.h  |  13 ++
- .../resource_request_handler_wrapper.cc       |  90 +++++++++++--
+ .../resource_request_handler_wrapper.cc       | 121 ++++++++++++++--
  libcef/browser/request_context_impl.cc        |  18 +++
  libcef/browser/request_context_impl.h         |   5 +
  patch/patch.cfg                               |  12 ++
  ..._browser_ui_tab_group_feedback_guard.patch |  26 ++++
- .../content_download_keep_paused.patch        |  89 +++++++++++++
- 13 files changed, 411 insertions(+), 24 deletions(-)
+ .../content_download_keep_paused.patch        |  89 ++++++++++++
+ 13 files changed, 455 insertions(+), 27 deletions(-)
  create mode 100644 patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
  create mode 100644 patch/patches/content_download_keep_paused.patch
 
 diff --git a/include/cef_download_handler.h b/include/cef_download_handler.h
-index 069fcd4db..008376df9 100644
+index 069fcd4..008376d 100644
 --- a/include/cef_download_handler.h
 +++ b/include/cef_download_handler.h
 @@ -129,9 +129,11 @@ class CefDownloadHandler : public virtual CefBaseRefCounted {
@@ -41,7 +41,7 @@ index 069fcd4db..008376df9 100644
                                   CefRefPtr<CefDownloadItem> download_item,
                                   CefRefPtr<CefDownloadItemCallback> callback) {}
 diff --git a/include/cef_request_context.h b/include/cef_request_context.h
-index 77a1c0249..e60fae3de 100644
+index 77a1c02..e60fae3 100644
 --- a/include/cef_request_context.h
 +++ b/include/cef_request_context.h
 @@ -47,6 +47,7 @@
@@ -75,7 +75,7 @@ index 77a1c0249..e60fae3de 100644
  
  #endif  // CEF_INCLUDE_CEF_REQUEST_CONTEXT_H_
 diff --git a/include/cef_resource_request_handler.h b/include/cef_resource_request_handler.h
-index 572065b77..7a1c31d1a 100644
+index 572065b..7a1c31d 100644
 --- a/include/cef_resource_request_handler.h
 +++ b/include/cef_resource_request_handler.h
 @@ -181,6 +181,12 @@ class CefResourceRequestHandler : public virtual CefBaseRefCounted {
@@ -92,7 +92,7 @@ index 572065b77..7a1c31d1a 100644
    virtual void OnResourceLoadComplete(CefRefPtr<CefBrowser> browser,
                                        CefRefPtr<CefFrame> frame,
 diff --git a/libcef/browser/browser_context.cc b/libcef/browser/browser_context.cc
-index 456c6c2d4..efcc616b2 100644
+index 456c6c2..efcc616 100644
 --- a/libcef/browser/browser_context.cc
 +++ b/libcef/browser/browser_context.cc
 @@ -15,6 +15,7 @@
@@ -139,7 +139,7 @@ index 456c6c2d4..efcc616b2 100644
    CEF_REQUIRE_UIT();
    request_context_set_.insert(context);
 diff --git a/libcef/browser/browser_context.h b/libcef/browser/browser_context.h
-index 4565128ee..543076d15 100644
+index 4565128..543076d 100644
 --- a/libcef/browser/browser_context.h
 +++ b/libcef/browser/browser_context.h
 @@ -14,6 +14,7 @@
@@ -175,7 +175,7 @@ index 4565128ee..543076d15 100644
    using RenderIdSet = std::set<content::GlobalRenderFrameHostId>;
    RenderIdSet render_id_set_;
 diff --git a/libcef/browser/download_manager_delegate_impl.cc b/libcef/browser/download_manager_delegate_impl.cc
-index e5363cc46..45f319de0 100644
+index e5363cc..9f5bab7 100644
 --- a/libcef/browser/download_manager_delegate_impl.cc
 +++ b/libcef/browser/download_manager_delegate_impl.cc
 @@ -4,15 +4,19 @@
@@ -222,7 +222,7 @@ index e5363cc46..45f319de0 100644
  void RunDownloadTargetCallback(download::DownloadTargetCallback callback,
                                 const base::FilePath& path) {
    download::DownloadTargetInfo target_info;
-@@ -268,10 +289,14 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+@@ -268,10 +289,16 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
          // IN_PROGRESS_INTERNAL state (not TARGET_PENDING_INTERNAL which also
          // maps to external IN_PROGRESS state).
          if (item->GetFullPath().empty()) {
@@ -237,11 +237,13 @@ index e5363cc46..45f319de0 100644
 +                CEF_UIT,
 +                base::BindOnce(&CefDownloadItemCallbackImpl::DoPause, this),
 +                kRetryDelayMs);
++          } else {
++            GiveUp("Pause", item);
 +          }
            return;
          }
          item->Pause();
-@@ -290,10 +315,14 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+@@ -290,10 +317,16 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
          // Verify the download has a full path if it's in IN_PROGRESS state.
          if (item->GetState() == DownloadItem::IN_PROGRESS &&
              item->GetFullPath().empty()) {
@@ -256,14 +258,28 @@ index e5363cc46..45f319de0 100644
 +                CEF_UIT,
 +                base::BindOnce(&CefDownloadItemCallbackImpl::DoResume, this),
 +                kRetryDelayMs);
++          } else {
++            GiveUp("Resume", item);
 +          }
            return;
          }
          item->Resume(true);
-@@ -301,8 +330,12 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+@@ -301,8 +334,24 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
      }
    }
  
++  // Noche: the request did not take effect. CefDownloadItemCallback methods
++  // return nothing, so the embedder sees the failure as an unchanged item (its
++  // next OnDownloadUpdated still reports not paused after Pause(), or still
++  // paused after Resume()); the log line names the download and the cause.
++  void GiveUp(const char* what, DownloadItem* item) {
++    LOG(ERROR) << "CefDownloadItemCallback::" << what << "() gave up for download "
++               << download_id_ << " after " << kMaxRetries << " retries of "
++               << kRetryDelayMs
++               << " ms: the item still has no full path (state "
++               << item->GetState() << ")";
++  }
++
 +  static constexpr int kMaxRetries = 50;
 +  static constexpr int kRetryDelayMs = 100;
 +
@@ -273,7 +289,7 @@ index e5363cc46..45f319de0 100644
  
    IMPLEMENT_REFCOUNTING(CefDownloadItemCallbackImpl);
  };
-@@ -313,6 +346,7 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
+@@ -313,6 +362,7 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
      DownloadManager* manager)
      : manager_(manager), manager_ptr_factory_(manager) {
    DCHECK(manager);
@@ -281,7 +297,7 @@ index e5363cc46..45f319de0 100644
    manager->AddObserver(this);
  
    DownloadManager::DownloadVector items;
-@@ -323,14 +357,40 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
+@@ -323,14 +373,40 @@ CefDownloadManagerDelegateImpl::CefDownloadManagerDelegateImpl(
  }
  
  CefDownloadManagerDelegateImpl::~CefDownloadManagerDelegateImpl() {
@@ -322,7 +338,7 @@ index e5363cc46..45f319de0 100644
    }
  
    if (handler.get()) {
-@@ -345,6 +405,22 @@ void CefDownloadManagerDelegateImpl::OnDownloadUpdated(DownloadItem* download) {
+@@ -345,6 +421,22 @@ void CefDownloadManagerDelegateImpl::OnDownloadUpdated(DownloadItem* download) {
    }
  }
  
@@ -345,7 +361,7 @@ index e5363cc46..45f319de0 100644
  void CefDownloadManagerDelegateImpl::OnDownloadDestroyed(DownloadItem* item) {
    item->RemoveObserver(this);
  
-@@ -379,6 +455,15 @@ void CefDownloadManagerDelegateImpl::OnDownloadCreated(DownloadManager* manager,
+@@ -379,6 +471,15 @@ void CefDownloadManagerDelegateImpl::OnDownloadCreated(DownloadManager* manager,
    // This callback may arrive after DetermineDownloadTarget, so we allow
    // association from either method.
    CefRefPtr<CefBrowserHostBase> browser = GetOrAssociateBrowser(item);
@@ -361,7 +377,7 @@ index e5363cc46..45f319de0 100644
    if (!browser) {
      // If the download is rejected (e.g. ALT+click on an invalid protocol link)
      // then an "interrupted" download will be started via DownloadManagerImpl::
-@@ -407,6 +492,21 @@ bool CefDownloadManagerDelegateImpl::DetermineDownloadTarget(
+@@ -407,6 +508,21 @@ bool CefDownloadManagerDelegateImpl::DetermineDownloadTarget(
    // from either method.
    CefRefPtr<CefBrowserHostBase> browser = GetOrAssociateBrowser(item);
    if (!browser) {
@@ -383,7 +399,7 @@ index e5363cc46..45f319de0 100644
      return false;
    }
  
-@@ -473,8 +573,9 @@ void CefDownloadManagerDelegateImpl::OnBrowserDestroyed(
+@@ -473,8 +589,9 @@ void CefDownloadManagerDelegateImpl::OnBrowserDestroyed(
    for (auto& [item, item_browser] : item_browser_map_) {
      if (item_browser == browser) {
        // Don't call back into browsers that have been destroyed. We're not
@@ -396,7 +412,7 @@ index e5363cc46..45f319de0 100644
      }
    }
 diff --git a/libcef/browser/download_manager_delegate_impl.h b/libcef/browser/download_manager_delegate_impl.h
-index 5843c0d8e..c68f0df01 100644
+index 5843c0d..c68f0df 100644
 --- a/libcef/browser/download_manager_delegate_impl.h
 +++ b/libcef/browser/download_manager_delegate_impl.h
 @@ -6,6 +6,7 @@
@@ -434,7 +450,7 @@ index 5843c0d8e..c68f0df01 100644
  
    raw_ptr<content::DownloadManager> manager_;
 diff --git a/libcef/browser/net_service/resource_request_handler_wrapper.cc b/libcef/browser/net_service/resource_request_handler_wrapper.cc
-index efabfd257..281d51090 100644
+index efabfd2..3d0d5b8 100644
 --- a/libcef/browser/net_service/resource_request_handler_wrapper.cc
 +++ b/libcef/browser/net_service/resource_request_handler_wrapper.cc
 @@ -110,6 +110,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
@@ -458,11 +474,34 @@ index efabfd257..281d51090 100644
      bool accept_language_added_ = false;
      CancelRequestCallback cancel_callback_;
    };
-@@ -203,24 +210,24 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -157,7 +164,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+   };
+ 
+   // Observer to receive notification of CEF context or associated browser
+-  // destruction. Only one of the *Destroyed() methods will be called.
++  // destruction. Noche: OnContextDestroyed can follow OnBrowserDestroyed while
++  // requests are kept alive.
+   class DestructionObserver : public CefBrowserHostBase::Observer,
+                               public CefContext::Observer {
+    public:
+@@ -201,26 +209,36 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+     void OnBrowserDestroyed(CefBrowserHostBase* browser) override {
+       CEF_REQUIRE_UIT();
        browser->RemoveObserver(this);
-       registered_ = false;
+-      registered_ = false;
        browser_info_ = nullptr;
 -      NotifyOnDestroyed();
++      // Noche: stay registered for the destruction of the CEF context. A
++      // request kept alive past its browser holds the CefBrowser, and with it
++      // the browser's request context; only CancelKeptRequests (run from
++      // OnContextDestroyed, or when the proxies shut down) releases them, so
++      // without this a kept download pins the context past CefShutdown. The
++      // wrapper deletes this observer right away when nothing is kept.
++      if (CefContext::Get()) {
++        CefContext::Get()->AddObserver(this);
++      } else {
++        registered_ = false;
++      }
 +      NotifyOnDestroyed(/*from_browser=*/true);
      }
  
@@ -487,7 +526,7 @@ index efabfd257..281d51090 100644
        }
      }
  
-@@ -408,6 +415,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -408,6 +426,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
      // There should be no in-progress requests during destruction.
      DCHECK(request_map_.empty());
@@ -495,7 +534,7 @@ index efabfd257..281d51090 100644
  
      // Don't continue with initialization if we get deleted before
      // SetInitialized is called asynchronously.
-@@ -426,11 +434,11 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -426,11 +445,11 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      // we won't get an OnDestroyed callback from DestructionObserver.
      if (init_state_->browser_) {
        if (!init_state_->browser_->browser_info()->browser()) {
@@ -509,7 +548,7 @@ index efabfd257..281d51090 100644
        return;
      }
  
-@@ -520,6 +528,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -520,6 +539,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      CEF_REQUIRE_IOT();
  
      if (shutting_down_) {
@@ -517,7 +556,7 @@ index efabfd257..281d51090 100644
        return;
      }
  
-@@ -532,7 +541,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -532,7 +552,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
        return;
      }
  
@@ -526,7 +565,7 @@ index efabfd257..281d51090 100644
    }
  
    void OnBeforeRequest(int32_t request_id,
-@@ -900,6 +909,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -900,6 +920,10 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
        return;
      }
  
@@ -537,7 +576,7 @@ index efabfd257..281d51090 100644
      if (state->cookie_filter_) {
        // Remove the flags that were added in ContinueWithLoadedCookies.
        request->load_flags &= ~kLoadNoCookiesFlags;
-@@ -1124,6 +1137,17 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1124,6 +1148,17 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
                           bool& handled_externally) override {
      CEF_REQUIRE_IOT();
  
@@ -555,7 +594,7 @@ index efabfd257..281d51090 100644
      RequestState* state = GetState(request_id);
      if (!state) {
        // The request may have been aborted during initialization or canceled
-@@ -1177,6 +1201,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1177,6 +1212,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
   private:
    void CallHandlerOnComplete(RequestState* state,
                               const network::URLLoaderCompletionStatus& status) {
@@ -570,7 +609,7 @@ index efabfd257..281d51090 100644
      if (!state->handler_ || !state->pending_request_) {
        return;
      }
-@@ -1198,8 +1230,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1198,8 +1241,8 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      state->pending_response_->SetReadOnly(true);
  
      state->handler_->OnResourceLoadComplete(
@@ -581,7 +620,7 @@ index efabfd257..281d51090 100644
          status.error_code == 0 ? UR_SUCCESS : UR_FAILED,
          status.encoded_body_length.InBytes());
    }
-@@ -1285,12 +1317,19 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1285,16 +1328,35 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
    }
  
    // Stop accepting new requests and cancel pending/in-flight requests when the
@@ -603,7 +642,24 @@ index efabfd257..281d51090 100644
        return;
      }
  
-@@ -1310,8 +1349,15 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+-    init_state_->DeleteDestructionObserver();
++    // Noche: keep the destruction observer while requests are kept, it delivers
++    // the context destruction that releases them (see OnBrowserDestroyed).
++    bool any_kept = false;
++    if (from_browser) {
++      for (const auto& [key, value] : request_map_) {
++        if (value->response_received_ && !value->was_custom_handled_) {
++          any_kept = true;
++        }
++      }
++    }
++    if (!any_kept) {
++      init_state_->DeleteDestructionObserver();
++    }
+ 
+     // Stop accepting new requests.
+     shutting_down_ = true;
+@@ -1310,8 +1372,15 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      RequestMap request_map;
      request_map.swap(request_map_);
  
@@ -620,7 +676,7 @@ index efabfd257..281d51090 100644
        CallHandlerOnComplete(
            value.get(), network::URLLoaderCompletionStatus(net::ERR_ABORTED));
      }
-@@ -1330,6 +1376,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1330,6 +1399,14 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
      for (auto& [key, value] : request_map) {
        auto state = std::move(value);
@@ -635,11 +691,13 @@ index efabfd257..281d51090 100644
        if (state->cancel_callback_) {
          // The cancel callback may trigger a call to OnRequestComplete followed
          // by destruction of the InterceptedRequest that owns the
-@@ -1342,6 +1396,17 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1342,6 +1419,19 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
      }
    }
  
-+  // Context destruction after a browser destruction: cancel what was kept.
++  // Context destruction after a browser destruction: cancel what was kept. The
++  // states, and the CefBrowser references they hold, are released when |kept|
++  // goes out of scope.
 +  void CancelKeptRequests() {
 +    RequestMap kept;
 +    kept.swap(kept_request_map_);
@@ -653,7 +711,7 @@ index efabfd257..281d51090 100644
    static CefRefPtr<CefRequestImpl> MakeRequest(
        const network::ResourceRequest* request,
        int64_t request_id,
-@@ -1368,6 +1433,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
+@@ -1368,6 +1458,7 @@ class InterceptedRequestHandlerWrapper : public InterceptedRequestHandler {
  
    using RequestMap = std::map<int32_t, std::unique_ptr<RequestState>>;
    RequestMap request_map_;
@@ -662,7 +720,7 @@ index efabfd257..281d51090 100644
    using PendingRequests = std::vector<std::unique_ptr<PendingRequest>>;
    PendingRequests pending_requests_;
 diff --git a/libcef/browser/request_context_impl.cc b/libcef/browser/request_context_impl.cc
-index 40dc0900a..ae85f6b56 100644
+index 40dc090..ae85f6b 100644
 --- a/libcef/browser/request_context_impl.cc
 +++ b/libcef/browser/request_context_impl.cc
 @@ -644,6 +644,15 @@ void CefRequestContextImpl::SetChromeColorScheme(cef_color_variant_t variant,
@@ -698,7 +756,7 @@ index 40dc0900a..ae85f6b56 100644
      cef_color_variant_t variant,
      cef_color_t user_color,
 diff --git a/libcef/browser/request_context_impl.h b/libcef/browser/request_context_impl.h
-index 7a61f4a5f..f493d9729 100644
+index 7a61f4a..f493d97 100644
 --- a/libcef/browser/request_context_impl.h
 +++ b/libcef/browser/request_context_impl.h
 @@ -147,6 +147,7 @@ class CefRequestContextImpl : public CefRequestContext {
@@ -721,7 +779,7 @@ index 7a61f4a5f..f493d9729 100644
        CefRefPtr<CefCookieManagerImpl> cookie_manager,
        CefRefPtr<CefCompletionCallback> callback);
 diff --git a/patch/patch.cfg b/patch/patch.cfg
-index 75f5886c6..9c04a2bc6 100644
+index 75f5886..9c04a2b 100644
 --- a/patch/patch.cfg
 +++ b/patch/patch.cfg
 @@ -942,5 +942,17 @@ patches = [
@@ -744,7 +802,7 @@ index 75f5886c6..9c04a2bc6 100644
  ]
 diff --git a/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch b/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
 new file mode 100644
-index 000000000..cd1a23858
+index 0000000..cd1a238
 --- /dev/null
 +++ b/patch/patches/chrome_browser_ui_tab_group_feedback_guard.patch
 @@ -0,0 +1,26 @@
@@ -776,7 +834,7 @@ index 000000000..cd1a23858
 +   std::vector<TabGroupId> local_group_ids =
 diff --git a/patch/patches/content_download_keep_paused.patch b/patch/patches/content_download_keep_paused.patch
 new file mode 100644
-index 000000000..248eca108
+index 0000000..248eca1
 --- /dev/null
 +++ b/patch/patches/content_download_keep_paused.patch
 @@ -0,0 +1,89 @@

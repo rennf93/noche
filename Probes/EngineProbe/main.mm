@@ -236,9 +236,16 @@ static void Log(NSString* fmt, ...) {
 }
 
 static bool g_ok = false;
+// The main window's state, so a timeout that comes from the machine (no frames reach an occluded window) explains itself.
+static NSString* WindowFacts() {
+  if (!g_window) return @"no main window";
+  NSWindow* w = ((__bridge NSView*)g_window->GetWindowHandle()).window;
+  return [NSString stringWithFormat:@"window: nsvisible=%d occlusionVisible=%d cefIsVisible=%d cefIsActive=%d", (int)w.isVisible, (int)((w.occlusionState & NSWindowOcclusionStateVisible) != 0), (int)g_window->IsVisible(), (int)g_window->IsActive()];
+}
 static void Finish(bool ok, NSString* detail) {
   if (g_done) return;
   g_done = true;
+  if (!ok && ([detail hasPrefix:@"timeout"] || [detail hasPrefix:@"no answer"])) detail = [detail stringByAppendingFormat:@" (%@)", WindowFacts()];
   // A helper (GPU, utility) that crashed leaves a report even when no callback fired.
   NSMutableSet* fresh = [CrashReports() mutableCopy];
   if (g_reports_at_start) [fresh minusSet:g_reports_at_start]; else [fresh removeAllObjects];
@@ -332,13 +339,16 @@ static void EnsureWindowVisible(std::function<void(bool)> cb) {
 // The content script fills dataset.nocheTabs from the service worker's answer. A view created before the
 // extension finished loading misses the script (spike S1, C4b), so reload once if it stays empty.
 static int g_polls = 0;
+static NSString* g_last_sw_error = nil;  // last {"error"...} answer while the service worker was starting
 static void Poll() {
   if (g_done) return;
   Eval(@"document.documentElement.dataset.nocheTabs || ''", ^(NSString* s) {
+    if (getenv("NOCHE_PROBE_FORCE_SW_ERROR")) s = @"{\"error\":\"forced by NOCHE_PROBE_FORCE_SW_ERROR\"}";  // test hook: shows the error text reaches the timeout line
+    if ([s hasPrefix:@"{\"error\""]) g_last_sw_error = s;
     // {"error":...} is the content script's answer while the service worker is still starting (a slow machine): keep polling until it answers or 30 s pass.
     if (s.length && ![s hasPrefix:@"{\"error\""]) { CheckTabs(s); return; }
     if (++g_polls == 12 && g_browser) g_browser->ReloadIgnoreCache();
-    if (g_polls > 60) { Finish(false, @"no answer from the service worker in 30s"); return; }
+    if (g_polls > 60) { Finish(false, g_last_sw_error ? [NSString stringWithFormat:@"no answer from the service worker in 30s; last answer %@", g_last_sw_error] : @"no answer from the service worker in 30s"); return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ Poll(); });
   });
 }
@@ -1213,7 +1223,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5", @"profile-dirs", @"profile-cookie", @"profile-cookie-2", @"profile-storage", @"profile-ext", @"profile-close", @"profile-incognito", @"profile-incognito-2", @"profile-clear", @"profile-delete", @"profile-delete-2", @"profile-upgrade", @"profile-clear-callbacks" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5", @"profile-dirs", @"profile-cookie", @"profile-cookie-2", @"profile-storage", @"profile-ext", @"profile-close", @"profile-incognito", @"profile-incognito-2", @"profile-clear", @"profile-delete", @"profile-delete-2", @"profile-upgrade", @"profile-clear-callbacks" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
