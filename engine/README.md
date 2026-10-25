@@ -32,6 +32,7 @@ Run in order, each logs to `$NOCHE_ENGINE_ROOT/logs/<step>-<UTC timestamp>.log`:
 ## GN defines
 
 - `is_official_build=false`: skips the official-build link and optimization cost.
+- `disable_fieldtrial_testing_config=true`: a non-official build otherwise turns on every experiment in `testing/variations/fieldtrial_testing_config.json` (CEF sets this only for official builds, `cef/tools/gn_args.py:549`), so the engine would run Chromium's test experiments and change with each Chromium bump. Features Noche needs are named on the app's `--enable-features` line instead.
 - `symbol_level=0 blink_symbol_level=0 v8_symbol_level=0`: no debug symbols, which keeps the output small and the link fast.
 - `proprietary_codecs=true ffmpeg_branding=Chrome`: H.264 and AAC playback. Distributing a build with these needs a licensing decision before any public binary.
 

@@ -13,7 +13,7 @@ BRANCH="8078"
 # NOCHE_ENGINE_CEF_PIN, NOCHE_ENGINE_CEF_DIR, NOCHE_ENGINE_PATCH_DIR and NOCHE_ENGINE_ALLOW_INTERNAL are test-only.
 PIN="${NOCHE_ENGINE_CEF_PIN:-426920c33ef22551e0b8f48cf343d623ac25642d}"
 PATCH_DIR="${NOCHE_ENGINE_PATCH_DIR:-$REPO/engine/patches}"
-GN_DEFINES_VALUE="is_official_build=false symbol_level=0 blink_symbol_level=0 v8_symbol_level=0 proprietary_codecs=true ffmpeg_branding=Chrome"
+GN_DEFINES_VALUE="is_official_build=false disable_fieldtrial_testing_config=true symbol_level=0 blink_symbol_level=0 v8_symbol_level=0 proprietary_codecs=true ffmpeg_branding=Chrome"
 OUT_CONFIG="Release_GN_arm64"
 
 STEP="${1:-}"
