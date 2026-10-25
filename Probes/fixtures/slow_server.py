@@ -1,39 +1,65 @@
 #!/usr/bin/env python3
-"""Throttled download server for the surfaces probe: /big.bin is 200 MB of zeros at about 2 MB/s, with Range, ETag and Last-Modified so a download can resume."""
+"""Throttled download server for the surfaces probe.
+
+Usage: slow_server.py PORT [REQUEST_LOG]
+
+Files (both about 2 MB/s, with Range, ETag and Last-Modified so a download can resume):
+  /big.bin   200 MB
+  /mid.bin   24 MB, small enough to finish inside one probe run
+The body is a deterministic pattern, byte i = (i * 31 + 7) mod 251, so a probe can compute the expected SHA-256 of any
+prefix without trusting the app or the engine. Every request is appended to REQUEST_LOG as "<path> range=<Range header>",
+the witness for "the resume sent a Range request".
+"""
 import sys, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-SIZE = 200 * 1024 * 1024
+FILES = {"/big.bin": 200 * 1024 * 1024, "/mid.bin": 24 * 1024 * 1024}
 CHUNK = 64 * 1024
 DELAY = 0.03
+PERIOD = bytes((i * 31 + 7) % 251 for i in range(251))
+TABLE = PERIOD * (CHUNK // 251 + 2)
+LOG = sys.argv[2] if len(sys.argv) > 2 else None
+
+
+def pattern(offset, n):
+    i = offset % 251
+    return TABLE[i:i + n]
+
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
+
     def do_GET(self):
-        if self.path.split("?")[0] != "/big.bin":
+        path = self.path.split("?")[0]
+        rng = self.headers.get("Range")
+        if LOG:
+            with open(LOG, "a") as f:
+                f.write(f"{path} range={rng or '-'}\n")
+        size = FILES.get(path)
+        if size is None:
             self.send_response(404); self.end_headers(); return
         start = 0
-        rng = self.headers.get("Range")
         if rng and rng.startswith("bytes="):
             start = int(rng[6:].split("-")[0] or 0)
+        name = path[1:]
         self.send_response(206 if start else 200)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", 'attachment; filename="big.bin"')
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", '"noche-probe-big"')
+        self.send_header("ETag", f'"noche-probe-{name}"')
         self.send_header("Last-Modified", "Sat, 01 Jan 2022 00:00:00 GMT")
-        self.send_header("Content-Length", str(SIZE - start))
-        if start: self.send_header("Content-Range", f"bytes {start}-{SIZE - 1}/{SIZE}")
+        self.send_header("Content-Length", str(size - start))
+        if start: self.send_header("Content-Range", f"bytes {start}-{size - 1}/{size}")
         self.end_headers()
-        buf = b"\0" * CHUNK
         sent = start
         try:
-            while sent < SIZE:
-                n = min(CHUNK, SIZE - sent)
-                self.wfile.write(buf[:n]); self.wfile.flush()
+            while sent < size:
+                n = min(CHUNK, size - sent)
+                self.wfile.write(pattern(sent, n)); self.wfile.flush()
                 sent += n
                 time.sleep(DELAY)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
 
 ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()

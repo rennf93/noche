@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 #import <objc/runtime.h>
+#import <CommonCrypto/CommonDigest.h>
+#include <algorithm>
 #include <sys/stat.h>
 #include "include/cef_id_mappers.h"
 #include "include/cef_command_ids.h"
@@ -18,7 +20,7 @@ CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -274,7 +276,18 @@ void CheckBubbles(H h) {
 NSString* DeepJs() {
   return @"(function(){function t(n){let s='';if(n.shadowRoot)s+=t(n.shadowRoot);for(const c of n.childNodes){if(c.nodeType===3)s+=c.textContent+' ';else if(c.nodeType===1&&!['STYLE','SCRIPT'].includes(c.tagName))s+=t(c);}return s;}return t(document.body||document).replace(/\\s+/g,' ').trim().slice(0,500);})()";
 }
-// ---- R6 ----
+// ---- M1.5 downloads (engine patch 0008): R6 restart, R7 tab close, negative controls ----
+// Independent witnesses, not the app and not the engine: the server's request log (Range headers), the SHA-256 of the
+// downloaded bytes against the server's deterministic pattern, the History database (read by the script between launches).
+// Every check records named assertions; a check passes only if all of them hold. RED on an engine without patch 0008.
+#ifdef NOCHE_DOWNLOAD_API
+constexpr bool kProfileApi = true;
+#else
+constexpr bool kProfileApi = false;  // engine without CefRequestContext::SetDownloadHandler
+#endif
+constexpr unsigned long long kMid = 24ull * 1024 * 1024;
+size_t g_log0 = 0;  // length of the server's request log when this launch started
+
 NSString* StateFile() { return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe/download-restart.state"]; }
 NSString* DirListing() {
   NSMutableArray* o = [NSMutableArray array];
@@ -289,9 +302,197 @@ unsigned long long DirBytes() {
   return t;
 }
 const char* SlowUrl() { return getenv("NOCHE_PROBE_SLOW_URL"); }
+const char* MidUrl() { return getenv("NOCHE_PROBE_MID_URL"); }
+bool DlEnv(H h) {
+  if (MidUrl() && SlowUrl() && getenv("NOCHE_PROBE_SLOW_LOG") && !DlDir().empty()) return true;
+  h->finish(false, @"NOCHE_PROBE_MID_URL / NOCHE_PROBE_SLOW_LOG / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)");
+  return false;
+}
+NSString* ServerLog() { return [NSString stringWithContentsOfFile:@(getenv("NOCHE_PROBE_SLOW_LOG") ?: "/dev/null") encoding:NSUTF8StringEncoding error:nil] ?: @""; }
+NSString* ServerLogSinceStart() { NSString* l = ServerLog(); return l.length > g_log0 ? [l substringFromIndex:g_log0] : @""; }
+NSString* MidPath() { return [@(DlDir().c_str()) stringByAppendingPathComponent:@"mid.bin"]; }
+unsigned long long FileSize(NSString* p) { return [NSFileManager.defaultManager attributesOfItemAtPath:p error:nil].fileSize; }
+NSString* Hex(const unsigned char* d) {
+  NSMutableString* s = [NSMutableString string];
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [s appendFormat:@"%02x", d[i]];
+  return s;
+}
+// SHA-256 of the first n bytes of the server's pattern (byte i = (i * 31 + 7) mod 251).
+NSString* PatternSha(unsigned long long n) {
+  CC_SHA256_CTX c; CC_SHA256_Init(&c);
+  std::vector<unsigned char> buf(1 << 20);
+  for (unsigned long long off = 0; off < n;) {
+    size_t k = (size_t)std::min<unsigned long long>(buf.size(), n - off);
+    for (size_t i = 0; i < k; i++) buf[i] = (unsigned char)(((off + i) * 31 + 7) % 251);
+    CC_SHA256_Update(&c, buf.data(), (CC_LONG)k);
+    off += k;
+  }
+  unsigned char d[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_Final(d, &c);
+  return Hex(d);
+}
+// SHA-256 of the first n bytes of the file at p, or @"" if it is shorter or unreadable.
+NSString* FileSha(NSString* p, unsigned long long n) {
+  NSFileHandle* f = [NSFileHandle fileHandleForReadingAtPath:p];
+  if (!f) return @"";
+  CC_SHA256_CTX c; CC_SHA256_Init(&c);
+  unsigned long long left = n;
+  while (left) {
+    NSData* d = [f readDataOfLength:(NSUInteger)std::min<unsigned long long>(left, 1 << 20)];
+    if (!d.length) return @"";
+    CC_SHA256_Update(&c, d.bytes, (CC_LONG)d.length);
+    left -= d.length;
+  }
+  unsigned char d[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_Final(d, &c);
+  return Hex(d);
+}
 
-void DownloadRestart1(H h) {
-  if (!SlowUrl() || DlDir().empty()) { Done(h, false, @"NOCHE_PROBE_SLOW_URL / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)"); return; }
+struct Asserts {
+  std::vector<std::string> failed;
+  void Check(const char* name, bool ok, NSString* detail) {
+    if (!ok) failed.push_back(name);
+    PI(@"assert %s %s: %@", name, ok ? "PASS" : "FAIL", detail);
+  }
+  void Api(const char* what) {
+    Check("profile-handler-api", kProfileApi, kProfileApi ? @"CefRequestContext::SetDownloadHandler compiled in" : [NSString stringWithFormat:@"CefRequestContext::SetDownloadHandler is not in this engine build (NOCHE_DOWNLOAD_API unset): %s cannot be observed through a profile handler", what]);
+  }
+  bool ok() const { return failed.empty(); }
+  NSString* Summary() const {
+    if (failed.empty()) return @"every assertion held";
+    NSMutableArray* a = [NSMutableArray array];
+    for (auto& f : failed) [a addObject:@(f.c_str())];
+    return [NSString stringWithFormat:@"%zu assertion(s) failed: %@", failed.size(), [a componentsJoinedByString:@", "]];
+  }
+};
+using AS = std::shared_ptr<Asserts>;
+using Next = std::function<void()>;
+using Step = std::function<void(Next)>;
+using Steps = std::shared_ptr<std::vector<Step>>;
+void RunSteps(Steps s, size_t i = 0) {
+  if (i < s->size()) (*s)[i]([=] { RunSteps(s, i + 1); });
+}
+Step Sleep(double sec) { return [=](Next n) { Later(sec, n); }; }
+
+// Events of one download id as seen by the handlers (profile handler events have browser=0).
+size_t EventsFor(uint32_t id, size_t from, bool (*pred)(const DlEv&)) {
+  size_t n = 0;
+  for (size_t i = from; i < g_dl_events.size(); i++) if (g_dl_events[i].id == id && pred(g_dl_events[i])) n++;
+  return n;
+}
+bool NoBrowserInProgress(const DlEv& e) { return !e.hasBrowser && e.inprog; }
+bool NoBrowser(const DlEv& e) { return !e.hasBrowser; }
+bool AnyInProgress(const DlEv& e) { return e.inprog; }
+const DlEv* FirstNoBrowserEvent(uint32_t id) {
+  for (auto& e : g_dl_events) if (e.id == id && !e.hasBrowser) return &e;
+  return nullptr;
+}
+// Status word after "mid.bin mid.bin" in the chrome://downloads text ("Canceled" for a canceled row).
+NSString* RowStatus(NSString* txt, NSString* name) {
+  NSString* pat = [NSString stringWithFormat:@"%@ %@ (\\S+)", [NSRegularExpression escapedPatternForString:name], [NSRegularExpression escapedPatternForString:name]];
+  NSTextCheckingResult* m = [[NSRegularExpression regularExpressionWithPattern:pat options:0 error:nil] firstMatchInString:txt options:0 range:NSMakeRange(0, txt.length)];
+  return m ? [txt substringWithRange:[m rangeAtIndex:1]] : nil;
+}
+// Reads chrome://downloads (opened as a tab) and hands its text to |cb|.
+void DownloadsPageText(H h, std::function<void(NSString*)> cb) {
+  const int t = AddTab(h, @"chrome://downloads", false);
+  WaitFor(h, 10000, [=] { return g_load.count(t) > 0; }, [=](bool) {
+    Later(2, [=] { Eval(h, t, DeepJs(), false, [=](NSString* txt) { cb(txt ?: @""); }); });
+  });
+}
+void StartMidInFirstTab(H h) {
+  h->eval(h->first(), [NSString stringWithFormat:@"location.href = '%s'; 'go'", MidUrl()], false, [](NSString*) {});
+}
+bool DlEventsPaused() { for (auto& e : g_dl_events) if (e.paused) return true; return false; }
+
+// ---- R7: download survives its tab ----
+// Variant 1 starts the download by navigating tab 2 to the file, variant 2 with CefBrowserHost::StartDownload from tab 2. Either way the
+// tab is then closed: the partial file must keep growing, the profile handler must be told (browser=0), Pause and Resume through the
+// saved callback must work, and the download must complete with the pattern's SHA-256.
+void DownloadTabClose(H h, bool viaStartDownload) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto id = std::make_shared<uint32_t>(0);
+  auto t2 = std::make_shared<int>(-1);
+  auto c0 = std::make_shared<unsigned long long>(0), p0 = std::make_shared<unsigned long long>(0), p1 = std::make_shared<unsigned long long>(0);
+  auto ev0 = std::make_shared<size_t>(0);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) {
+    A->Api("events for a download whose tab is gone");
+    *t2 = AddTab(h, h->url(), false);
+    if (*t2 < 0) { Done(h, false, @"AddTab returned NULL"); return; }
+    WaitFor(h, 10000, [=] { return g_load.count(*t2) > 0; }, [=](bool) { n(); });
+  });
+  S->push_back([=](Next n) {
+    if (viaStartDownload) ById(h, *t2)->GetHost()->StartDownload(MidUrl());
+    else Eval(h, *t2, [NSString stringWithFormat:@"location.href = '%s'; 'go'", MidUrl()], false, [](NSString*) {});
+    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().recv > 1000000; }, [=](bool started) {
+      if (!started) { Done(h, false, @"download never started in tab 2"); return; }
+      *id = g_dl_events.back().id;
+      PI(@"download started (%s): %s", viaStartDownload ? "StartDownload" : "navigation", DlStr(g_dl_events.back()).c_str());
+      *c0 = DirBytes();
+      n();
+    });
+  });
+  S->push_back(Sleep(2.0));
+  S->push_back([=](Next n) {
+    A->Check("control-open-tab-grows", DirBytes() > *c0 + 500000, [NSString stringWithFormat:@"tab still open: dir bytes %llu -> %llu over 2 s", *c0, DirBytes()]);
+    if (auto b = ById(h, *t2)) b->GetHost()->CloseBrowser(true);
+    WaitFor(h, 10000, [=] { return ById(h, *t2) == nullptr; }, [=](bool gone) {
+      Later(0.5, [=] {
+        *c0 = DirBytes(); *ev0 = g_dl_events.size();
+        PI(@"tab %d closed (gone=%d); dir bytes %llu; events so far %zu; last: %s", *t2, (int)gone, *c0, *ev0, DlStr(g_dl_events.back()).c_str());
+        n();
+      });
+    });
+  });
+  S->push_back(Sleep(2.5));
+  S->push_back([=](Next n) {
+    A->Check("a-partial-grows-after-close", DirBytes() > *c0 + 1000000, [NSString stringWithFormat:@"dir bytes %llu -> %llu over 2.5 s after the tab was gone; files %@", *c0, DirBytes(), DirListing()]);
+    size_t k = EventsFor(*id, *ev0, NoBrowserInProgress);
+    A->Check("b-profile-handler-events-without-browser", k > 0, [NSString stringWithFormat:@"%zu in-progress OnDownloadUpdated events with browser=0 for id %u after close (all events after close: %zu)", k, *id, g_dl_events.size() - *ev0]);
+    n();
+  });
+  S->push_back([=](Next n) {
+    if (!g_dl_cbs.count(*id)) { A->Check("c-pause-resume", false, @"no callback saved"); n(); return; }
+    g_dl_cbs[*id]->Pause();
+    Later(2.0, [=] { *p0 = DirBytes(); Later(2.5, [=] { *p1 = DirBytes(); n(); }); });
+  });
+  S->push_back([=](Next n) {
+    A->Check("c1-pause-stops-growth", *p0 > 0 && *p1 == *p0, [NSString stringWithFormat:@"after Pause(): dir bytes %llu -> %llu over 2.5 s (want a non-empty partial that stopped growing)", *p0, *p1]);
+    if (g_dl_cbs.count(*id)) g_dl_cbs[*id]->Resume();
+    Later(3.0, [=] {
+      A->Check("c2-resume-restarts-growth", DirBytes() > *p1 + 500000, [NSString stringWithFormat:@"after Resume(): dir bytes %llu -> %llu over 3 s", *p1, DirBytes()]);
+      n();
+    });
+  });
+  S->push_back([=](Next n) {
+    WaitFor(h, 40000, [=] { return FileSize(MidPath()) == kMid && !g_dl_events.empty() && g_dl_events.back().complete; }, [=](bool done) {
+      A->Check("d1-completes-within-40s", done, [NSString stringWithFormat:@"files %@; last event: %s", DirListing(), g_dl_events.empty() ? "(none)" : DlStr(g_dl_events.back()).c_str()]);
+      NSString* got = done ? FileSha(MidPath(), kMid) : @"";
+      NSString* want = PatternSha(kMid);
+      A->Check("d2-sha256-equals-pattern", [got isEqualToString:want], [NSString stringWithFormat:@"file %@ expected %@", got.length ? got : @"(unreadable or short)", want]);
+      n();
+    });
+  });
+  S->push_back([=](Next n) {
+    DownloadsPageText(h, [=](NSString* txt) {
+      NSString* st = RowStatus(txt, @"mid.bin");
+      A->Check("e-downloads-page-not-canceled", st && ![st isEqualToString:@"Canceled"], [NSString stringWithFormat:@"chrome://downloads row mid.bin status word: %@", st ?: @"(no row)"]);
+      n();
+    });
+  });
+  S->push_back([=](Next) {
+    if (g_dl_cbs.count(*id) && !(g_dl_events.size() && g_dl_events.back().complete)) g_dl_cbs[*id]->Cancel();  // cleanup
+    Done(h, A->ok(), [NSString stringWithFormat:@"tab-close download (%s): %@", viaStartDownload ? "StartDownload variant" : "navigation variant", A->Summary()]);
+  });
+  RunSteps(S);
+}
+
+// ---- R6: restart ----
+// Launch 1 starts the download, pauses it at 10 percent and records what is on disk. With crash=false it then quits normally (the paused
+// download is interrupted at shutdown with patch 0008); with crash=true it prints ready-to-kill and waits for the script's kill -9.
+void DownloadRestart1(H h, bool crash) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
   auto paused = std::make_shared<bool>(false);
   g_dl_hook = [=](const DlEv& e) {
     if (!*paused && e.inprog && e.pct >= 10) {
@@ -300,107 +501,192 @@ void DownloadRestart1(H h) {
       g_dl_cbs[e.id]->Pause();
     }
   };
-  h->eval(h->first(), [NSString stringWithFormat:@"location.href = '%s'; 'go'", SlowUrl()], false, [](NSString*) {});
-  WaitFor(h, 40000, [=] { for (auto& e : g_dl_events) if (e.paused) return true; return false; }, [=](bool ok) {
+  StartMidInFirstTab(h);
+  WaitFor(h, 40000, [=] { return DlEventsPaused(); }, [=](bool ok) {
     if (!ok) { Done(h, false, @"download never reached 10 percent and a paused state in 40 s"); return; }
+    Later(crash ? 14.0 : 2.5, [=] {  // crash: let the History database commit the paused row before the kill
+      DlEv last = g_dl_events.back();
+      NSString* path = @(last.path.c_str());
+      PI(@"before %s: %s files: %@", crash ? "kill -9" : "quit", DlStr(last).c_str(), DirListing());
+      NSString* want = PatternSha(last.recv);
+      NSString* got = FileSha(path, last.recv);
+      A->Check("prefix-on-disk-matches-pattern", got.length && [got isEqualToString:want], [NSString stringWithFormat:@"first %lld bytes of the partial: sha %@ pattern %@", (long long)last.recv, got.length ? got : @"(short or unreadable)", want]);
+      NSString* st = [NSString stringWithFormat:@"id=%u\nrecv=%lld\ntotal=%lld\npath=%@\nsha=%@\n", last.id, (long long)last.recv, (long long)last.total, path, got];
+      [st writeToFile:StateFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      if (!crash) { Done(h, A->ok(), [NSString stringWithFormat:@"launch 1: paused download recorded (id=%u recv=%lld), quitting with it paused; %@", last.id, (long long)last.recv, A->Summary()]); return; }
+      PI(@"ready-to-kill");  // the script sees this line and sends SIGKILL; nothing below runs
+      Later(60, [=] { Done(h, false, @"ready-to-kill was printed but nobody killed the app"); });
+    });
+  });
+}
+
+bool ReadState(NSString* key, unsigned long long* out, NSString** str) {
+  NSString* st = [NSString stringWithContentsOfFile:StateFile() encoding:NSUTF8StringEncoding error:nil];
+  for (NSString* line in [st componentsSeparatedByString:@"\n"]) {
+    if (![line hasPrefix:[key stringByAppendingString:@"="]]) continue;
+    NSString* v = [line substringFromIndex:key.length + 1];
+    if (str) *str = v;
+    if (out) *out = strtoull(v.UTF8String, nullptr, 10);
+    return true;
+  }
+  return false;
+}
+
+// Launch 2 (profile handler set before the first navigation in SurfEarly): the item must replay as interrupted without a browser, keep its
+// bytes, resume with a Range request and finish with the pattern's SHA-256.
+void DownloadRestart2(H h, bool crash) {
+  if (!DlEnv(h)) return;
+  unsigned long long id = 0, recv = 0, total = 0; NSString *path = nil, *sha = nil;
+  if (!ReadState(@"id", &id, nullptr) || !ReadState(@"recv", &recv, nullptr) || !ReadState(@"total", &total, nullptr) || !ReadState(@"path", nullptr, &path) || !ReadState(@"sha", nullptr, &sha)) { Done(h, false, @"no state file from launch 1 (run the -1 check first, same script run)"); return; }
+  auto A = std::make_shared<Asserts>();
+  PI(@"launch 1 state: id=%llu recv=%llu total=%llu path=%@ sha=%@; files now: %@", id, recv, total, path, sha, DirListing());
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) { A->Api("the replay of a restored download"); Later(6, n); });
+  S->push_back([=](Next n) {
+    PI(@"events received before any resume: %zu", g_dl_events.size());
+    for (auto& e : g_dl_events) if (e.id == (uint32_t)id) PI(@"  event %s", DlStr(e).c_str());
+    const DlEv* e = FirstNoBrowserEvent((uint32_t)id);
+    A->Check("a-replayed-as-interrupted-without-browser", e && e->interrupted && !e->canceled, e ? [NSString stringWithFormat:@"first browser=0 event for id %llu: %s", id, DlStr(*e).c_str()] : [NSString stringWithFormat:@"no browser=0 event for id %llu (profile handler absent or the item was dropped)", id]);
+    const unsigned long long sz = FileSize(path);
+    NSString* got = sz >= recv ? FileSha(path, recv) : @"";
+    A->Check("b-partial-kept-with-matching-prefix", sz >= recv && [got isEqualToString:sha], [NSString stringWithFormat:@"partial %@ size %llu (want >= %llu), prefix sha %@ (want %@)", path, sz, recv, got.length ? got : @"(missing or short)", sha]);
+    if (g_dl_cbs.count((uint32_t)id)) { PI(@"calling Resume() on the replayed item's callback"); g_dl_cbs[(uint32_t)id]->Resume(); }
+    else A->Check("resume-callback-available", false, @"no OnDownloadUpdated callback for the item, cannot Resume()");
+    Later(4, n);
+  });
+  S->push_back([=](Next n) {
+    NSString* log = ServerLogSinceStart();
+    long long start = -1;
+    for (NSString* line in [log componentsSeparatedByString:@"\n"]) {
+      NSRange r = [line rangeOfString:@"/mid.bin range=bytes="];
+      if (r.location == NSNotFound) continue;
+      start = strtoll([line substringFromIndex:NSMaxRange(r)].UTF8String, nullptr, 10);
+    }
+    A->Check("c-resume-sent-range-request", start > 0 && (unsigned long long)start <= recv, [NSString stringWithFormat:@"server saw Range start %lld for /mid.bin since this launch began (want 1..%llu); log: %@", start, recv, [log stringByReplacingOccurrencesOfString:@"\n" withString:@" | "]]);
+    n();
+  });
+  S->push_back([=](Next n) {
+    WaitFor(h, 40000, [=] { return FileSize(path) == total && FirstNoBrowserEvent((uint32_t)id) && g_dl_events.back().complete; }, [=](bool done) {
+      A->Check("d1-completes-within-40s", done, [NSString stringWithFormat:@"files %@; last event: %s", DirListing(), g_dl_events.empty() ? "(none)" : DlStr(g_dl_events.back()).c_str()]);
+      NSString* got = done ? FileSha(path, total) : @"";
+      NSString* want = PatternSha(total);
+      A->Check("d2-sha256-equals-pattern", [got isEqualToString:want], [NSString stringWithFormat:@"file %@ expected %@", got.length ? got : @"(unreadable or short)", want]);
+      n();
+    });
+  });
+  S->push_back([=](Next) {
+    if (g_dl_cbs.count((uint32_t)id) && !g_dl_events.back().complete) g_dl_cbs[(uint32_t)id]->Cancel();  // cleanup
+    Done(h, A->ok(), [NSString stringWithFormat:@"launch 2 (%s): %@", crash ? "after kill -9" : "after clean quit", A->Summary()]);
+  });
+  RunSteps(S);
+}
+
+// ---- negative controls ----
+// A download the client cancelled stays cancelled over a restart: no resume, no file, never in progress again.
+void ControlCancel1(H h) {
+  if (!DlEnv(h)) return;
+  auto canceled = std::make_shared<bool>(false);
+  g_dl_hook = [=](const DlEv& e) {
+    if (!*canceled && e.inprog && e.pct >= 10) { *canceled = true; PI(@"cancelling at pct=%d recv=%lld through the callback", e.pct, (long long)e.recv); g_dl_cbs[e.id]->Cancel(); }
+  };
+  StartMidInFirstTab(h);
+  WaitFor(h, 40000, [=] { for (auto& e : g_dl_events) if (e.canceled) return true; return false; }, [=](bool ok) {
+    if (!ok) { Done(h, false, @"download never reached 10 percent and a canceled state"); return; }
     Later(2.5, [=] {
       DlEv last = g_dl_events.back();
+      [[NSString stringWithFormat:@"id=%u\n", last.id] writeToFile:StateFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
       PI(@"before quit: %s files: %@", DlStr(last).c_str(), DirListing());
-      NSString* st = [NSString stringWithFormat:@"id=%u recv=%lld total=%lld path=%s", last.id, (long long)last.recv, (long long)last.total, last.path.c_str()];
-      [st writeToFile:StateFile() atomically:YES encoding:NSUTF8StringEncoding error:nil];
-      Done(h, true, [NSString stringWithFormat:@"launch 1: paused download state saved (%@), quitting with it paused", st]);
+      Done(h, last.canceled, [NSString stringWithFormat:@"launch 1: client-cancelled download id=%u recorded (canceled=%d)", last.id, (int)last.canceled]);
     });
   });
 }
-
-void DownloadRestart2(H h) {
-  if (DlDir().empty()) { Done(h, false, @"NOCHE_PROBE_DL_DIR not set"); return; }
-  NSString* st = [NSString stringWithContentsOfFile:StateFile() encoding:NSUTF8StringEncoding error:nil];
-  if (!st) { Done(h, false, @"no state file from launch 1 (run download-restart-1 first)"); return; }
-  PI(@"launch 1 state: %@; files now: %@", st, DirListing());
-  PI(@"OnDownloadUpdated events received before this check started: %zu (hasBrowser=0 means item without a CEF browser)", g_dl_events.size());
-  for (auto& e : g_dl_events) PI(@"  early event %s", DlStr(e).c_str());
-  int t = AddTab(h, @"chrome://downloads", false);
-  Later(6, [=] {
-    static NSString* deep = @"(function(){function t(n){let s='';if(n.shadowRoot)s+=t(n.shadowRoot);for(const c of n.childNodes){if(c.nodeType===3)s+=c.textContent+' ';else if(c.nodeType===1&&!['STYLE','SCRIPT'].includes(c.tagName))s+=t(c);}return s;}return t(document.body||document).replace(/\\s+/g,' ').trim().slice(0,600);})()";
-    Eval(h, t, deep, false, [=](NSString* txt) {
-      PI(@"chrome://downloads text after launch (what the download manager holds): %@", txt);
-      PI(@"OnDownloadUpdated events so far: %zu; callbacks held: %zu", g_dl_events.size(), g_dl_cbs.size());
-      const unsigned long long b0 = DirBytes();
-      bool haveCb = !g_dl_cbs.empty();
-      if (haveCb) { auto last = g_dl_events.back(); PI(@"last event %s; calling Resume() on the replayed item's callback", DlStr(last).c_str()); g_dl_cbs.begin()->second->Resume(); }
-      // Also try the page's own Resume control (a click inside the downloads WebUI).
-      static NSString* click = @"(function(){let n=0;function w(r){for(const e of r.querySelectorAll('*')){if(e.shadowRoot)w(e.shadowRoot);if((e.tagName==='CR-BUTTON'||e.tagName==='BUTTON'||e.tagName==='A')&&/^Resume$/.test((e.textContent||'').trim())&&e.offsetParent!==null){e.click();n++;}}}w(document);return 'clicked '+n;})()";
-      Eval(h, t, click, false, [=](NSString* c) {
-        PI(@"downloads page Resume click (Retry is not clicked: it starts a new download): %@", c);
-        Later(6, [=] {
-          const unsigned long long b1 = DirBytes();
-          PI(@"after Resume attempts: dir bytes %llu -> %llu (grew=%d); files: %@; events now %zu", b0, b1, (int)(b1 > b0), DirListing(), g_dl_events.size());
-          if (!g_dl_events.empty()) PI(@"last event %s", DlStr(g_dl_events.back()).c_str());
-          for (auto& kv : g_dl_cbs) kv.second->Cancel();
-          // Cleanup: cancel anything the page's Resume brought back, so the next launch starts without a running download.
-          Eval(h, t, @"(function(){let n=0;function w(r){for(const e of r.querySelectorAll('*')){if(e.shadowRoot)w(e.shadowRoot);if((e.tagName==='CR-BUTTON'||e.tagName==='BUTTON'||e.tagName==='A')&&/^Cancel$/.test((e.textContent||'').trim())&&e.offsetParent!==null){e.click();n++;}}}w(document);return 'cancel clicked '+n;})()", false, [=](NSString* c2) { PI(@"cleanup: %@", c2); });
-          Later(1.5, [=] { Done(h, true, @"launch 2: replay facts recorded, download cancelled for cleanup"); });
-        });
-      });
+void ControlCancel2(H h) {
+  if (!DlEnv(h)) return;
+  unsigned long long id = 0;
+  if (!ReadState(@"id", &id, nullptr)) { Done(h, false, @"no state file from launch 1"); return; }
+  auto A = std::make_shared<Asserts>();
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back(Sleep(6));
+  S->push_back([=](Next n) {
+    PI(@"events: %zu; files: %@", g_dl_events.size(), DirListing());
+    for (auto& e : g_dl_events) if (e.id == (uint32_t)id) PI(@"  event %s", DlStr(e).c_str());
+    A->Check("no-file-after-restart", FileSize(MidPath()) == 0 && ![NSFileManager.defaultManager fileExistsAtPath:MidPath()], [NSString stringWithFormat:@"files %@", DirListing()]);
+    A->Check("no-resume-request", [ServerLogSinceStart() rangeOfString:@"/mid.bin"].location == NSNotFound, [NSString stringWithFormat:@"server log since launch start: %@", [ServerLogSinceStart() stringByReplacingOccurrencesOfString:@"\n" withString:@" | "]]);
+    A->Check("never-in-progress-again", EventsFor((uint32_t)id, 0, AnyInProgress) == 0, [NSString stringWithFormat:@"%zu in-progress events for id %llu", EventsFor((uint32_t)id, 0, AnyInProgress), id]);
+    if (kProfileApi) {
+      const DlEv* e = FirstNoBrowserEvent((uint32_t)id);
+      A->Check("replayed-as-canceled", e && e->canceled, e ? [NSString stringWithFormat:@"%s", DlStr(*e).c_str()] : @"no browser=0 event for the item");
+    }
+    DownloadsPageText(h, [=](NSString* txt) {
+      NSString* st = RowStatus(txt, @"mid.bin");
+      A->Check("downloads-page-says-canceled", [st isEqualToString:@"Canceled"], [NSString stringWithFormat:@"chrome://downloads row mid.bin status word: %@", st ?: @"(no row)"]);
+      n();
     });
   });
+  S->push_back([=](Next) { Done(h, A->ok(), [NSString stringWithFormat:@"control client-cancelled: %@", A->Summary()]); });
+  RunSteps(S);
 }
-
-// ---- R7 ----
-void DownloadTabClose(H h) {
-  if (!SlowUrl() || DlDir().empty()) { Done(h, false, @"NOCHE_PROBE_SLOW_URL / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)"); return; }
-  int t2 = AddTab(h, h->url(), false);
-  if (t2 < 0) { Done(h, false, @"AddTab returned NULL"); return; }
-  WaitFor(h, 10000, [=] { return g_load.count(t2) > 0; }, [=](bool) {
-    Eval(h, t2, [NSString stringWithFormat:@"location.href = '%s'; 'go'", SlowUrl()], false, [=](NSString*) {});
-    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().recv > 1000000; }, [=](bool started) {
-      if (!started) { Done(h, false, @"download in tab 2 never started"); return; }
-      const uint32_t id = g_dl_events.back().id;
-      PI(@"download started in tab %d: %s", t2, DlStr(g_dl_events.back()).c_str());
-      const unsigned long long c0 = DirBytes();
-      Later(2.5, [=] {
-      PI(@"positive control, tab still open: dir bytes %llu -> %llu over 2.5 s (growing=%d); files %@; events=%zu last: %s", c0, DirBytes(), (int)(DirBytes() > c0), DirListing(), g_dl_events.size(), DlStr(g_dl_events.back()).c_str());
-      const size_t ev0 = g_dl_events.size();
-      const int tdl = AddTab(h, @"chrome://downloads", false);
-      Later(3, [=] {
-      Eval(h, tdl, DeepJs(), false, [=](NSString* txt) { PI(@"chrome://downloads before close: %@", txt); });
-      if (auto b = ById(h, t2)) b->GetHost()->CloseBrowser(true);
-      Later(3, [=] {
-      Eval(h, tdl, DeepJs(), false, [=](NSString* txt) { PI(@"chrome://downloads 3 s after close: %@", txt); });
-        const size_t ev1 = g_dl_events.size();
-        const bool alive = ById(h, t2) != nullptr;
-        PI(@"tab %d closed (still listed=%d); OnDownloadUpdated events during the 3 s after close: %zu; last: %s", t2, (int)alive, ev1 - ev0, DlStr(g_dl_events.back()).c_str());
-        const unsigned long long s0 = DirBytes();
-        Later(2, [=] {
-          const unsigned long long s1 = DirBytes();
-          PI(@"after close, no Pause: dir bytes %llu -> %llu (download continues: %d); files %@", s0, s1, (int)(s1 > s0), DirListing());
-          if (!g_dl_cbs.count(id)) { Done(h, false, @"no callback saved"); return; }
-          g_dl_cbs[id]->Pause();
-          Later(2, [=] {
-            const unsigned long long p0 = DirBytes();
-            Later(3, [=] {
-              const unsigned long long p1 = DirBytes();
-              PI(@"after Pause() through the saved callback: dir bytes %llu -> %llu over 3 s (stopped=%d); events=%zu last: %s", p0, p1, (int)(p1 == p0), g_dl_events.size(), DlStr(g_dl_events.back()).c_str());
-              g_dl_cbs[id]->Resume();
-              Later(2, [=] {
-                const unsigned long long r0 = DirBytes();
-                Later(4, [=] {
-                  const unsigned long long r1 = DirBytes();
-                  PI(@"after Resume() through the saved callback: dir bytes %llu -> %llu over 4 s (growing=%d); events=%zu last: %s files %@", r0, r1, (int)(r1 > r0), g_dl_events.size(), DlStr(g_dl_events.back()).c_str(), DirListing());
-                  g_dl_cbs[id]->Cancel();
-                  Eval(h, tdl, DeepJs(), false, [=](NSString* txt) { PI(@"chrome://downloads at the end: %@", txt); });
-                  Later(1, [=] { Done(h, true, @"tab-close download facts recorded; download cancelled for cleanup"); });
-                });
-              });
-            });
-          });
-        });
-      });
-      });
-      });
+// A rejected download (file:///etc/hosts requested for a page process that may not read it: DownloadRequestUtils::IsURLSafe fails and an interrupted download without WebContents is created) is cancelled at creation and never shows as in progress.
+void ControlRejected(H h) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto S = std::make_shared<std::vector<Step>>();
+  auto logged0 = std::make_shared<size_t>(0);
+  // CEF logs "Rejected download of <url>" when it cancels a download that has no browser; count it to prove the rejected path ran.
+  auto rejectedLines = [] {
+    NSString* log = [NSString stringWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/Noche Probe/probe.log"] encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    return [log componentsSeparatedByString:@"Rejected download of file:///etc/hosts"].count - 1;
+  };
+  S->push_back([=](Next n) { *logged0 = rejectedLines(); h->first()->GetHost()->StartDownload("file:///etc/hosts"); Later(4, n); });
+  S->push_back([=](Next n) {
+    A->Check("rejected-path-ran", rejectedLines() > *logged0, [NSString stringWithFormat:@"'Rejected download of file:///etc/hosts' log lines %zu -> %zu (want more)", *logged0, rejectedLines()]);
+    PI(@"events: %zu; files: %@", g_dl_events.size(), DirListing());
+    for (auto& e : g_dl_events) PI(@"  event %s", DlStr(e).c_str());
+    size_t inprog = 0;
+    for (auto& e : g_dl_events) if (e.inprog) inprog++;
+    A->Check("never-in-progress", inprog == 0, [NSString stringWithFormat:@"%zu in-progress events delivered for the rejected URL", inprog]);
+    A->Check("no-file", [DirListing() isEqualToString:@"(empty)"], [NSString stringWithFormat:@"files %@", DirListing()]);
+    DownloadsPageText(h, [=](NSString* txt) {
+      NSString* st = RowStatus(txt, @"hosts");
+      PI(@"chrome://downloads row hosts status word: %@ (text: %@)", st ?: @"(no row)", txt);
+      A->Check("downloads-page-row-cancelled-or-absent", !st || [st isEqualToString:@"Canceled"], [NSString stringWithFormat:@"status word %@", st ?: @"(no row)"]);
+      n();
     });
   });
+  S->push_back([=](Next) { Done(h, A->ok(), [NSString stringWithFormat:@"control rejected download: %@", A->Summary()]); });
+  RunSteps(S);
+}
+// No profile handler set: behavior is today's. The tab's own handler gets the events (browser always set), the download proceeds, nothing crashes.
+void ControlNoProfile(H h) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto c0 = std::make_shared<unsigned long long>(0);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) {
+    StartMidInFirstTab(h);
+    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().recv > 1000000; }, [=](bool ok) {
+      if (!ok) { Done(h, false, @"download never started"); return; }
+      *c0 = DirBytes(); n();
+    });
+  });
+  S->push_back(Sleep(3));
+  S->push_back([=](Next n) {
+    A->Check("download-proceeds-with-tab-handler", DirBytes() > *c0 + 1000000, [NSString stringWithFormat:@"dir bytes %llu -> %llu over 3 s", *c0, DirBytes()]);
+    A->Check("all-events-carry-a-browser", EventsFor(g_dl_events.back().id, 0, NoBrowser) == 0, [NSString stringWithFormat:@"%zu of %zu events had browser=0 (want 0, no profile handler)", EventsFor(g_dl_events.back().id, 0, NoBrowser), g_dl_events.size()]);
+    n();
+  });
+  // Also the positive control of the measuring chain: the download finishes and its SHA-256 equals the server's pattern.
+  S->push_back([=](Next n) {
+    WaitFor(h, 40000, [=] { return FileSize(MidPath()) == kMid && g_dl_events.back().complete; }, [=](bool done) {
+      A->Check("completes-within-40s", done, [NSString stringWithFormat:@"files %@; last event: %s", DirListing(), DlStr(g_dl_events.back()).c_str()]);
+      NSString* got = done ? FileSha(MidPath(), kMid) : @"";
+      NSString* want = PatternSha(kMid);
+      A->Check("sha256-equals-pattern", [got isEqualToString:want], [NSString stringWithFormat:@"file %@ expected %@", got.length ? got : @"(unreadable or short)", want]);
+      n();
+    });
+  });
+  S->push_back([=](Next) { Done(h, A->ok(), [NSString stringWithFormat:@"control no profile handler: %@", A->Summary()]); });
+  RunSteps(S);
 }
 
 // ---- R12 ----
@@ -576,6 +862,11 @@ void SurfEarly(NSString* check) {
   g_ctx_on = [check isEqualToString:@"ctx-ext-items"];
   g_name = check;
   g_dl = new DlHandler();
+  if (g_dl_on) g_log0 = ServerLog().length;
+#ifdef NOCHE_DOWNLOAD_API
+  // Patch 0008: the profile handler gets the downloads that have no live browser. Set before the first navigation.
+  if (g_dl_on && ![check isEqualToString:@"download-control-noprofile"]) CefRequestContext::GetGlobalContext()->SetDownloadHandler(g_dl);
+#endif
   g_perm = new PermHandler();
   g_ctx = new CtxHandler();
 }
@@ -587,7 +878,9 @@ void SurfOnLoadEnd(int id, int status) { g_load[id] = status; }
 bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{
     @"cmd-enabled" : @0, @"bubbles" : @1, @"download-restart-1" : @2, @"download-restart-2" : @3, @"download-tab-close" : @4,
-    @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8 };
+    @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,
+    @"download-restart-crash-1" : @10, @"download-restart-crash-2" : @11, @"download-control-cancel-1" : @12,
+    @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -595,9 +888,16 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
   switch (n.intValue) {
     case 0: CheckCmdEnabled(h); break;
     case 1: CheckBubbles(h); break;
-    case 2: DownloadRestart1(h); break;
-    case 3: DownloadRestart2(h); break;
-    case 4: DownloadTabClose(h); break;
+    case 2: DownloadRestart1(h, false); break;
+    case 3: DownloadRestart2(h, false); break;
+    case 4: DownloadTabClose(h, false); break;
+    case 9: DownloadTabClose(h, true); break;
+    case 10: DownloadRestart1(h, true); break;
+    case 11: DownloadRestart2(h, true); break;
+    case 12: ControlCancel1(h); break;
+    case 13: ControlCancel2(h); break;
+    case 14: ControlRejected(h); break;
+    case 15: ControlNoProfile(h); break;
     case 5: CheckCtx(h); break;
     case 6: CheckZoom(h); break;
     case 7: CheckChromePages(h); break;

@@ -70,8 +70,10 @@ if withProbes {
         path: "Probes/EngineProbe",
         // NOCHE_TABS_API=1 compiles the tab checks, which need the engine with CefBrowserView::AddTab (task B2).
         // NOCHE_ACTIONS_API=1 compiles the extension action checks (task B5), which also use the tab API.
+        // NOCHE_DOWNLOAD_API=1 compiles the calls that need CefRequestContext::SetDownloadHandler (engine patch 0008).
         cxxSettings: [.unsafeFlags(cefFlags + (env["NOCHE_TABS_API"] == "1" || env["NOCHE_ACTIONS_API"] == "1" ? ["-DNOCHE_TABS_API=1"] : [])
-                                   + (env["NOCHE_ACTIONS_API"] == "1" ? ["-DNOCHE_ACTIONS_API=1"] : []))],
+                                   + (env["NOCHE_ACTIONS_API"] == "1" ? ["-DNOCHE_ACTIONS_API=1"] : [])
+                                   + (env["NOCHE_DOWNLOAD_API"] == "1" ? ["-DNOCHE_DOWNLOAD_API=1"] : []))],
         linkerSettings: [.unsafeFlags([wrapper]), .linkedLibrary("c++"), .linkedFramework("AppKit")]
     ))
 }

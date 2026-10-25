@@ -1199,7 +1199,7 @@ int main(int argc, const char* argv[]) {
       printf("PROBE %s info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)\n", g_check.UTF8String);
       fflush(stdout);
     }
-    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
+    if (![@[ @"ext-loaded", @"tabs-one", @"tabs-20", @"ext-create", @"ext-activate", @"switch-latency", @"switch-latency-ab", @"switch-latency-ab-hybrid", @"switch-latency-hybrid", @"rss-20", @"rss-20-hybrid", @"tabs-bare", @"tabs-bare-2", @"tabs-bare-wait", @"raf-hidden", @"blank-link", @"per-tab-client", @"close-non-last", @"close-last", @"window-normal", @"raf-visible", @"actions-list", @"badge-observer", @"popup-anchor", @"popup-tabid", @"popup-closes", @"popup-close-last", @"close-active-previous", @"close-callbacks", @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble" ] containsObject:g_check] && !IsStoreCheck(g_check)) {
       printf("PROBE %s fail unknown\n", g_check.UTF8String);
       return 1;
     }
@@ -1214,6 +1214,8 @@ int main(int argc, const char* argv[]) {
     for (const char* f : {"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
                           "--disable-background-timer-throttling", "--mute-audio"})
       if (!getenv("NOCHE_PROBE_NO_AF") || !strcmp(f, "--mute-audio")) av.push_back(f);
+    // Engine patch 0008: keep a paused download through a clean quit. An engine without the feature ignores the name.
+    if ([g_check hasPrefix:@"download-"]) av.push_back("--enable-features=KeepPausedDownloadsAtShutdown");
     av.push_back(nullptr);
     static char** avp = const_cast<char**>(av.data());
     static int ac = (int)av.size() - 1;

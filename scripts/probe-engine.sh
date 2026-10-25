@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble)
+# usage: probe-engine.sh <check>...   (store-stock, store-ua, store-brand, store-ua-brand, install-no-window (live Chrome Web Store, task B4), ext-loaded, tabs-one, tabs-20, ext-create, ext-activate, switch-latency, rss-20, blank-link, per-tab-client, close-non-last, close-last, close-callbacks, window-normal, cmd-enabled, bubbles, download-restart-1, download-restart-2 (run 1 then 2, same profile), download-tab-close, download-tab-close-start, download-restart-crash-1/2, download-control-cancel-1/2, download-control-rejected, download-control-noprofile, ctx-ext-items, zoom-scope, chrome-pages, zoom-no-bubble)
 # Builds Probes/EngineProbe (NOCHE_PROBES=1), runs it once per check by direct exec, prints its PROBE lines,
 # exits 0 only if every check printed "pass", exited 0, did not hit the watchdog and left no helpers behind.
 # Profile: ~/Library/Application Support/Noche Probe (store checks: Noche Probe Store, emptied every run). Check names are [a-z0-9-]+.
@@ -10,8 +10,10 @@
 # switch-latency needs frames; it orders its alpha-0 window in without activating. The tab checks need NOCHE_TABS_API=1 (new engine).
 # NOCHE_PROBE_VISIBLE=1 makes the probe window opaque on screen: it needs the owner's approval each time and is never on by default.
 # Surfaces checks (M1.4/M1.5 research): 90 s probe watchdog / 110 s outer. The script serves Probes/fixtures/pages next to index.html and starts
-# Probes/fixtures/slow_server.py (200 MB at about 2 MB/s, Range-capable) for the download checks: NOCHE_PROBE_SLOW_URL, downloads land in a temp
-# NOCHE_PROBE_DL_DIR that is deleted on exit. Run with NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 like the tab checks.
+# Probes/fixtures/slow_server.py (/big.bin 200 MB and /mid.bin 24 MB of a deterministic pattern at about 2 MB/s, Range-capable) for the
+# download checks: NOCHE_PROBE_SLOW_URL, NOCHE_PROBE_MID_URL, NOCHE_PROBE_SLOW_LOG (one line per request with its Range header), downloads land in a
+# temp NOCHE_PROBE_DL_DIR that is deleted on exit. download-restart-crash-1 is killed with SIGKILL by this script (it prints ready-to-kill first).
+# Patch 0008 checks need the new engine API for SetDownloadHandler: NOCHE_DOWNLOAD_API=1 (without it they print the missing API as a failed assertion). Run with NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 like the tab checks.
 # Test-only: NOCHE_PROBE_STUB_BIN=<exe> skips the build and runs that binary instead of the probe app.
 set -euo pipefail
 
@@ -33,13 +35,15 @@ echo '<!doctype html><title>probe</title><p>probe page' > "$SITE/index.html"
 cp "$ROOT"/Probes/fixtures/pages/*.html "$SITE/"
 DL_DIR="$(mktemp -d)"
 SLOW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
-python3 "$ROOT/Probes/fixtures/slow_server.py" "$SLOW_PORT" >/dev/null 2>&1 &
+SLOW_LOG="$(mktemp)"
+python3 "$ROOT/Probes/fixtures/slow_server.py" "$SLOW_PORT" "$SLOW_LOG" >/dev/null 2>&1 &
 SLOW_PID=$!
-export NOCHE_PROBE_SLOW_URL="http://127.0.0.1:$SLOW_PORT/big.bin" NOCHE_PROBE_DL_DIR="$DL_DIR"
+export NOCHE_PROBE_SLOW_URL="http://127.0.0.1:$SLOW_PORT/big.bin" NOCHE_PROBE_MID_URL="http://127.0.0.1:$SLOW_PORT/mid.bin" NOCHE_PROBE_SLOW_LOG="$SLOW_LOG" NOCHE_PROBE_DL_DIR="$DL_DIR"
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$SITE" >/dev/null 2>&1 &
 SERVER_PID=$!
 OUTF="$(mktemp)"
+HIST_COPY="$(mktemp)"
 APP_PID=""
 # Ctrl-C or a kill of this script must not leave the probe running: stop the one app PID this script spawned (never a list).
 cleanup() {
@@ -50,7 +54,7 @@ cleanup() {
     for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
     kill -0 "$APP_PID" 2>/dev/null && kill -KILL "$APP_PID" 2>/dev/null || true
   fi
-  rm -rf "$SITE" "$OUTF"
+  rm -rf "$SITE" "$OUTF" "$SLOW_LOG" "$HIST_COPY"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -65,6 +69,8 @@ for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
 FAILED=0
 for CHECK in "$@"; do
   : > "$OUTF"
+  # Download checks start from an empty download directory, except a -2 check, which continues its -1 check.
+  [[ "$CHECK" == download-* && "$CHECK" != *-2 ]] && rm -rf "${DL_DIR:?}"/* 2>/dev/null
   # Guard against the store-install pollution (B4) coming back: only the store checks may install, in their own profile.
   if [[ "$CHECK" != store-* && "$CHECK" != install-no-window ]] && [ -n "$(ls -A "$EXT_DIR" 2>/dev/null)" ]; then
     echo "PROBE $CHECK fail profile-polluted: $EXT_DIR holds $(ls -A "$EXT_DIR" | tr '\n' ' ')"
@@ -80,9 +86,13 @@ for CHECK in "$@"; do
   (cd / && exec "$BIN" --probe="$CHECK" --url="http://127.0.0.1:$PORT/" \
       --load-extension="$ROOT/Probes/fixtures/probe-extension" --enable-logging=stderr >"$OUTF") &
   APP_PID=$!
-  WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0
+  WATCHDOG=0; SAMPLES=0; FRONT=0; UNKNOWN=0; TICK=0; KILLED=0
   for _ in $(seq 1 $((LIMIT * 10))); do
     kill -0 "$APP_PID" 2>/dev/null || break
+    # download-restart-crash-1 asks the harness to kill -9 it (no shutdown code runs) once it printed ready-to-kill.
+    if [[ "$CHECK" == download-restart-crash-1 && "$KILLED" = 0 ]] && grep -q "info ready-to-kill" "$OUTF"; then
+      KILLED=1; kill -KILL "$APP_PID" 2>/dev/null || true
+    fi
     if [ $((TICK % 5)) = 0 ]; then
       SAMPLES=$((SAMPLES + 1)); FP="$(front_pid)"
       if [ -z "$FP" ]; then UNKNOWN=$((UNKNOWN + 1)); elif [ "$FP" = "$APP_PID" ]; then FRONT=$((FRONT + 1)); fi
@@ -100,9 +110,15 @@ for CHECK in "$@"; do
   set +e; wait "$APP_PID" 2>/dev/null; RC=$?; set -e
   APP_PID=""
   [ "$WATCHDOG" = 1 ] && echo "PROBE $CHECK fail watchdog" >> "$OUTF"
+  [ "$KILLED" = 1 ] && echo "PROBE $CHECK pass killed with SIGKILL by the harness after ready-to-kill" >> "$OUTF" && RC=0
   grep '^PROBE ' "$OUTF" || echo "PROBE $CHECK fail no-output"
   grep -qxE "PROBE $CHECK pass( .*)?" "$OUTF" || FAILED=1
   if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then FAILED=1; echo "PROBE $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"; fi
+  # Independent witness between launches: what the History database holds for the downloads (a copy, the app is gone).
+  if [[ "$CHECK" =~ ^download-.*-1$ ]] && command -v sqlite3 >/dev/null; then
+    cp "$HOME/Library/Application Support/Noche Probe/Default/History" "$HIST_COPY" 2>/dev/null || true
+    echo "PROBE $CHECK info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): $(sqlite3 -separator '|' "$HIST_COPY" 'select id,state,interrupt_reason,received_bytes,etag from downloads order by id desc limit 3' 2>&1 | tr '\n' ' ')"
+  fi
   echo "PROBE $CHECK info frontmost samples=$SAMPLES probe-frontmost=$FRONT unknown=$UNKNOWN"
   [ "$FRONT" = 0 ] || { FAILED=1; echo "PROBE $CHECK fail probe-was-frontmost in $FRONT of $SAMPLES samples"; }
   [ "$UNKNOWN" -lt "$SAMPLES" ] || { FAILED=1; echo "PROBE $CHECK fail frontmost-unreadable (lsappinfo gave no pid in $SAMPLES samples)"; }
