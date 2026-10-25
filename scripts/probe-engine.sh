@@ -66,6 +66,14 @@ helpers() { ps -axo pid=,command= | awk -v p="$APP/Contents/Frameworks" 'index($
 EXT_DIR="$HOME/Library/Application Support/Noche Probe/Default/Extensions"
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
 
+# Copy of the History database (with journal/WAL) queried with sqlite3; prints the query result on one line.
+hist_query() {
+  local hd="$HOME/Library/Application Support/Noche Probe/Default" hc f
+  hc="$(mktemp -d)"
+  for f in History History-journal History-wal History-shm; do if [ -f "$hd/$f" ]; then cp "$hd/$f" "$hc/$f"; fi; done
+  sqlite3 -separator '|' "$hc/History" "$1" 2>&1 | tr '\n' ' '
+  rm -rf "$hc"
+}
 FAILED=0
 for CHECK in "$@"; do
   : > "$OUTF"
@@ -77,6 +85,8 @@ for CHECK in "$@"; do
     FAILED=1; continue
   fi
   REPORTS_BEFORE="$(crash_reports)"
+  HIST_MAX0=0
+  [[ "$CHECK" == download-control-rejected ]] && HIST_MAX0="$(hist_query 'select coalesce(max(id),0) from downloads' | tr -d ' ')"
   LIMIT=$((40 + ${NOCHE_PROBE_SLACK:-20}))
   [[ "$CHECK" == rss-20* || "$CHECK" == tabs-bare-wait ]] && LIMIT=$((120 + ${NOCHE_PROBE_SLACK:-20}))
   [[ "$CHECK" =~ ^(cmd-enabled|bubbles|download-.*|ctx-ext-items|zoom-scope|chrome-pages|zoom-no-bubble)$ ]] && LIMIT=$((90 + ${NOCHE_PROBE_SLACK:-20}))
@@ -114,10 +124,39 @@ for CHECK in "$@"; do
   grep '^PROBE ' "$OUTF" || echo "PROBE $CHECK fail no-output"
   grep -qxE "PROBE $CHECK pass( .*)?" "$OUTF" || FAILED=1
   if [ "$WATCHDOG" = 1 ] || [ "$RC" != 0 ]; then FAILED=1; echo "PROBE $CHECK fail exit-rc=$RC watchdog=$WATCHDOG"; fi
-  # Independent witness between launches: what the History database holds for the downloads (a copy, the app is gone).
-  if [[ "$CHECK" =~ ^download-.*-1$ ]] && command -v sqlite3 >/dev/null; then
-    cp "$HOME/Library/Application Support/Noche Probe/Default/History" "$HIST_COPY" 2>/dev/null || true
-    echo "PROBE $CHECK info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): $(sqlite3 -separator '|' "$HIST_COPY" 'select id,state,interrupt_reason,received_bytes,etag from downloads order by id desc limit 3' 2>&1 | tr '\n' ' ')"
+  # Independent witness for download-control-rejected: a rejected download (no WebContents) is cancelled by CEF's item->Cancel(true) at
+  # creation, which leaves a History row with state 2 (cancelled) and interrupt reason 40 (USER_CANCELED) for every new file:///etc/hosts item.
+  if [[ "$CHECK" == download-control-rejected ]]; then
+    Q="from downloads d join downloads_url_chains u on u.id=d.id where u.url='file:///etc/hosts' and d.id>$HIST_MAX0"
+    TOTAL="$(hist_query "select count(*) $Q" | tr -d ' ')"; GOOD="$(hist_query "select count(*) $Q and d.state=2 and d.interrupt_reason=40" | tr -d ' ')"
+    if [ "${TOTAL:-0}" -gt 0 ] 2>/dev/null && [ "$TOTAL" = "$GOOD" ]; then
+      echo "PROBE $CHECK info assert history-rows-cancelled-by-cancel-true PASS: $TOTAL new History row(s) for the rejected URL, all state 2 reason 40 (USER_CANCELED)"
+    else
+      FAILED=1; echo "PROBE $CHECK fail history-rows-cancelled-by-cancel-true: new History rows for the rejected URL: $TOTAL, cancelled with reason 40: $GOOD (want all)"
+    fi
+  fi
+  # An exit code other than 0 (pass) or 1 (a failed check) is the engine or the OS ending the process: show how it ended.
+  if [ "$RC" != 0 ] && [ "$RC" != 1 ] && [ "$WATCHDOG" = 0 ]; then
+    # Exit code 2 is content::RESULT_CODE_HUNG: chrome/browser/shutdown_watchdog_mac.cc _exit()s with it when engine shutdown takes over 10 s
+    # (it logs "Teardown watchdog expired"). Seen only under heavy machine load; it is a real failure, shutdown was too slow.
+    if grep -q "Teardown watchdog expired" "$HOME/Library/Application Support/Noche Probe/probe.log" 2>/dev/null; then
+      echo "PROBE $CHECK fail engine shutdown watchdog fired (exit code $RC = RESULT_CODE_HUNG, shutdown took over 10 s)"
+    fi
+    echo "PROBE $CHECK info unexpected exit code $RC (1-minute load $(uptime | sed 's/.*load averages*: *//' | awk '{print $1}')); probe.log tail: $(tail -n 6 "$HOME/Library/Application Support/Noche Probe/probe.log" | cut -c1-200 | tr '\n' '|')"
+  fi
+  # Independent witness between launches: what the History database holds for the downloads. The app is gone, so copy the database
+  # together with its journal/WAL files into a temp dir (a copy of History alone misses rows that only exist in the journal) and
+  # print the files that were copied, so a stale snapshot would be visible.
+  if [[ "$CHECK" =~ ^download-.*-[12]$ ]] && command -v sqlite3 >/dev/null; then
+    HD="$HOME/Library/Application Support/Noche Probe/Default"
+    HC="$(mktemp -d)"
+    for F in History History-journal History-wal History-shm; do [ -f "$HD/$F" ] && cp "$HD/$F" "$HC/$F"; done
+    echo "PROBE $CHECK info History files copied: $(cd "$HC" && ls -l | awk 'NR>1 {print $9 ":" $5}' | tr '\n' ' ')"
+    echo "PROBE $CHECK info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): $(sqlite3 -separator '|' "$HC/History" 'select id,state,interrupt_reason,received_bytes,etag from downloads order by id desc limit 3' 2>&1 | tr '\n' ' ')"
+    rm -rf "$HC"
+    # download-restart-crash-1: History has NO row for the killed download even with its WAL copied (measured 2026-10-25: the row for id N
+    # first appeared in History when launch 2 handled the restored item). In-progress downloads are persisted in the in-progress download DB
+    # (leveldb under shared_proto_db) until a History row is written, so only launch 2 can show what crash recovery restored.
   fi
   echo "PROBE $CHECK info frontmost samples=$SAMPLES probe-frontmost=$FRONT unknown=$UNKNOWN"
   [ "$FRONT" = 0 ] || { FAILED=1; echo "PROBE $CHECK fail probe-was-frontmost in $FRONT of $SAMPLES samples"; }
