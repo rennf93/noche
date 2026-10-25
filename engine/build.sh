@@ -4,6 +4,10 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="${NOCHE_ENGINE_ROOT:-/Volumes/K3Trunk/noche-engine}"
 MIN_FREE_GB="${NOCHE_ENGINE_MIN_FREE_GB:-40}"
+case "${NOCHE_ENGINE_JOBS:-}" in
+  ''|[1-9]|[1-9][0-9]) ;;
+  *) echo "NOCHE_ENGINE_JOBS must be a whole number from 1 to 99" >&2; exit 2 ;;
+esac
 
 BRANCH="8078"
 # NOCHE_ENGINE_CEF_PIN, NOCHE_ENGINE_CEF_DIR, NOCHE_ENGINE_PATCH_DIR and NOCHE_ENGINE_ALLOW_INTERNAL are test-only.
@@ -134,7 +138,8 @@ case "$STEP" in
     cd "$CEF"
     GN_DEFINES="$GN_DEFINES_VALUE" GN_OUT_CONFIGS="$OUT_CONFIG" caffeinate -is python3 tools/gclient_hook.py
     cd "$SRC"
-    caffeinate -is autoninja -C "out/$OUT_CONFIG" cefclient
+    # NOCHE_ENGINE_JOBS caps the parallel compile jobs (siso -local_jobs) so the Mac stays usable during a build.
+    caffeinate -is autoninja ${NOCHE_ENGINE_JOBS:+-j "$NOCHE_ENGINE_JOBS"} -C "out/$OUT_CONFIG" cefclient
     ;;
   distrib)
     # make_distrib.py takes the framework from the cefclient app in out/Release_GN_arm64.
