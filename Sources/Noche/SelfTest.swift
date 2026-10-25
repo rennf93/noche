@@ -151,6 +151,7 @@ final class SelfTest {
             case "window-close-cancel": await windowCloseCancel()
             case "tab-chords": await tabChords()
             case "move-tab-relaunch": await moveTabRelaunch()
+            case "history-record": await historyRecord()
             default: finish(false, "unknown check")
             }
         }

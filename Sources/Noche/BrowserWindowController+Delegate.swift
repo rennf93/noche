@@ -69,6 +69,8 @@ extension BrowserWindowController {
         }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
+        typedLoads.remove(tab.identifier)
+        recordedTitle[tab.identifier] = nil
         failed[tab.identifier] = nil
         closing[tab.identifier] = nil
         if intendedActive === tab { intendedActive = nil }
@@ -96,17 +98,20 @@ extension BrowserWindowController {
         // The next committed navigation of the tab, whatever caused it, ends the failed display.
         if let f = failed[tab.identifier], tab.url != f.shown, tab.url != f.url { failed[tab.identifier] = nil }
         if let id = ids[tab.identifier] { list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading) }
+        recordTitle(tab)
         refresh()
         changed()
         app.tabUpdated(tab)
     }
 
     func window(_ window: NCWindow, tab: NCTab, didFinishLoadWithStatus status: Int) {
+        recordVisit(tab, status: status)
         app.tabLoaded(tab, status: status)
     }
 
     func window(_ window: NCWindow, tab: NCTab, didFailLoadWithCode code: Int, url: String) {
         guard code != -3 else { return }  // ERR_ABORTED: a navigation replaced by another, not a failure
+        typedLoads.remove(tab.identifier)
         failed[tab.identifier] = (url, tab.url)
         if let id = ids[tab.identifier] { list.update(id, url: url, title: tab.title, isLoading: false) }
         refresh()

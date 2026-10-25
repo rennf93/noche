@@ -23,6 +23,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     /// close is confirmed (didClose), never before.
     var closeNext: [Int: NCTab] = [:]
     static let closeStale: TimeInterval = 10
+    /// Tabs (engine ids) whose next load came from the address entry: that visit is a typed one. Cleared when the load ends or fails.
+    var typedLoads = Set<Int>()
+    var recordedTitle: [Int: String] = [:]
 
     let backdrop = BackdropView(frame: .zero)
     let overlay = ChromeOverlayView(frame: .zero)
@@ -304,6 +307,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
             let text = toolbar.address.stringValue
             if let url = AddressInput.resolve(text, searchTemplate: app.searchTemplate), let tab = activeTab {
                 failed[tab.identifier] = nil
+                typedLoads.insert(tab.identifier)
                 tab.loadURL(url.absoluteString)
             }
             endEditing()
