@@ -1,0 +1,32 @@
+<!doctype html><title>profile-storage</title><p>profile storage fixture
+<script>
+// set() writes localStorage, IndexedDB, a service worker and a Cache Storage entry; get() reports what this profile holds.
+window.noche = {
+  async get() {
+    return JSON.stringify({
+      ls: localStorage.getItem('nocheKey'),
+      idb: (await indexedDB.databases()).map((d) => d.name),
+      sw: (await navigator.serviceWorker.getRegistrations()).length,
+      caches: await caches.keys(),
+    });
+  },
+  async set() {
+    localStorage.setItem('nocheKey', 'fromA');
+    await new Promise((res, rej) => {
+      const r = indexedDB.open('nocheDb', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('s');
+      r.onerror = () => rej(r.error);
+      r.onsuccess = () => {
+        const t = r.result.transaction('s', 'readwrite');
+        t.objectStore('s').put('fromA', 'k');
+        t.oncomplete = () => { r.result.close(); res(); };
+        t.onerror = () => rej(t.error);
+      };
+    });
+    await navigator.serviceWorker.register('/profile-sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+    await (await caches.open('nocheCache')).put('/x', new Response('fromA'));
+    return this.get();
+  },
+};
+</script>

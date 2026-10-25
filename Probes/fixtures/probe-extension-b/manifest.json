@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Noche second probe extension",
+  "version": "1.0",
+  "permissions": ["tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_title": "Noche second probe action" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start" }
+  ]
+}

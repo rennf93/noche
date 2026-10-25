@@ -1,0 +1,12 @@
+<!doctype html><title>discard ticks</title><p>discard ticks
+<script>
+// P3 recorder: a 100 ms setInterval counting ticks, visibility and lifecycle events with performance.now() stamps.
+window.__d = { ticks: 0, t0: performance.now(), tickAt: [], ev: [] };
+setInterval(() => { window.__d.ticks++; window.__d.tickAt.push(Math.round(performance.now())); if (window.__d.tickAt.length > 2000) window.__d.tickAt.shift(); }, 100);
+const mark = (n) => window.__d.ev.push([n, Math.round(performance.now()), document.visibilityState]);
+document.addEventListener('visibilitychange', () => mark('visibilitychange'));
+document.addEventListener('freeze', () => mark('freeze'));
+document.addEventListener('resume', () => mark('resume'));
+window.addEventListener('pagehide', () => mark('pagehide'));
+mark('load');
+</script>

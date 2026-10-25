@@ -1,0 +1,255 @@
+# Surfaces probe, final scripted pass (branch m1-4-surfaces-probe), raw PROBE lines. Skipped on purpose: R3, R4 (TCC), R5, R8, R9, R10, R11.
+# lock and load state before the pass: 2026-10-24 15:57:51; uptime: up 1 day, 46 mins, 1 user, load averages: 8.26 7.75 9.29; screen lock key: none (CGSSessionScreenIsLocked absent, screen unlocked); frontmost app at start: ASN:0x0-0x10010:
+PROBE cmd-enabled info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info CanExecuteChromeCommand on active tab 1 (fresh load, no history): IDC_NEW_TAB(34014)=1 IDC_CLOSE_TAB(34015)=1 IDC_RELOAD(33002)=1 IDC_RELOAD_BYPASSING_CACHE(33007)=1 IDC_BACK(33000)=0 IDC_FORWARD(33001)=0 IDC_FIND(37000)=1 IDC_FIND_NEXT(37001)=1 IDC_FIND_PREVIOUS(37002)=1 IDC_PRINT(35003)=1 IDC_ZOOM_PLUS(38001)=1 IDC_ZOOM_MINUS(38003)=1 IDC_ZOOM_NORMAL(38002)=0 IDC_SHOW_HISTORY(40010)=1 IDC_SHOW_DOWNLOADS(40012)=1 IDC_BOOKMARK_THIS_TAB(35000)=0 IDC_SHOW_BOOKMARK_MANAGER(40011)=1 IDC_DEV_TOOLS(40004)=1 IDC_DEV_TOOLS_CONSOLE(40005)=1 IDC_DEV_TOOLS_INSPECT(40023)=1 IDC_DEV_TOOLS_TOGGLE(40237)=1 IDC_DEV_TOOLS_DEVICES(40007)=1 IDC_VIEW_SOURCE(35002)=1 IDC_SAVE_PAGE(35004)=1 IDC_FULLSCREEN(34030)=1 IDC_FOCUS_LOCATION(39001)=0
+PROBE cmd-enabled info CanExecuteChromeCommand on active tab 1 (after a second navigation (Back possible)): IDC_NEW_TAB(34014)=1 IDC_CLOSE_TAB(34015)=1 IDC_RELOAD(33002)=1 IDC_RELOAD_BYPASSING_CACHE(33007)=1 IDC_BACK(33000)=1 IDC_FORWARD(33001)=0 IDC_FIND(37000)=1 IDC_FIND_NEXT(37001)=1 IDC_FIND_PREVIOUS(37002)=1 IDC_PRINT(35003)=1 IDC_ZOOM_PLUS(38001)=1 IDC_ZOOM_MINUS(38003)=1 IDC_ZOOM_NORMAL(38002)=0 IDC_SHOW_HISTORY(40010)=1 IDC_SHOW_DOWNLOADS(40012)=1 IDC_BOOKMARK_THIS_TAB(35000)=0 IDC_SHOW_BOOKMARK_MANAGER(40011)=1 IDC_DEV_TOOLS(40004)=1 IDC_DEV_TOOLS_CONSOLE(40005)=1 IDC_DEV_TOOLS_INSPECT(40023)=1 IDC_DEV_TOOLS_TOGGLE(40237)=1 IDC_DEV_TOOLS_DEVICES(40007)=1 IDC_VIEW_SOURCE(35002)=1 IDC_SAVE_PAGE(35004)=1 IDC_FULLSCREEN(34030)=1 IDC_FOCUS_LOCATION(39001)=0
+PROBE cmd-enabled info CanExecuteChromeCommand on active tab 1 (after going back (Forward possible)): IDC_NEW_TAB(34014)=1 IDC_CLOSE_TAB(34015)=1 IDC_RELOAD(33002)=1 IDC_RELOAD_BYPASSING_CACHE(33007)=1 IDC_BACK(33000)=0 IDC_FORWARD(33001)=1 IDC_FIND(37000)=1 IDC_FIND_NEXT(37001)=1 IDC_FIND_PREVIOUS(37002)=1 IDC_PRINT(35003)=1 IDC_ZOOM_PLUS(38001)=1 IDC_ZOOM_MINUS(38003)=1 IDC_ZOOM_NORMAL(38002)=0 IDC_SHOW_HISTORY(40010)=1 IDC_SHOW_DOWNLOADS(40012)=1 IDC_BOOKMARK_THIS_TAB(35000)=0 IDC_SHOW_BOOKMARK_MANAGER(40011)=1 IDC_DEV_TOOLS(40004)=1 IDC_DEV_TOOLS_CONSOLE(40005)=1 IDC_DEV_TOOLS_INSPECT(40023)=1 IDC_DEV_TOOLS_TOGGLE(40237)=1 IDC_DEV_TOOLS_DEVICES(40007)=1 IDC_VIEW_SOURCE(35002)=1 IDC_SAVE_PAGE(35004)=1 IDC_FULLSCREEN(34030)=1 IDC_FOCUS_LOCATION(39001)=0
+PROBE cmd-enabled info exec IDC_SHOW_HISTORY id=40010 before: tabs=1 windows=1 active=1 urls: 1=http://127.0.0.1:58447/
+PROBE cmd-enabled info guard makeKeyAndOrderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info exec IDC_SHOW_HISTORY after 3s: tabs=2 windows=1 (before 1) active=2 urls: 1=http://127.0.0.1:58447/ 2=chrome://history/
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=CefNSWindow frame={{240, 620}, {1000, 700}} alpha=0.00 visible=1 key=0 main=0 level=0 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after counts nswindows=3 cgwindows=1 alphaGuardCalls=9 activateBlocked=1 appActive=0
+PROBE cmd-enabled info exec IDC_SHOW_DOWNLOADS id=40012 before: tabs=1 windows=1 active=1 urls: 1=http://127.0.0.1:58447/
+PROBE cmd-enabled info guard makeKeyAndOrderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info exec IDC_SHOW_DOWNLOADS after 3s: tabs=2 windows=1 (before 1) active=3 urls: 1=http://127.0.0.1:58447/ 3=chrome://downloads/
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=CefNSWindow frame={{240, 620}, {1000, 700}} alpha=0.00 visible=1 key=0 main=0 level=0 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after counts nswindows=3 cgwindows=1 alphaGuardCalls=11 activateBlocked=2 appActive=0
+PROBE cmd-enabled info exec IDC_SHOW_BOOKMARK_MANAGER id=40011 before: tabs=1 windows=1 active=1 urls: 1=http://127.0.0.1:58447/
+PROBE cmd-enabled info guard makeKeyAndOrderFront: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info exec IDC_SHOW_BOOKMARK_MANAGER after 3s: tabs=2 windows=1 (before 1) active=4 urls: 1=http://127.0.0.1:58447/ 4=chrome://bookmarks/
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=CefNSWindow frame={{240, 620}, {1000, 700}} alpha=0.00 visible=1 key=0 main=0 level=0 parent=0 new=0
+PROBE cmd-enabled info exec-after window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE cmd-enabled info exec-after counts nswindows=3 cgwindows=1 alphaGuardCalls=13 activateBlocked=3 appActive=0
+PROBE cmd-enabled info alpha-guard hooked calls=13
+PROBE cmd-enabled info activate calls blocked=3
+PROBE cmd-enabled pass CanExecuteChromeCommand printed for 3 states; 3 unintercepted commands executed (3 s apart), facts above
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE cmd-enabled info frontmost samples=59 probe-frontmost=0 unknown=0
+PROBE cmd-enabled info crash reports: none new
+PROBE bubbles info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info baseline window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info baseline window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info baseline window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info baseline counts nswindows=3 cgwindows=1 alphaGuardCalls=5 activateBlocked=0 appActive=0
+PROBE bubbles info zoom now: 0.000000
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info after-SetZoomLevel window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info after-SetZoomLevel window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info after-SetZoomLevel window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info after-SetZoomLevel counts nswindows=3 cgwindows=1 alphaGuardCalls=7 activateBlocked=0 appActive=0
+PROBE bubbles info zoom after SetZoomLevel(1.0): 1.000000
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info after-IDC_ZOOM_PLUS window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info after-IDC_ZOOM_PLUS window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info after-IDC_ZOOM_PLUS window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info after-IDC_ZOOM_PLUS counts nswindows=3 cgwindows=1 alphaGuardCalls=9 activateBlocked=0 appActive=0
+PROBE bubbles info zoom after IDC_ZOOM_PLUS: 1.223901
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=1.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info phase 1 (no permission handler) page runPerm: started, active tab=2 (want 2)
+PROBE bubbles info phase1-after-permission-request window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase1-after-permission-request window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info phase1-after-permission-request window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase1-after-permission-request window class=NativeWidgetMacNSWindow frame={{160, 1054}, {320, 266}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=1
+PROBE bubbles info phase1-after-permission-request counts nswindows=4 cgwindows=2 alphaGuardCalls=11 activateBlocked=0 appActive=0
+PROBE bubbles info phase 1 page __perm after 4s: {} (empty means prompts still pending)
+PROBE bubbles info phase 1 handler calls seen: 0 (want 0, no handler installed)
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info phase2-baseline window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase2-baseline window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info phase2-baseline window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase2-baseline counts nswindows=3 cgwindows=1 alphaGuardCalls=13 activateBlocked=0 appActive=0
+PROBE bubbles info OnShowPermissionPrompt id=1 origin=http://localhost:58447/ mask=0x100 (geolocation=0x100 notifications=0x8000)
+PROBE bubbles info phase 2 (deny handler) page runPerm: started
+PROBE bubbles info OnDismissPermissionPrompt id=1 result=1
+PROBE bubbles info OnShowPermissionPrompt id=2 origin=http://localhost:58447/ mask=0x8000 (geolocation=0x100 notifications=0x8000)
+PROBE bubbles info OnDismissPermissionPrompt id=2 result=1
+PROBE bubbles info phase2-after-permission-request window class=NSStatusBarWindow frame={{1710, 1410}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase2-after-permission-request window class=CefNSWindow frame={{120, 620}, {1000, 700}} alpha=0.00 visible=0 key=0 main=0 level=0 parent=0 new=0
+PROBE bubbles info phase2-after-permission-request window class=NSStatusBarWindow frame={{-1440, 2035}, {38, 30}} alpha=0.00 visible=1 key=0 main=0 level=25 parent=0 new=0
+PROBE bubbles info phase2-after-permission-request counts nswindows=3 cgwindows=1 alphaGuardCalls=13 activateBlocked=0 appActive=0
+PROBE bubbles info phase 2 page __perm after 4s: {"geo":"err1","notif":"denied"} (geo err1 = PERMISSION_DENIED, notif denied)
+PROBE bubbles info phase 2 handler prompts=2 union mask=0x8100 expected geolocation|notifications=0x8100
+PROBE bubbles info alpha-guard hooked calls=13
+PROBE bubbles info activate calls blocked=0
+PROBE bubbles pass zoom bubbles and permission bubbles recorded (no handler, then deny handler)
+PROBE bubbles info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE bubbles info frontmost samples=28 probe-frontmost=0 unknown=0
+PROBE bubbles info crash reports: none new
+PROBE download-tab-close info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info OnDownloadUpdated id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=209715200 path= t=6.8s (events so far 1)
+PROBE download-tab-close info OnBeforeDownload id=5 browser=1 name=big.bin url=http://127.0.0.1:58446/big.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin
+PROBE download-tab-close info download started in tab 2: id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=1048576 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=7.2s
+PROBE download-tab-close info positive control, tab still open: dir bytes 1245184 -> 6488064 over 2.5 s (growing=1); files big.bin:6488064; events=8 last: id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=2 recv=6094848 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=9.8s
+PROBE download-tab-close info chrome://downloads before close: Download History Search download history Clear all Today big.bin big.bin Canceled From http://127.0.0.1:58447 Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from his
+PROBE download-tab-close info tab 2 closed (still listed=0); OnDownloadUpdated events during the 3 s after close: 6; last: id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=5 recv=12189696 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=12.8s
+PROBE download-tab-close info chrome://downloads 3 s after close: Download History Search download history Clear all Today big.bin big.bin Canceled From http://127.0.0.1:58447 Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from his
+PROBE download-tab-close info after close, no Pause: dir bytes 0 -> 0 (download continues: 0); files (empty)
+PROBE download-tab-close info after Pause() through the saved callback: dir bytes 0 -> 0 over 3 s (stopped=1); events=14 last: id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=5 recv=12189696 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=12.8s
+PROBE download-tab-close info after Resume() through the saved callback: dir bytes 0 -> 0 over 4 s (growing=0); events=14 last: id=5 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=5 recv=12189696 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=12.8s files (empty)
+PROBE download-tab-close info chrome://downloads at the end: Download History Search download history Clear all Today big.bin big.bin Canceled From http://127.0.0.1:58447 Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from his
+PROBE download-tab-close info alpha-guard hooked calls=5
+PROBE download-tab-close info activate calls blocked=0
+PROBE download-tab-close pass tab-close download facts recorded; download cancelled for cleanup
+PROBE download-tab-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info frontmost samples=58 probe-frontmost=0 unknown=0
+PROBE download-tab-close info crash reports: none new
+PROBE download-restart-1 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info OnDownloadUpdated id=6 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=209715200 path= t=6.6s (events so far 1)
+PROBE download-restart-1 info OnBeforeDownload id=6 browser=1 name=big.bin url=http://127.0.0.1:58446/big.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin
+PROBE download-restart-1 info OnDownloadUpdated id=6 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=21102592 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=17.2s (events so far 23)
+PROBE download-restart-1 info pausing at pct=10 recv=21102592
+PROBE download-restart-1 info OnDownloadUpdated id=6 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=21102592 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=17.2s (events so far 24)
+PROBE download-restart-1 info before quit: id=6 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=21102592 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin t=17.2s files: big.bin:21102592
+PROBE download-restart-1 info alpha-guard hooked calls=5
+PROBE download-restart-1 info activate calls blocked=0
+PROBE download-restart-1 pass launch 1: paused download state saved (id=6 recv=21102592 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin), quitting with it paused
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info frontmost samples=38 probe-frontmost=0 unknown=0
+PROBE download-restart-1 info crash reports: none new
+PROBE download-restart-2 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info launch 1 state: id=6 recv=21102592 total=209715200 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.XiP7V9tIVk/big.bin; files now: (empty)
+PROBE download-restart-2 info OnDownloadUpdated events received before this check started: 0 (hasBrowser=0 means item without a CEF browser)
+PROBE download-restart-2 info chrome://downloads text after launch (what the download manager holds): Download History Search download history Clear all Today big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Delete from history Delete from history Retry Scan for malware Cancel Open anyway Discard Review big.bin big.bin Canceled Scanning for malware… Show in Finder Dele
+PROBE download-restart-2 info OnDownloadUpdated events so far: 0; callbacks held: 0
+PROBE download-restart-2 info downloads page Resume click (Retry is not clicked: it starts a new download): clicked 0
+PROBE download-restart-2 info after Resume attempts: dir bytes 0 -> 0 (grew=0); files: (empty); events now 0
+PROBE download-restart-2 info cleanup: cancel clicked 0
+PROBE download-restart-2 info alpha-guard hooked calls=5
+PROBE download-restart-2 info activate calls blocked=0
+PROBE download-restart-2 pass launch 2: replay facts recorded, download cancelled for cleanup
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info frontmost samples=29 probe-frontmost=0 unknown=0
+PROBE download-restart-2 info crash reports: none new
+PROBE ctx-ext-items info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info right click sent (attempt 1)
+PROBE ctx-ext-items info RunContextMenu browser=2 pageUrl=http://127.0.0.1:58447/?ctxtab x=120 y=120 typeFlags=0x3
+PROBE ctx-ext-items info model count=14
+PROBE ctx-ext-items info menu item depth=0 idx=0 id=33000 type=1 label="&Back" enabled=0 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=1 id=33001 type=1 label="&Forward" enabled=0 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=2 id=33002 type=1 label="&Reload" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=3 id=-1 type=4 label="" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=4 id=35004 type=1 label="Save &As…" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=5 id=35003 type=1 label="&Print…" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=6 id=-1 type=4 label="" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=7 id=35011 type=1 label="&Cast…" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=8 id=51034 type=1 label="Create QR Code for this Page" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=9 id=-1 type=4 label="" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=10 id=49000 type=1 label="Noche probe item" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=11 id=-1 type=4 label="" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=12 id=35002 type=1 label="&View Page Source" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info menu item depth=0 idx=13 id=50162 type=1 label="I&nspect" enabled=1 visible=1 checked=0
+PROBE ctx-ext-items info Continue(49000, EVENTFLAG_NONE) for the extension item "Noche probe item"
+PROBE ctx-ext-items info service worker view: {"clicks":[{"pageUrl":"http:\/\/127.0.0.1:58447\/?ctxtab","tabId":357994797,"tabUrl":"http:\/\/127.0.0.1:58447\/?ctxtab","menuItemId":"noche-probe"}],"tabs":[{"id":357994790,"url":"http:\/\/127.0.0.1:58447\/","active":false},{"id":357994797,"url":"http:\/\/127.0.0.1:58447\/?ctxtab","active":true}]}
+PROBE ctx-ext-items info onClicked id=noche-probe tabId=357994797 matches the tab that was right clicked (url has ?ctxtab, CEF browser id 2): 1
+PROBE ctx-ext-items info alpha-guard hooked calls=5
+PROBE ctx-ext-items info activate calls blocked=0
+PROBE ctx-ext-items pass context menu model dumped; extension item id=49000; onClicked seen=1 right tab=1
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE ctx-ext-items info frontmost samples=20 probe-frontmost=0 unknown=0
+PROBE ctx-ext-items info crash reports: none new
+PROBE zoom-scope info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info zoom initial: tab1(127.0.0.1)=0.000 tab2(127.0.0.1)=0.000 tab3(localhost)=0.000
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info zoom after tab A SetZoomLevel(1.0): tab1(127.0.0.1)=1.000 tab2(127.0.0.1)=1.000 tab3(localhost)=0.000
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info zoom after tab A IDC_ZOOM_PLUS: tab1(127.0.0.1)=1.224 tab2(127.0.0.1)=1.224 tab3(localhost)=0.000
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info zoom after tab B IDC_ZOOM_PLUS: tab1(127.0.0.1)=2.224 tab2(127.0.0.1)=2.224 tab3(localhost)=0.000
+PROBE zoom-scope info zoom new tab D opened on the same host afterwards: tab1(127.0.0.1)=2.224 tab2(127.0.0.1)=2.224 tab3(localhost)=0.000 tab4(127.0.0.1)=2.224
+PROBE zoom-scope info zoom reset via tab A SetZoomLevel(0): tab1(127.0.0.1)=0.000 tab2(127.0.0.1)=0.000 tab3(localhost)=0.000 tab4(127.0.0.1)=0.000
+PROBE zoom-scope info alpha-guard hooked calls=11
+PROBE zoom-scope info activate calls blocked=0
+PROBE zoom-scope pass zoom scope facts recorded
+PROBE zoom-scope info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE zoom-scope info frontmost samples=13 probe-frontmost=0 unknown=0
+PROBE zoom-scope info crash reports: none new
+PROBE chrome-pages info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info AddTab chrome://history -> tab id 2
+PROBE chrome-pages info AddTab chrome://downloads -> tab id 3
+PROBE chrome-pages info AddTab chrome://bookmarks -> tab id 4
+PROBE chrome-pages info chrome://history: tab 2 loadEndStatus=200 mainFrameUrl=chrome://history/
+PROBE chrome-pages info chrome://history: Runtime.evaluate -> {"url":"chrome://history/","title":"History","innerText":0,"deepText":1467,"sample":"History Search history Open Delete Chromium history Tabs from other devices Delete browsing data Your Google Account may"}
+PROBE chrome-pages info chrome://downloads: tab 3 loadEndStatus=200 mainFrameUrl=chrome://downloads/
+PROBE chrome-pages info chrome://downloads: Runtime.evaluate -> {"url":"chrome://downloads/","title":"Download History","innerText":0,"deepText":1046,"sample":"Download History Search download history Clear all Today big.bin big.bin Canceled Scanning for malware… Show in Finder D"}
+PROBE chrome-pages info chrome://bookmarks: tab 4 loadEndStatus=200 mainFrameUrl=chrome://bookmarks/
+PROBE chrome-pages info chrome://bookmarks: Runtime.evaluate -> {"url":"chrome://bookmarks/","title":"Bookmarks","innerText":0,"deepText":193,"sample":"Bookmarks Search bookmarks 0 selected Delete Bookmarks Bar Other Bookmarks To bookmark pages, click the star in the addr"}
+PROBE chrome-pages info alpha-guard hooked calls=5
+PROBE chrome-pages info activate calls blocked=0
+PROBE chrome-pages pass 3 chrome:// pages opened as tabs, facts above
+PROBE chrome-pages info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE chrome-pages info frontmost samples=9 probe-frontmost=0 unknown=0
+PROBE chrome-pages info crash reports: none new
+# probe-engine.sh exit code not captured (PIPESTATUS was empty); the pass has no fail line and no leftover-helpers line, every check printed pass
+# after: uptime: up 1 day, 49 mins, 1 user, load averages: 6.19 7.98 9.20

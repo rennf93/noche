@@ -1,0 +1,9 @@
+<!doctype html><title>perm</title><p>perm page
+<script>
+window.__perm = {};
+window.runPerm = () => {
+  navigator.geolocation.getCurrentPosition(() => { __perm.geo = 'granted'; }, (e) => { __perm.geo = 'err' + e.code; });
+  Notification.requestPermission().then((r) => { __perm.notif = r; });
+  return 'started';
+};
+</script>
