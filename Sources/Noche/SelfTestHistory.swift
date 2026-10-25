@@ -29,7 +29,7 @@ extension SelfTest {
         guard others.isEmpty else { return finish(false, "non-http loads were stored: \(others.map(\.url))") }
         // A typed load through the address entry counts as typed; a link load does not.
         let before = loads
-        guard submitAddress("\(host)/b.html") else { return finish(false, "the address entry did not take the text") }
+        guard await submitAddress("\(host)/b.html") else { return finish(false, "the address entry did not take the text") }
         guard await until(15, { loads > before && page(store, host: host, path: "/b.html")?.title == "B Page" }), let b = page(store, host: host, path: "/b.html") else {
             return finish(false, "typed b.html is not a page row with its title: \((try? store.pageCandidates(prefix: host)) ?? [])")
         }

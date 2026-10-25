@@ -45,6 +45,8 @@ extension BrowserWindowController {
         }
         refresh()
         changed()
+        // The window's own first tab is never announced as an activation.
+        if active, list.items.count == 1 { syncNewTab(activated: true) }
         app.tabAdded(tab)
     }
 
@@ -57,6 +59,7 @@ extension BrowserWindowController {
         if intendedActive === tab { intendedActive = nil }
         refresh()
         changed()
+        syncNewTab(activated: true)
         app.tabActivated(tab)
     }
 
@@ -101,6 +104,7 @@ extension BrowserWindowController {
         recordTitle(tab)
         refresh()
         changed()
+        syncNewTab(activated: false)
         app.tabUpdated(tab)
     }
 
@@ -155,6 +159,7 @@ extension BrowserWindowController {
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()
+        commandBar.teardown()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         app.controllerClosed(self)

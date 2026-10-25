@@ -5,7 +5,7 @@ import NocheStore
 
 /// One window: the engine window, its tab list, and the AppKit chrome around the page.
 @MainActor
-final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDelegate {
+final class BrowserWindowController: NSObject, NCWindowDelegate {
     unowned let app: AppDelegate
     var window: NCWindow!
     var list = TabList()
@@ -33,6 +33,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
     let sidebar = SidebarView(frame: .zero)
     let toolbar = ToolbarView(frame: .zero)
     var installed = false
+    lazy var commandBar = CommandBarController(owner: self)
+    var newTabShown = false
+    var newTabTabID: TabID?
+    var reportedActive: TabID?   // the tab the bridge last announced as active (or the window's first)
+    var newTabPage: NewTabPageView?
     var focusWhenInstalled = false     // Open Command Bar came before the chrome existed (a window opened for it)
     var sidebarHidden = false
     /// Restoring: the saved tabs are still being added to the engine, so a snapshot now would be partial (and would tombstone tabs).
@@ -162,7 +167,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toolbar.back.onClick = { [weak self] in self?.goBack() }
         toolbar.forward.onClick = { [weak self] in self?.goForward() }
         toolbar.reload.onClick = { [weak self] in self?.reload() }
-        toolbar.address.delegate = self
+        toolbar.address.onClick = { [weak self] in self?.focusAddress() }
         applyLayout()
         refresh()
         if focusWhenInstalled { focusWhenInstalled = false; focusAddress() }
@@ -178,6 +183,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         toolbar.frame = layout.toolbar
         sidebar.frame = layout.sidebar
         window.webInsets = layout.webInsets
+        updateNewTabFrame()
+        commandBar.relayout()
 #if NOCHE_TESTHOOKS
         cardLog.append((ProcessInfo.processInfo.systemUptime, cardX))
 #endif
@@ -192,9 +199,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         let tab = activeTab
         toolbar.back.isEnabled = tab?.canGoBack ?? false
         toolbar.forward.isEnabled = tab?.canGoForward ?? false
-        if toolbar.address.currentEditor() == nil {
-            toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : AddressInput.displayHost(shownURL($0)) } ?? ""
-        }
+        toolbar.address.stringValue = tab.map { shownURL($0) == "about:blank" ? "" : AddressInput.displayHost(shownURL($0)) } ?? ""
+        toolbar.address.isHidden = commandBar.isOpen && commandBar.placement == .overlay
     }
 
     // MARK: sidebar motion (live-ui.md section 8)
@@ -257,12 +263,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         window.close()
     }
 
+    /// Cmd+L, File > Open Command Bar, the engine's focus-location command and a click on the toolbar's address area.
     func focusAddress() {
         note("focusAddress")
-        guard installed, let ns = nsWindow else { focusWhenInstalled = true; return }
-        toolbar.address.stringValue = activeTab.map { shownURL($0) == "about:blank" ? "" : shownURL($0) } ?? ""
-        ns.makeFirstResponder(toolbar.address)
-        toolbar.address.currentEditor()?.selectAll(nil)
+        guard installed else { focusWhenInstalled = true; return }
+        commandBar.openFromShortcut()
     }
 
     /// Our own navigation actions end the "failed load" display: the error page's load end says nothing about the next page.
@@ -298,35 +303,6 @@ final class BrowserWindowController: NSObject, NCWindowDelegate, NSTextFieldDele
         guard i < list.items.count, let tab = tabs[list.items[i].engineID], !isClosing(tab) else { return }
         if tab === activeTab { closeActiveTab() } else { closing[tab.identifier] = ProcessInfo.processInfo.systemUptime; tab.close() }
     }
-
-    // MARK: address field
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        switch selector {
-        case #selector(NSResponder.insertNewline(_:)):
-            let text = toolbar.address.stringValue
-            if let url = AddressInput.resolve(text, searchTemplate: app.searchTemplate), let tab = activeTab {
-                failed[tab.identifier] = nil
-                typedLoads.insert(tab.identifier)
-                tab.loadURL(url.absoluteString)
-            }
-            endEditing()
-            return true
-        case #selector(NSResponder.cancelOperation(_:)):
-            endEditing()
-            return true
-        default:
-            return false
-        }
-    }
-
-    func endEditing() {
-        guard let ns = nsWindow else { return }
-        ns.makeFirstResponder(ns.contentView)
-        refresh()
-    }
-
-    func controlTextDidEndEditing(_ obj: Notification) { refresh() }
 
     // MARK: test support
 

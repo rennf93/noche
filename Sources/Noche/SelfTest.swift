@@ -18,7 +18,7 @@ final class SelfTest {
     static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
 
     /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
-    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "crash-mid-write" || check == "corrupt-store" }
+    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" }
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -152,6 +152,17 @@ final class SelfTest {
             case "tab-chords": await tabChords()
             case "move-tab-relaunch": await moveTabRelaunch()
             case "history-record": await historyRecord()
+            case "cb-layout": await cbLayout()
+            case "cb-open": await cbOpen()
+            case "cb-motion": await cbMotion()
+            case "cb-go": await cbGo()
+            case "cb-escape": await cbEscape()
+            case "cb-arrows": await cbArrows()
+            case "cb-inline": await cbInline()
+            case "cb-switch-tab": await cbSwitchTab()
+            case "cb-outside": await cbOutside()
+            case "cb-nonet": await cbNonet()
+            case "cb-history": await cbHistory()
             default: finish(false, "unknown check")
             }
         }
@@ -195,12 +206,15 @@ final class SelfTest {
     }
 
 
+    /// Windows of this process that are real windows: macOS's own text-input window (TUINSWindow, 500x500, it appears whenever a text field
+    /// is being edited, as the command bar's is on every New Tab) is not one.
     func ownWindows() -> Int {
         let pid = ProcessInfo.processInfo.processIdentifier
+        let textInput = Set(NSApp.windows.filter { NSStringFromClass(type(of: $0)).hasPrefix("TUI") }.map { Int($0.windowNumber) })
         let all = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
         return all.filter { w in
             guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, let b = w[kCGWindowBounds as String] as? NSDictionary,
-                  let r = CGRect(dictionaryRepresentation: b) else { return false }
+                  let r = CGRect(dictionaryRepresentation: b), !textInput.contains((w[kCGWindowNumber as String] as? Int) ?? -1) else { return false }
             return r.width >= 400 && r.height >= 300
         }.count
     }
@@ -247,7 +261,4 @@ final class SelfTest {
     }
 }
 
-extension Array {
-    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
-}
 #endif

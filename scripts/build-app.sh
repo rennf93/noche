@@ -57,6 +57,9 @@ else
   $PB -c "Set :NocheDevBuild true" "$APP/Contents/Info.plist" 2>/dev/null \
     || $PB -c "Add :NocheDevBuild bool true" "$APP/Contents/Info.plist"
 fi
+# The built-in site list for command bar suggestions (hand-written, see Resources/App/Sites.json).
+mkdir -p "$APP/Contents/Resources"
+cp "$ROOT/Resources/App/Sites.json" "$APP/Contents/Resources/Sites.json"
 ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 # helper suffix : bundle id suffix

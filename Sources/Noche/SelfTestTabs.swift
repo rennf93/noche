@@ -34,11 +34,12 @@ extension SelfTest {
         let title = ctl.list.displayTitle(of: ctl.list.items[0].id)
         let address = ctl.toolbar.address.stringValue
         guard title == "localhost", address == "localhost" else { return finish(false, "link to a closed port: row title \(title) address \(address) (tab url \(tab.url))") }
-        // Cmd+L seeds the field with the URL the tab shows, the failed one.
+        // Cmd+L seeds the command bar with the URL the tab shows, the failed one (the trailing "/" is dropped).
         cmdL()
-        let seeded = ctl.toolbar.address.stringValue
-        if let ns = ctl.nsWindow { ns.makeFirstResponder(ns.contentView) }
-        guard seeded == "http://localhost:1/" else { return finish(false, "Cmd+L seeded \(seeded), want http://localhost:1/") }
+        _ = await until(5, { barEditor != nil })
+        let seeded = barText
+        closeBarNow()
+        guard seeded == "http://localhost:1" else { return finish(false, "Cmd+L seeded \(seeded), want http://localhost:1") }
         guard await until(10, { tab.canGoBack }) else { return finish(false, "Back is not available after the error") }
         shortcut("Go Back")
         // The next committed navigation, whatever caused it, ends the failed state.
@@ -151,18 +152,16 @@ extension SelfTest {
         guard await ready(), let ctl, let win, let tab = win.activeTab, let port = URL(string: url)?.port else { return }
         func load(_ text: String) async -> Bool {
             let before = loads
-            cmdL()
-            guard ctl.toolbar.address.currentEditor() != nil else { return false }
-            typeText(text)
-            if ctl.toolbar.address.stringValue != text { ctl.toolbar.address.currentEditor()?.insertText(text) }
-            pressReturn()
+            guard await openBar() else { return false }
+            barType(text)
+            press(.enter)
             return await until(15, { loads > before })
         }
-        cmdL()
-        let editor = ctl.toolbar.address.currentEditor()
-        guard let editor, editor.selectedRange.length == (ctl.toolbar.address.stringValue as NSString).length, ctl.toolbar.address.stringValue == url else {
-            return finish(false, "Cmd+L: editor \(editor != nil) selection \(editor?.selectedRange ?? NSRange()) text \(ctl.toolbar.address.stringValue)")
+        let shown = String(url.dropLast())  // the bar shows the URL without its trailing "/"
+        guard await openBar(), let editor = barEditor, editor.selectedRange.length == (shown as NSString).length, barText == shown else {
+            return finish(false, "Cmd+L: editor \(barEditor != nil) selection \(barEditor?.selectedRange ?? NSRange()) text \(barText) want \(shown)")
         }
+        closeBarNow()
         guard await load("127.0.0.1:\(port)/b.html") else { return finish(false, "typed host and path did not load") }
         guard await until(5, { ctl.list.displayTitle(of: ctl.list.items[0].id) == "B Page" && ctl.toolbar.address.stringValue == "127.0.0.1" }) else {
             return finish(false, "after load: title \(ctl.list.displayTitle(of: ctl.list.items[0].id)) address \(ctl.toolbar.address.stringValue)")
@@ -202,14 +201,11 @@ extension SelfTest {
                "target=_blank click: one new row at index \(selected.map(String.init) ?? "nil") (opener 0), active; rows=\(rowCount) engine tabs=\(win.tabs.count) windows=\(ownWindows()) \(violations)")
     }
 
-    /// Cmd+L, the text, Return: the way a person navigates. False when the address field did not take the text.
-    func submitAddress(_ text: String) -> Bool {
-        guard let ctl else { return false }
-        cmdL()
-        guard ctl.toolbar.address.currentEditor() != nil else { return false }
-        typeText(text)
-        if ctl.toolbar.address.stringValue != text { ctl.toolbar.address.currentEditor()?.insertText(text) }
-        pressReturn()
+    /// Cmd+L, the text, Return: the way a person navigates. False when the command bar did not take the text.
+    func submitAddress(_ text: String) async -> Bool {
+        guard await openBar() else { return false }
+        barType(text)
+        press(.enter)
         return true
     }
 
@@ -218,7 +214,7 @@ extension SelfTest {
         let good = tab.url
         let failures = loadFailures
         // localhost, not 127.0.0.1: the fixture is on 127.0.0.1, so a failing 127.0.0.1 could not tell old from new.
-        guard submitAddress("http://localhost:1/") else { return finish(false, "address field did not take the text") }
+        guard await submitAddress("http://localhost:1/") else { return finish(false, "command bar did not take the text") }
         guard await until(15, { loadFailures > failures }) else { return finish(false, "no load error for a closed port") }
         _ = await until(5, { ctl.list.displayTitle(of: ctl.list.items[0].id) == "localhost" && ctl.toolbar.address.stringValue == "localhost" })
         let title = ctl.list.displayTitle(of: ctl.list.items[0].id)
@@ -289,16 +285,16 @@ extension SelfTest {
         guard await until(10, { tab.canGoForward && !tab.url.hasSuffix("b.html") }) else { return finish(false, "Back did not go back (\(tab.url))") }
         reset(); shortcut("Go Forward"); await settle(); verify("Cmd+]", "forward")
         reset(); cmdL(); await settle(); verify("Cmd+L", "focusAddress")
-        if ctl.toolbar.address.currentEditor() == nil { bad.append("Cmd+L did not focus the address field") }
+        if barEditor == nil { bad.append("Cmd+L did not open the command bar with its field focused") }
         // Address editing: type, select all, copy; the clipboard holds the text.
         general.clearContents()
-        typeText("hello noche")
+        barType("hello noche")
         // The Edit menu items are nil-targeted and a hidden window is never key, so deliver the actions the way the responder chain would.
         _ = ctl.nsWindow?.firstResponder?.tryToPerform(#selector(NSText.selectAll(_:)), with: nil)
         _ = ctl.nsWindow?.firstResponder?.tryToPerform(#selector(NSText.copy(_:)), with: nil)
         if general.string(forType: .string) != "hello noche" { bad.append("address field: Cmd+A, Cmd+C left \(general.string(forType: .string) ?? "nil") on the pasteboard") } else { passed.append("address field Cmd+A, Cmd+C") }
-        ctl.toolbar.address.currentEditor()?.string = ""
-        if let ns = ctl.nsWindow { ns.makeFirstResponder(ns.contentView) }
+        barEditor?.string = ""
+        closeBarNow()
         reset(); cmdS(); await settle(); verify("Cmd+S", "toggleSidebar")
         reset(); cmdT(); guard await until(5, { rowCount == 2 }) else { return finish(false, "Cmd+T made no row") }; await settle(); verify("Cmd+T", "newTab")
         reset(); nextTab(); await settle(); verify("Shift+Cmd+]", "nextTab")
@@ -349,12 +345,12 @@ extension SelfTest {
         guard await until(15, { app.controllers.count == 1 && rowCount == 1 }) else { return finish(false, "New Tab with no window opened \(app.controllers.count) windows, \(rowCount) rows") }
         try? await Task.sleep(for: .milliseconds(500))
         guard app.controllers.count == 1, rowCount == 1, win?.tabs.count == 1 else { return finish(false, "New Tab with no window: windows \(app.controllers.count) rows \(rowCount) tabs \(win?.tabs.count ?? -1), want one window with one tab") }
-        // Open Command Bar with no window: a window opens and its address field is being edited.
+        // Open Command Bar with no window: a window opens and its command bar (the New Tab card) has its field being edited.
         win?.activeTab?.close()
         guard await until(15, { windowsClosed == 2 && app.controllers.isEmpty }) else { return finish(false, "the second window did not close") }
         guard cmdL() else { return finish(false, "Cmd+L found no menu item with no window open") }
-        guard await until(15, { app.controllers.count == 1 && rowCount == 1 && ctl?.toolbar.address.currentEditor() != nil }) else {
-            return finish(false, "Open Command Bar with no window: windows \(app.controllers.count) rows \(rowCount) editing \(ctl?.toolbar.address.currentEditor() != nil)")
+        guard await until(15, { app.controllers.count == 1 && rowCount == 1 && barEditor != nil }) else {
+            return finish(false, "Open Command Bar with no window: windows \(app.controllers.count) rows \(rowCount) editing \(barEditor != nil)")
         }
         // The Dock click: the delegate's reopen handler, called directly.
         win?.activeTab?.close()
@@ -362,7 +358,7 @@ extension SelfTest {
         let handled = app.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
         guard await until(15, { app.controllers.count == 1 && rowCount == 1 }) else { return finish(false, "reopen opened \(app.controllers.count) windows, \(rowCount) rows (handler returned \(handled))") }
         try? await Task.sleep(for: .milliseconds(500))
-        finish(app.controllers.count == 1 && rowCount == 1 && violations.isEmpty, "no window: New Tab (menu key equivalent), Open Command Bar (address field editing) and reopen each opened one window with one tab \(violations)")
+        finish(app.controllers.count == 1 && rowCount == 1 && violations.isEmpty, "no window: New Tab (menu key equivalent), Open Command Bar (command bar field editing) and reopen each opened one window with one tab \(violations)")
     }
 }
 #endif

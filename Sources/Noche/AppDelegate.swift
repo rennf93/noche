@@ -106,7 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
         guard let store = store ?? (try? Store.inMemory()) else { return }
-        for (k, v) in settings where k == "quitBehavior" && ["preserve", "close"].contains(v) { try? store.setSetting(k, v) }
+        for (k, v) in settings where (k == "quitBehavior" && ["preserve", "close"].contains(v)) || (k == "suggestRemote" && ["0", "1"].contains(v)) {
+            try? store.setSetting(k, v)
+        }
         let w = StoreWriter(store: store)
         w.snapshot = { [weak self] id in
             guard let self, let i = self.controllers.firstIndex(where: { $0.id == id }) else { return nil }

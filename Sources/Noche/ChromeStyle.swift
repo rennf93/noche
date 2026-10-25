@@ -78,6 +78,28 @@ enum ChromeStyle {
     }
 
     static func rowY(_ index: Int) -> CGFloat { firstRowY + rowPitch * CGFloat(index) }
+
+    // M1.3 command bar (noche-private/specs/research/m1-3-command-bar.md section 1; geometry itself is CommandBarLayout)
+    static let barFill = NSColor(hex: 0x282828)
+    static let barBorder = NSColor(hex: 0x3E4042)              // also while focused: no focus ring
+    static let barRadius: CGFloat = 16
+    static let barRowSelected = NSColor(hex: 0x464747)         // measured; the token alone would give #424344
+    static let barRowRadius: CGFloat = 8
+    static let barTitle = NSColor.white
+    static let barHost = NSColor(hex: 0x9FA1A8)
+    static let barPlaceholder = NSColor(hex: 0x9A9A9A)
+    static let barSelectedText = NSColor(hex: 0x787D86, alpha: 0xB2 / 255.0)
+    static let barChipText = NSColor(hex: 0xA9A9A9)
+    static let barMic = NSColor(hex: 0x656565)
+    static let barSendFill = NSColor(hex: 0x3A3A3A)
+    static let barGoFill = NSColor(hex: 0xD4D4D4)
+    static let barGoText = NSColor(hex: 0x0F182C)
+    static let barHintFill = NSColor.white.withAlphaComponent(0.10)
+    static let newTabBackground = NSColor(hex: 0x161616)
+    static let barInputFontNewTab = NSFont.systemFont(ofSize: 14)
+    static let barInputFontOverlay = NSFont.systemFont(ofSize: 13)
+    static let barRowFont = NSFont.systemFont(ofSize: 13)
+    static let barMotionDuration: TimeInterval = 0.107
 }
 
 /// Where everything sits for a window size and a card left edge (6 hidden, 197 shown, up to 199 mid-show).

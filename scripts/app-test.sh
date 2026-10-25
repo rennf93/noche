@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch quit-close-dirty-relaunch window-close-cancel reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch history-record hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link focus-return newtab-surface)
+# usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch quit-close-dirty-relaunch window-close-cancel reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch history-record cb-layout cb-open cb-motion cb-go cb-escape cb-arrows cb-inline cb-switch-tab cb-outside cb-nonet cb-history hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link focus-return newtab-surface)
 # Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
 # Two-phase checks (names ending in -relaunch): phase 1 runs with `--selftest-phase 1` on the wiped profile, phase 2 with
 # `--selftest-phase 2` on the same profile; each phase must print its own `NOCHE_TEST <check> pass` (the crash variant `-crash-relaunch`: phase 1 prints `info phase1-ready` and this script SIGKILLs the one app PID) and every control below covers both.
+# cb-history is two-phase by name (a typed visit through the command bar, then the relaunch shows it as a row); cb-nonet passes `--selftest-setting suggestRemote=1` and `--selftest-suggest-url` (the fixture's suggest.json) and counts requests in the fixture server's access log (NOCHE_TEST_SERVER_LOG).
 # Store checks: quit-close-relaunch passes `--selftest-setting quitBehavior=close` in phase 1; crash-mid-write runs both
 # NOCHE_TEST_KILL_AT variants (pending, in-transaction): phase 1 SIGKILLs itself (rc 137 expected), then `sqlite3 <store> "PRAGMA integrity_check"`
 # must print ok before phase 2; persist-relaunch prints the phase 2 store's `.schema` and `PRAGMA integrity_check`; corrupt-store overwrites the store file with garbage between its phases.
@@ -28,7 +29,7 @@ if [ "${1:-}" = "--negative" ]; then
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
   SCRIPT_LINES='^NOCHE_TEST [a-z0-9-]+ fail (watchdog|no-output|exit-rc=|NOCHE shutdown watchdog|NOCHE devtools|noche-was-frontmost|frontmost-unreadable|new-crash-report)'
   # NOCHE_NEG_PAIRS (";" separated "check VAR=1 expect-fail|record") replaces the list, to test this gate itself.
-  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;quit-close-dirty-relaunch NOCHE_TEST_NO_QUIT_CLEAR=1 expect-fail;window-close-cancel NOCHE_TEST_STICKY_CLOSING=1 expect-fail;tab-chords NOCHE_TEST_NO_LIST_ORDER=1 expect-fail;move-tab-relaunch NOCHE_TEST_NO_MOVE=1 expect-fail;history-record NOCHE_TEST_NO_RECORD=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;focus-return NOCHE_TEST_NO_FOCUS=1 expect-fail;newtab-surface NOCHE_TEST_NO_HIDE=1 expect-fail;focus-return NOCHE_TEST_NO_AMBIGUOUS_GUARD=1 expect-fail;newtab-surface NOCHE_TEST_NO_UNHIDE=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
+  PAIRS="${NOCHE_NEG_PAIRS:-no-zombie-tab NOCHE_TEST_NO_CLOSED_FILTER=1 expect-fail;hidden NOCHE_TEST_NEGATIVE=activate expect-fail;hidden NOCHE_TEST_NEGATIVE=alpha expect-fail;chromium-restore-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;chromium-restore-crash-relaunch NOCHE_TEST_RESTORE_EXPECT=1 expect-fail;persist-relaunch NOCHE_TEST_NOFLUSH=1 expect-fail;reopen-closed NOCHE_TEST_NO_CLOSED=1 expect-fail;quit-close-dirty-relaunch NOCHE_TEST_NO_QUIT_CLEAR=1 expect-fail;window-close-cancel NOCHE_TEST_STICKY_CLOSING=1 expect-fail;tab-chords NOCHE_TEST_NO_LIST_ORDER=1 expect-fail;move-tab-relaunch NOCHE_TEST_NO_MOVE=1 expect-fail;history-record NOCHE_TEST_NO_RECORD=1 expect-fail;shortcuts-once NOCHE_TEST_NOEXACT=1 expect-fail;focus-return NOCHE_TEST_NO_FOCUS=1 expect-fail;newtab-surface NOCHE_TEST_NO_HIDE=1 expect-fail;focus-return NOCHE_TEST_NO_AMBIGUOUS_GUARD=1 expect-fail;newtab-surface NOCHE_TEST_NO_UNHIDE=1 expect-fail;cb-layout NOCHE_TEST_BAR_LAYOUT=1 expect-fail;cb-open NOCHE_TEST_BAR_NOFOCUS=1 expect-fail;cb-motion NOCHE_TEST_BAR_NOMOTION=1 expect-fail;cb-go NOCHE_TEST_BAR_NOGO=1 expect-fail;cb-go NOCHE_TEST_BAR_ROUTE=1 expect-fail;cb-escape NOCHE_TEST_BAR_ESC=1 expect-fail;cb-escape NOCHE_TEST_NO_FOCUS=1 expect-fail;cb-arrows NOCHE_TEST_BAR_NOARROWS=1 expect-fail;cb-inline NOCHE_TEST_BAR_INLINE=1 expect-fail;cb-switch-tab NOCHE_TEST_BAR_DUPTAB=1 expect-fail;cb-outside NOCHE_TEST_BAR_NOOUTSIDE=1 expect-fail;cb-nonet NOCHE_TEST_NO_DEBOUNCE=1 expect-fail;cb-history NOCHE_TEST_NO_RECORD=1 expect-fail;devtools-quit NOCHE_TEST_DEVTOOLS_LAST=1 record}"
   IFS=';' read -ra PAIR_LIST <<< "$PAIRS"
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
@@ -61,7 +62,10 @@ BIN="$APP/Contents/MacOS/Noche"
 NOCHE_TESTHOOKS=1 "$ROOT/scripts/build-app.sh" >&2
 
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/Tests/fixtures/app" >/dev/null 2>&1 &
+# The server's access log is the independent record of the requests cb-nonet counts (the app reads it through NOCHE_TEST_SERVER_LOG).
+SERVER_LOG="$(mktemp)"
+export NOCHE_TEST_SERVER_LOG="$SERVER_LOG"
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/Tests/fixtures/app" >/dev/null 2>"$SERVER_LOG" &
 SERVER_PID=$!
 OUTF="$(mktemp)"
 ERRF="$(mktemp)"
@@ -77,7 +81,7 @@ cleanup() {
     for _ in $(seq 1 50); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
     kill -0 "$APP_PID" 2>/dev/null && kill -KILL "$APP_PID" 2>/dev/null || true
   fi
-  rm -rf "$OUTF" "$ERRF"
+  rm -rf "$OUTF" "$ERRF" "$SERVER_LOG"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -91,7 +95,7 @@ for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
 FAILED=0
 for CHECK in "$@"; do
   # Checks ending in -relaunch (and crash-mid-write, corrupt-store) run twice on one profile (phase 1, then 2); each phase must print its own pass line.
-  PHASES=""; case "$CHECK" in *-relaunch|crash-mid-write|corrupt-store) PHASES="1 2" ;; esac
+  PHASES=""; case "$CHECK" in *-relaunch|crash-mid-write|corrupt-store|cb-history) PHASES="1 2" ;; esac
   # crash-mid-write runs once per kill point, store-unavailable once per variant.
   KILLS="${NOCHE_TEST_KILL_AT:-none}"; [ "$CHECK" != crash-mid-write ] || KILLS="pending in-transaction"
   [ "$CHECK" != store-unavailable ] || KILLS="file unwritable"  # the variants share the loop variable
@@ -118,6 +122,8 @@ for CHECK in "$@"; do
       SENTINEL="$(shasum "$PROFILE/Store/noche.sqlite")"; LISTING="$(ls -a "$PROFILE/Store")"; chmod 555 "$PROFILE/Store"
     fi
     EXTRA=(); [ "$CHECK" != quit-close-relaunch ] && [ "$CHECK" != quit-close-dirty-relaunch ] || [ "$PHASE" != 1 ] || EXTRA=(--selftest-setting quitBehavior=close)
+    # cb-nonet: remote suggestions on, pointed at the fixture server (no self-test touches the network).
+    [ "$CHECK" != cb-nonet ] || EXTRA=(--selftest-setting suggestRemote=1 --selftest-suggest-url "http://127.0.0.1:$PORT/suggest.json?q=%s")
     SELFKILL=0; [ "$CHECK" != crash-mid-write ] || [ "$PHASE" != 1 ] || SELFKILL=1
     REPORTS_BEFORE="$(crash_reports)"
     BASE=40; [ "$CHECK" = quit-100 ] && BASE=90  # the app's own limit, see SelfTest.limit

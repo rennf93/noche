@@ -21,7 +21,7 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 - Controls the app cannot give itself: new `Noche*.ips` crash reports (after a 3 s settle), the frontmost app (every 0.5 s, fails if it is ever Noche) and leftover helpers (polled up to 5 s).
 - A hidden window gets no frames while the screen is locked, and a loaded CPU can trip the watchdog: a timeout then is not necessarily a code fault. Check `ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` and `uptime`.
 
-## Checks (29)
+## Checks (29, plus the M1.2 and M1.3 tables below)
 
 | Check | What it asserts |
 |---|---|
@@ -92,6 +92,28 @@ Store checks read the store file through the `sqlite3` CLI (read only), the way 
 
 Negative controls added in M1.2 (`--negative`): `persist-relaunch` with `NOCHE_TEST_NOFLUSH=1` and `reopen-closed` with `NOCHE_TEST_NO_CLOSED=1` must fail. `tab-chords` with `NOCHE_TEST_NO_LIST_ORDER=1` and `move-tab-relaunch` with `NOCHE_TEST_NO_MOVE=1` must fail too. The unwritable variant has no switch; the RED runs (including the lastActiveAt run on the 03c37ed sources and the trap demonstration) are under "RED proofs" in `docs/app/evidence/m1-2-run.txt`.
 
+## M1.3 command bar checks
+
+The command bar (File > Open Command Bar, Cmd+L, a click on the toolbar's address area) is one view with two placements: the New Tab card (always shown on a blank tab, over a hidden page surface and `NewTabPageView`) and the overlay a loaded page gets. Typing goes through the field editor's `insertText`, special keys are key events handed to the first responder, clicks are mouse events sent through `NSApp` (so the click-outside monitor sees them). Geometry is compared with the note's tables from formulas written out in the check, not from `CommandBarLayout`.
+
+| Check | What it asserts |
+|---|---|
+| cb-layout | the `commandBar` frame within 1 pt of the research note's tables 1a (card) and 1c (overlay) at 2200x1436, for the overlay with 0 and 6 rows (sidebar shown, then hidden) and the New Tab card with its 3 starter rows and with 6 rows (shown, then hidden); fill #282828, border #3e4042 and the selected row #464747 within 3 per channel of the same color through the same pipeline (`cacheDisplay`); the NOCHE_TEST_BAR_LAYOUT negative control fails it |
+| cb-open | Cmd+L on a loaded page opens the overlay with the page's address (`https://` dropped, a trailing "/" dropped, other schemes kept) fully selected, the field editor (not the page view) is first responder and takes typing; two Escapes close it and the page view is first responder again; the Chrome command `IDC_FOCUS_LOCATION` opens it; Cmd+T shows the focused card (placement New Tab, no overlay) over a hidden page surface that stays hidden for 1 s (ruling R14: the engine's later active-tab report must not clear it), Escape on the empty card unfocuses it and Cmd+L focuses it again; the NOCHE_TEST_BAR_NOFOCUS negative control fails it |
+| cb-motion | the overlay height from Cmd+L: at least 4 frames, each within 2 pt of the cubic ease-out fit (41 to 107 pt in 107 ms), monotonic, none above 107, the final frame 107; Escape twice closes within the same run-loop turn; the NOCHE_TEST_BAR_NOMOTION negative control fails it |
+| cb-go | typed `127.0.0.1:<port>/b.html` plus Return loads it (row title updates, the typed visit is a history page row with `typedCount` 1), `two words` plus Return loads the self-test search URL, and Return gives the page typing back; typed `javascript:` and `data:` text searches and never navigates; stored rows with `javascript:`, `data:` and `ftp:` URLs load nothing and run nothing (title and URL unchanged); the NOCHE_TEST_BAR_NOGO and NOCHE_TEST_BAR_ROUTE negative controls fail it |
+| cb-escape | loaded page: Escape clears the text and the rows with the bar still open, a second Escape closes it and the page view is first responder (the NOCHE_TEST_NO_FOCUS bridge control fails that); New Tab: Escape clears to the 3 starter rows, a second Escape unfocuses the card and the page surface stays hidden; the NOCHE_TEST_BAR_ESC negative control fails it |
+| cb-arrows | 3 stored pages and a typed prefix: the inline remainder is selected, Down twice selects row 3 and the field text follows it, Down past the end does not wrap, Up returns to the typed text with the remainder selected, Tab accepts the remainder (caret at the end), a second Tab moves down, Return runs the selected row; the NOCHE_TEST_BAR_NOARROWS negative control fails it |
+| cb-inline | typing `weather` completes to a stored page's URL with the remainder selected, Backspace deletes the completion and nothing completes again (also after a second Backspace), typing again completes, case stays as typed, no completion with a space or for a title-only match; the NOCHE_TEST_BAR_INLINE negative control fails it |
+| cb-switch-tab | with tabs A and B and a blank New Tab, typing a prefix of A's title and Return on its row makes A active with the same number of engine tabs, sidebar rows and list items (no duplicate), the blank tab stays and the page surface is visible again; the NOCHE_TEST_BAR_DUPTAB negative control fails it |
+| cb-outside | a click on the card keeps the bar open; a click on the sidebar toggle closes it, the monitor hands the event back untouched, and the toggle takes its click (a hidden window never delivers synthesized mouse events by itself, so the check delivers it to the target); the NOCHE_TEST_BAR_NOOUTSIDE negative control fails it |
+| cb-nonet | with `suggestRemote` 1 and `--selftest-suggest-url` pointing at the fixture's `suggest.json` (the script passes both): 7 keystrokes in one turn send at most 2 requests and 14 spaced keystrokes at most 3, never closer than 100 ms, every request to 127.0.0.1 (the host assertion in `RemoteSuggest` counts any other as foreign), the fixture server's access log (`NOCHE_TEST_SERVER_LOG`, written by the script) counts the same as the app; URL-like text, text with no letter and 1 character send none; the answer shows as query rows; with the setting 0 nothing is sent; the NOCHE_TEST_NO_DEBOUNCE negative control fails it |
+| cb-history | two-phase: phase 1 navigates by typing through the bar (a typed page row with its title in the store); phase 2 (relaunch) types a title prefix and the stored page is a suggestion row; the NOCHE_TEST_NO_RECORD negative control fails phase 1 |
+
+The M1.1 checks that typed into the address field (`navigate`, `load-error`, `load-error-link`, `shortcuts-once`, `no-window`) now type into the command bar's field editor; the toolbar address is display only (a click on it opens the bar).
+
+Negative controls added in M1.3 (`--negative`): `history-record` NOCHE_TEST_NO_RECORD, `cb-layout` NOCHE_TEST_BAR_LAYOUT, `cb-open` NOCHE_TEST_BAR_NOFOCUS, `cb-motion` NOCHE_TEST_BAR_NOMOTION, `cb-go` NOCHE_TEST_BAR_NOGO and NOCHE_TEST_BAR_ROUTE, `cb-escape` NOCHE_TEST_BAR_ESC and NOCHE_TEST_NO_FOCUS, `cb-arrows` NOCHE_TEST_BAR_NOARROWS, `cb-inline` NOCHE_TEST_BAR_INLINE, `cb-switch-tab` NOCHE_TEST_BAR_DUPTAB, `cb-outside` NOCHE_TEST_BAR_NOOUTSIDE, `cb-nonet` NOCHE_TEST_NO_DEBOUNCE, `cb-history` NOCHE_TEST_NO_RECORD. Each must fail on its own `NOCHE_TEST <check> fail` line.
+
 ## Builder calls and rulings
 
 Calls the design left open:
@@ -111,6 +133,23 @@ M1.2 calls adopted from the research note as written:
 - A blank tab (`about:blank` or no address) is never added to the closed list.
 - Incognito windows are never persisted (no incognito code exists yet).
 - Warn before quitting is off.
+
+M1.3 command bar calls (every CALL item of the research note, adopted as written unless a line says otherwise):
+
+- Deep-URL display (note section 2): the bar shows the page address with `https://` and a trailing "/" dropped and keeps path and query. Other schemes (`http://`, `file://`, `about:`) are kept as they are, so Return on the untouched text loads the same page (a stripped `http://` would turn into `https://`).
+- Arrows, Tab, Cmd+Return, click outside (note section 2): Down and Up move the selection without wrapping, the field text follows the selected row (its address without scheme, or the query), Up back to the first row shows the typed text with the inline remainder selected; Tab accepts the remainder (caret at the end), without one it acts like Down; Cmd+Return opens the row in a new tab; a click outside the card closes the overlay (on a New Tab card it only takes the focus out of the field) and the click still reaches its target.
+- Escape (note section 2): the first Escape with any text, an untouched prefilled address included, clears the text and the rows; on an empty bar an overlay closes (instantly) and the New Tab card gives up focus. Whether the reference clears or closes on an untouched prefilled address needs a capture.
+- Cmd+L on a New Tab focuses the card and selects its text; Cmd+T shows a New Tab with its card focused.
+- Open-tab row (note section 3a): "Title - host" with a trailing "Switch to Tab" pill; Return activates that tab (never a load, never a duplicate) and the blank New Tab it was opened from stays.
+- Frecency weights, tier order, six-row cap and the history slot kept for a page (note section 4, Task 1): builder numbers.
+- Overlay geometry with the sidebar hidden: left edge = card x + 106, right edge fixed at 264.5 from the window edge; top corners square (the window edge clips them) and no top border line; the card keeps its top (H/2 - 78) when it grows; rows appearing while typing are not animated; closing is instant; the overlay input is 13 pt and the New Tab card's 14 pt.
+- Chip "Add tabs or files" 142x28, centered on the footer row; mic and chip are inert (no AI, no voice in M1.3); the send circle shows with no rows, the "Go" pill with rows.
+- The 3 starter rows of the empty New Tab card ("Summarize my open tabs", "What changed on this page?", "Plan my week", SF Symbols `bubble.left`, `sparkles`, `list.bullet`) are inert: clicking one copies its text into the input and nothing is sent. The owner can veto them (the empty card would then be 107 pt high).
+- New Tab surface: the page surface is hidden (`webContentHidden`, set only after the bridge reports the tab active, ruling R14) under a behind-window vibrancy view and a static grain disc (a radial gradient with a fixed speckle) instead of the reference's video orb.
+- Remote query suggestions are off by default (`suggestRemote` 0), on when the owner sets it to 1 (Settings arrive in M1.8; tests use `--selftest-setting`). The endpoint follows the default search engine (Google `suggestqueries.google.com ... client=firefox`, DuckDuckGo `duckduckgo.com/ac/`; any other engine sends nothing); ephemeral session with no cookies, cache, credentials or referrer; 100 ms debounce, 500 ms timeout, the last 20 answers cached in memory; never for URL-like text, text with no letter or under 2 characters.
+- The built-in site list (`Resources/App/Sites.json`, copied into the bundle by `scripts/build-app.sh`) is a hand-written original file of about 380 `{name, host}` rows in rough popularity order.
+- Rows join title and host with " - " (a plain hyphen with spaces) where the reference uses a long dash.
+- History records only http and https main-frame loads that end with status 200 to 399; a load from the bar (or the address entry) counts as typed; every navigation from a stored row re-checks the scheme allowlist.
 
 Deviations and rulings that change behavior:
 

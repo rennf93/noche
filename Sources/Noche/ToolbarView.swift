@@ -46,11 +46,9 @@ final class ToolbarView: DragView {
     let back = ChromeButton(symbol: "chevron.left", identifier: "toolbar.back", label: "Back")
     let forward = ChromeButton(symbol: "chevron.right", identifier: "toolbar.forward", label: "Forward")
     let reload = ChromeButton(symbol: "arrow.clockwise", identifier: "toolbar.reload", label: "Reload")
-    let address: NSTextField = {
-        let field = NSTextField()
-        let cell = CenteredTextFieldCell(textCell: "")
-        cell.isEditable = true
-        field.cell = cell
+    let address: AddressLabel = {
+        let field = AddressLabel()
+        field.cell = CenteredTextFieldCell(textCell: "")
         return field
     }()
     let divider = DividerView()
@@ -63,7 +61,8 @@ final class ToolbarView: DragView {
             b.frame.origin = NSPoint(x: ChromeStyle.buttonInset + ChromeStyle.buttonPitch * CGFloat(i), y: ChromeStyle.buttonY - ChromeStyle.inset)
             addSubview(b)
         }
-        address.isEditable = true
+        address.isEditable = false  // the command bar edits the address (M1.3); a click here opens it
+        address.isSelectable = false
         address.isBezeled = false
         address.drawsBackground = false
         address.focusRingType = .none
@@ -89,6 +88,12 @@ final class ToolbarView: DragView {
     }
 }
 
+/// The toolbar's address text: display only. A click opens the command bar.
+final class AddressLabel: NSTextField {
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
 final class DividerView: NSView {
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -99,7 +104,7 @@ final class DividerView: NSView {
 }
 
 /// A text cell whose line sits in the vertical middle of its box (also while editing).
-final class CenteredTextFieldCell: NSTextFieldCell {
+class CenteredTextFieldCell: NSTextFieldCell {
     private func centered(_ rect: NSRect) -> NSRect {
         var r = rect
         let h = cellSize(forBounds: rect).height

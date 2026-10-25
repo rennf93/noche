@@ -2,7 +2,7 @@ import AppKit
 
 /// The M1.1 main menu (titles and shortcuts from live-ui.md section 9, the reference's app menu named Noche). App actions
 /// target the AppDelegate, which routes them to the active window's controller; the edit items have no target: they go to the key window's first responder
-/// through the responder chain (the address field's editor or the page).
+/// through the responder chain (the command bar's field editor or the page).
 @MainActor
 enum MainMenu {
     static func build(app: AppDelegate) -> NSMenu {
@@ -27,7 +27,7 @@ enum MainMenu {
             a("New Tab", #selector(AppDelegate.newTab(_:)), "t"),
             a("New Window", #selector(AppDelegate.newWindowMenu(_:)), "n"),
             a("Reopen Closed Tab", #selector(AppDelegate.reopenClosedTab(_:)), "t", shift),
-            a("Open Command Bar", #selector(AppDelegate.openCommandBar(_:)), "l"),
+            a("Open Command Bar", #selector(AppDelegate.openCommandBar(_:)), "l"),  // opens the command bar (CommandBarController), also for IDC_FOCUS_LOCATION
             .separator(),
             a("Close Window", #selector(AppDelegate.closeWindowMenu(_:)), "w", shift),
             a("Close Tab", #selector(AppDelegate.closeTab(_:)), "w"),
