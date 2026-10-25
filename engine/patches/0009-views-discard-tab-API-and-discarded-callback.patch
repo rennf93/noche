@@ -1,0 +1,414 @@
+From 3bd7cb2e60ccda4839e45f471ff215cd8fd73d91 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 03:19:30 +0100
+Subject: [PATCH] views: discard tab API and discarded callback
+
+---
+ BUILD.gn                                      |  2 +
+ include/cef_browser.h                         | 17 ++++
+ include/cef_display_handler.h                 | 15 +++
+ libcef/browser/browser_host_base.cc           | 11 +++
+ libcef/browser/browser_host_base.h            |  1 +
+ .../chrome/chrome_browser_host_impl.cc        | 43 ++++++++
+ .../browser/chrome/chrome_browser_host_impl.h |  1 +
+ .../chrome_browser_main_extra_parts_cef.cc    |  9 ++
+ .../chrome_browser_main_extra_parts_cef.h     |  5 +
+ libcef/browser/chrome/tab_discard_observer.cc | 97 +++++++++++++++++++
+ libcef/browser/chrome/tab_discard_observer.h  | 37 +++++++
+ 11 files changed, 238 insertions(+)
+ create mode 100644 libcef/browser/chrome/tab_discard_observer.cc
+ create mode 100644 libcef/browser/chrome/tab_discard_observer.h
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 5c0a07d28..6ba1fd297 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -580,6 +580,8 @@ source_set("libcef_static") {
+     "libcef/browser/chrome/extensions/chrome_mime_handler_view_guest_delegate_cef.h",
+     "libcef/browser/chrome/extensions/extension_actions.cc",
+     "libcef/browser/chrome/extensions/extension_actions.h",
++    "libcef/browser/chrome/tab_discard_observer.cc",
++    "libcef/browser/chrome/tab_discard_observer.h",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.cc",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_child_window.h",
+     "libcef/browser/chrome/views/browser_platform_delegate_chrome_views.cc",
+diff --git a/include/cef_browser.h b/include/cef_browser.h
+index 1831ac202..c98fb25df 100644
+--- a/include/cef_browser.h
++++ b/include/cef_browser.h
+@@ -1088,6 +1088,23 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
+   ///
+   /*--cef(added=experimental)--*/
+   virtual void SetAxViewportCollapse(bool enabled) = 0;
++
++  ///
++  /// Discards this browser's tab to free its renderer process and memory, the
++  /// same operation as Memory Saver and urgent memory-pressure discarding. The
++  /// browser, its navigation history, URL, title and favicon stay valid; the
++  /// page is reloaded when the tab becomes the active tab again.
++  /// CefDisplayHandler::OnTabDiscarded is called when the tab becomes
++  /// discarded and again when it is restored. Returns true if the tab was
++  /// discarded. Returns false, and does nothing, if this browser is not a tab of
++  /// a Chrome style browser, if it is the active tab, if it is already
++  /// discarded, or if the WebContentsDiscard feature is not enabled (without it
++  /// Chrome replaces the WebContents, which this browser cannot survive). Enable
++  /// the feature with --enable-features=WebContentsDiscard. This method can
++  /// only be called on the UI thread. Only used with Chrome style.
++  ///
++  /*--cef(added=experimental)--*/
++  virtual bool DiscardTab() = 0;
+ #endif
+ };
+ 
+diff --git a/include/cef_display_handler.h b/include/cef_display_handler.h
+index 5ba804967..47298966a 100644
+--- a/include/cef_display_handler.h
++++ b/include/cef_display_handler.h
+@@ -203,6 +203,21 @@ class CefDisplayHandler : public virtual CefBaseRefCounted {
+     return false;
+   }
+ #endif
++
++#if CEF_API_ADDED(CEF_EXPERIMENTAL)
++  ///
++  /// Called after |browser|'s tab became discarded (|discarded| is true) or was
++  /// restored (|discarded| is false). A tab is discarded by
++  /// CefBrowserHost::DiscardTab or by Chrome itself (Memory Saver, memory
++  /// pressure). While discarded the tab has no renderer process; it is
++  /// restored, and reloaded, when it becomes the active tab. Called on the UI
++  /// thread, possibly while the tab strip is changing: do not call
++  /// CefBrowserHost::DiscardTab or close browsers from this method. Not called
++  /// after the browser has been destroyed. Only used with Chrome style.
++  ///
++  /*--cef(added=experimental)--*/
++  virtual void OnTabDiscarded(CefRefPtr<CefBrowser> browser, bool discarded) {}
++#endif
+ };
+ 
+ #endif  // CEF_INCLUDE_CEF_DISPLAY_HANDLER_H_
+diff --git a/libcef/browser/browser_host_base.cc b/libcef/browser/browser_host_base.cc
+index c9f84e503..c93722b1c 100644
+--- a/libcef/browser/browser_host_base.cc
++++ b/libcef/browser/browser_host_base.cc
+@@ -16,6 +16,7 @@
+ #include "cef/libcef/browser/navigation_entry_impl.h"
+ #include "cef/libcef/browser/printing/print_util.h"
+ #include "cef/libcef/browser/thread_util.h"
++#include "cef/libcef/common/api_version_util.h"
+ #include "cef/libcef/common/frame_util.h"
+ #include "cef/libcef/common/net/url_util.h"
+ #include "chrome/browser/platform_util.h"
+@@ -990,6 +991,16 @@ void CefBrowserHostBase::SetAxViewportCollapse(bool enabled) {
+   }
+ }
+ 
++bool CefBrowserHostBase::DiscardTab() {
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  if (!CEF_CURRENTLY_ON_UIT()) {
++    DCHECK(false) << "called on invalid thread";
++  }
++  // Only Chrome style has tabs that Chrome can discard; see
++  // ChromeBrowserHostImpl::DiscardTab.
++  return false;
++}
++
+ void CefBrowserHostBase::ReplaceMisspelling(const CefString& word) {
+   if (!CEF_CURRENTLY_ON_UIT()) {
+     CEF_POST_TASK(
+diff --git a/libcef/browser/browser_host_base.h b/libcef/browser/browser_host_base.h
+index f984a1542..1a01b7cf6 100644
+--- a/libcef/browser/browser_host_base.h
++++ b/libcef/browser/browser_host_base.h
+@@ -280,6 +280,7 @@ class CefBrowserHostBase : public CefBrowserHost,
+   bool IsRenderProcessUnresponsive() override;
+   cef_runtime_style_t GetRuntimeStyle() override;
+   void SetAxViewportCollapse(bool enabled) override;
++  bool DiscardTab() override;
+ 
+   // CefBrowser methods:
+   bool IsValid() override;
+diff --git a/libcef/browser/chrome/chrome_browser_host_impl.cc b/libcef/browser/chrome/chrome_browser_host_impl.cc
+index 8f0c3140a..10ed47e1e 100644
+--- a/libcef/browser/chrome/chrome_browser_host_impl.cc
++++ b/libcef/browser/chrome/chrome_browser_host_impl.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "cef/libcef/browser/chrome/chrome_browser_host_impl.h"
+ 
++#include "base/feature_list.h"
+ #include "base/logging.h"
+ #include "base/notimplemented.h"
+ #include "cef/libcef/browser/browser_platform_delegate.h"
+@@ -13,8 +14,13 @@
+ #include "cef/libcef/browser/chrome/views/chrome_browser_widget.h"
+ #include "cef/libcef/browser/thread_util.h"
+ #include "cef/libcef/browser/views/browser_view_impl.h"
++#include "cef/libcef/common/api_version_util.h"
+ #include "cef/libcef/common/net/url_util.h"
++#include "content/public/common/content_features.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_source.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -344,6 +350,43 @@ void ChromeBrowserHostImpl::ExecuteChromeCommand(
+   }
+ }
+ 
++bool ChromeBrowserHostImpl::DiscardTab() {
++  CEF_API_REQUIRE_ADDED(CEF_EXPERIMENTAL);
++  if (!CEF_CURRENTLY_ON_UIT()) {
++    DCHECK(false) << "called on invalid thread";
++    return false;
++  }
++
++  auto* web_contents = GetWebContents();
++  if (!web_contents || !browser_) {
++    return false;
++  }
++
++  // Without kWebContentsDiscard, Chrome replaces and destroys the WebContents
++  // (TabStripModel::DiscardWebContents) and this CefBrowser would be left
++  // without one. With it, the WebContents is kept and only its renderer goes.
++  if (!base::FeatureList::IsEnabled(features::kWebContentsDiscard)) {
++    return false;
++  }
++
++  // Never discard the tab that is shown: explicit (EXTERNAL) discards are
++  // always allowed by the eligibility policy, so the check is ours.
++  if (browser_->tab_strip_model()->GetActiveWebContents() == web_contents) {
++    return false;
++  }
++
++  auto* lifecycle_unit =
++      resource_coordinator::TabLifecycleUnitSource::GetTabLifecycleUnitExternal(
++          web_contents);
++  if (!lifecycle_unit) {
++    return false;
++  }
++
++  return lifecycle_unit->DiscardTab(
++      ::mojom::LifecycleUnitDiscardReason::EXTERNAL,
++      /*memory_footprint_estimate=*/0);
++}
++
+ ChromeBrowserView* ChromeBrowserHostImpl::chrome_browser_view() const {
+   if (browser_ && is_views_hosted_) {
+     return static_cast<ChromeBrowserView*>(
+diff --git a/libcef/browser/chrome/chrome_browser_host_impl.h b/libcef/browser/chrome/chrome_browser_host_impl.h
+index d65742e17..279132a80 100644
+--- a/libcef/browser/chrome/chrome_browser_host_impl.h
++++ b/libcef/browser/chrome/chrome_browser_host_impl.h
+@@ -108,6 +108,7 @@ class ChromeBrowserHostImpl : public CefBrowserHostBase {
+   bool CanExecuteChromeCommand(int command_id) override;
+   void ExecuteChromeCommand(int command_id,
+                             cef_window_open_disposition_t disposition) override;
++  bool DiscardTab() override;
+ 
+   Browser* browser() const { return browser_; }
+ 
+diff --git a/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc b/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc
+index 7c96eb632..2e6f9a765 100644
+--- a/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc
++++ b/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.cc
+@@ -60,6 +60,10 @@ void ChromeBrowserMainExtraPartsCef::PostBrowserStart() {
+   // allows ProcessSingleton to begin processing messages.
+   startup_browser_creator::RegisterProcessCommandLineCallback();
+ 
++  // The TabLifecycleUnitSource is started by ChromeBrowserMainParts before
++  // this point (PreBrowserStart).
++  tab_discard_observer_.Start();
++
+ #if BUILDFLAG(IS_LINUX)
+   // This may be called indirectly via StartupBrowserCreator::LaunchBrowser.
+   // Call it here before blocking is disallowed to avoid assertions.
+@@ -94,6 +98,11 @@ void ChromeBrowserMainExtraPartsCef::PreMainMessageLoopRun() {
+ #endif
+ }
+ 
++void ChromeBrowserMainExtraPartsCef::PostMainMessageLoopRun() {
++  // The browser process, which owns the lifecycle unit source, is still alive.
++  tab_discard_observer_.Stop();
++}
++
+ void ChromeBrowserMainExtraPartsCef::ToolkitInitialized() {
+   // Override the default Chrome client.
+   SetConstrainedWindowViewsClient(CreateAlloyConstrainedWindowViewsClient(
+diff --git a/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.h b/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.h
+index 6908b4309..1c316223e 100644
+--- a/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.h
++++ b/libcef/browser/chrome/chrome_browser_main_extra_parts_cef.h
+@@ -9,6 +9,7 @@
+ 
+ #include "base/task/single_thread_task_runner.h"
+ #include "build/build_config.h"
++#include "cef/libcef/browser/chrome/tab_discard_observer.h"
+ #include "cef/libcef/browser/request_context_impl.h"
+ #include "chrome/browser/chrome_browser_main_extra_parts.h"
+ 
+@@ -50,10 +51,14 @@ class ChromeBrowserMainExtraPartsCef : public ChromeBrowserMainExtraParts {
+   void PostProfileInit(Profile* profile, bool is_initial_profile) override;
+   void PostBrowserStart() override;
+   void PreMainMessageLoopRun() override;
++  void PostMainMessageLoopRun() override;
+   void ToolkitInitialized() override;
+ 
+   CefRefPtr<CefRequestContextImpl> global_request_context_;
+ 
++  // Reports tab discards to CefDisplayHandler::OnTabDiscarded.
++  CefTabDiscardObserver tab_discard_observer_;
++
+   // Blocking task runners exposed via CefTaskRunner. For consistency with
+   // previous named thread behavior always execute all pending tasks before
+   // shutdown (e.g. to make sure critical data is saved to disk).
+diff --git a/libcef/browser/chrome/tab_discard_observer.cc b/libcef/browser/chrome/tab_discard_observer.cc
+new file mode 100644
+index 000000000..e8ffd362d
+--- /dev/null
++++ b/libcef/browser/chrome/tab_discard_observer.cc
+@@ -0,0 +1,97 @@
++// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "cef/libcef/browser/chrome/tab_discard_observer.h"
++
++#include "base/check.h"
++#include "cef/include/cef_client.h"
++#include "cef/include/cef_display_handler.h"
++#include "cef/libcef/browser/browser_host_base.h"
++#include "cef/libcef/browser/thread_util.h"
++#include "cef/libcef/common/api_version_util.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/resource_coordinator/lifecycle_unit.h"
++#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
++#include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_source.h"
++
++namespace {
++
++resource_coordinator::TabLifecycleUnitSource* GetSource() {
++  if (!g_browser_process || !g_browser_process->resource_coordinator_parts()) {
++    return nullptr;
++  }
++  return g_browser_process->resource_coordinator_parts()
++      ->tab_lifecycle_unit_source();
++}
++
++}  // namespace
++
++CefTabDiscardObserver::~CefTabDiscardObserver() {
++  // Normally Stop() already ran (PostMainMessageLoopRun). If shutdown skipped
++  // it, remove the registration here; Stop() is safe to call twice.
++  Stop();
++}
++
++void CefTabDiscardObserver::Start() {
++  CEF_REQUIRE_UIT();
++  if (started_) {
++    return;
++  }
++  if (auto* source = GetSource()) {
++    source->AddLifecycleObserver(this);
++    started_ = true;
++  }
++}
++
++void CefTabDiscardObserver::Stop() {
++  CEF_REQUIRE_UIT();
++  if (!started_) {
++    return;
++  }
++  started_ = false;
++  if (auto* source = GetSource()) {
++    source->RemoveLifecycleObserver(this);
++  }
++}
++
++void CefTabDiscardObserver::OnLifecycleUnitStateChanged(
++    resource_coordinator::LifecycleUnit* lifecycle_unit,
++    resource_coordinator::LifecycleUnitState last_state) {
++  CEF_REQUIRE_UIT();
++  if (!CEF_API_IS_ADDED(CEF_EXPERIMENTAL) || !lifecycle_unit) {
++    return;
++  }
++
++  // Only the transitions into and out of DISCARDED are reported.
++  const bool was_discarded =
++      last_state == ::mojom::LifecycleUnitState::DISCARDED;
++  const bool is_discarded =
++      lifecycle_unit->GetState() == ::mojom::LifecycleUnitState::DISCARDED;
++  if (was_discarded == is_discarded) {
++    return;
++  }
++
++  // The tab source only creates tab lifecycle units, which are
++  // TabLifecycleUnitExternal.
++  auto* tab = lifecycle_unit->AsTabLifecycleUnitExternal();
++  auto* web_contents = tab ? tab->GetWebContents() : nullptr;
++  if (!web_contents) {
++    return;
++  }
++
++  // NULL for a WebContents without a CefBrowser, and once the browser has been
++  // destroyed: no callback after that.
++  auto browser = CefBrowserHostBase::GetBrowserForContents(web_contents);
++  if (!browser || !browser->IsValid()) {
++    return;
++  }
++
++  if (auto client = browser->GetClient()) {
++    if (auto handler = client->GetDisplayHandler()) {
++      handler->OnTabDiscarded(browser, is_discarded);
++    }
++  }
++}
+diff --git a/libcef/browser/chrome/tab_discard_observer.h b/libcef/browser/chrome/tab_discard_observer.h
+new file mode 100644
+index 000000000..1a514309d
+--- /dev/null
++++ b/libcef/browser/chrome/tab_discard_observer.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Chromium Embedded Framework Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CEF_LIBCEF_BROWSER_CHROME_TAB_DISCARD_OBSERVER_H_
++#define CEF_LIBCEF_BROWSER_CHROME_TAB_DISCARD_OBSERVER_H_
++#pragma once
++
++#include "chrome/browser/resource_coordinator/lifecycle_unit_observer.h"
++
++// Turns Chrome's tab lifecycle changes into CefDisplayHandler::OnTabDiscarded.
++// Lives on the UI thread. Start() registers with the TabLifecycleUnitSource,
++// Stop() removes the registration; Stop() must run while the browser process
++// (which owns the source) is still alive.
++class CefTabDiscardObserver
++    : public resource_coordinator::LifecycleUnitObserver {
++ public:
++  CefTabDiscardObserver() = default;
++
++  CefTabDiscardObserver(const CefTabDiscardObserver&) = delete;
++  CefTabDiscardObserver& operator=(const CefTabDiscardObserver&) = delete;
++
++  ~CefTabDiscardObserver() override;
++
++  void Start();
++  void Stop();
++
++  // resource_coordinator::LifecycleUnitObserver:
++  void OnLifecycleUnitStateChanged(
++      resource_coordinator::LifecycleUnit* lifecycle_unit,
++      resource_coordinator::LifecycleUnitState last_state) override;
++
++ private:
++  bool started_ = false;
++};
++
++#endif  // CEF_LIBCEF_BROWSER_CHROME_TAB_DISCARD_OBSERVER_H_
+-- 
+2.56.0
+
