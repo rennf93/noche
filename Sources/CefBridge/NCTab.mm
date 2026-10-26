@@ -74,7 +74,15 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 @synthesize browser = _browser, closeRequested = _closeRequested;
 @synthesize faviconListSeen = _faviconListSeen, clearFaviconAtLoadEnd = _clearFaviconAtLoadEnd, lastLoadURL = _lastLoadURL;
 
+#ifdef NOCHE_TESTHOOKS
+static BOOL g_force_html_fullscreen = NO;
++ (void)testForceHTMLFullscreen:(BOOL)on { g_force_html_fullscreen = on; }
+#endif
+
 - (BOOL)isHTMLFullscreen {
+#ifdef NOCHE_TESTHOOKS
+  if (g_force_html_fullscreen) return YES;
+#endif
   return _browser && _browser->GetHost()->IsFullscreen();
 }
 

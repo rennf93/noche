@@ -429,15 +429,24 @@ extension SelfTest {
         // Another view has focus (not the page, not the pill's field): not the page's Escape.
         ns.makeFirstResponder(nil)
         if let m = unclaimed("while the window itself was the first responder") { return finish(false, m) }
-        // HTML fullscreen: Escape leaves it. A hidden run may not be allowed to enter it (tab.isHTMLFullscreen asks the engine, CefBrowserHost::IsFullscreen).
+        // HTML fullscreen: Escape leaves it. A real engine fullscreen of the hidden window makes the test app frontmost (the owner's screen), so the
+        // default forces tab.isHTMLFullscreen on instead; NOCHE_TEST_REAL_FULLSCREEN=1 asks the page to enter it for real (owner check 14).
         ns.makeFirstResponder(page)
-        _ = await evaluate(tab, "document.documentElement.requestFullscreen().catch(() => {}); 1")
-        let fsState = await evaluate(tab, "JSON.stringify([document.fullscreenEnabled, document.fullscreenElement === null])") ?? "nil"
-        var note = "the HTML fullscreen row DID NOT RUN, the page could not enter fullscreen in the hidden run (owner check 14; [fullscreenEnabled, no element] = \(fsState))"
-        if await until(5, { tab.isHTMLFullscreen }) {
-            if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
-            _ = await evaluate(tab, "document.exitFullscreen(); 1")
-            note = "an HTML fullscreen page (entered, IsFullscreen true)"
+        var note = "an HTML fullscreen page (the engine's answer forced, no real fullscreen; NOCHE_TEST_REAL_FULLSCREEN=1 enters one)"
+        if ProcessInfo.processInfo.environment["NOCHE_TEST_REAL_FULLSCREEN"] == nil {
+            NCTab.testForceHTMLFullscreen(true)
+            let m = unclaimed("while the page was in HTML fullscreen")
+            NCTab.testForceHTMLFullscreen(false)
+            if let m { return finish(false, m) }
+        } else {
+            _ = await evaluate(tab, "document.documentElement.requestFullscreen().catch(() => {}); 1")
+            let fsState = await evaluate(tab, "JSON.stringify([document.fullscreenEnabled, document.fullscreenElement === null])") ?? "nil"
+            note = "the HTML fullscreen row DID NOT RUN, the page could not enter fullscreen in the hidden run ([fullscreenEnabled, no element] = \(fsState))"
+            if await until(5, { tab.isHTMLFullscreen }) {
+                if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
+                _ = await evaluate(tab, "document.exitFullscreen(); 1")
+                note = "an HTML fullscreen page (entered, IsFullscreen true)"
+            }
         }
         // The claim itself still works once the guards are clear.
         ns.makeFirstResponder(page)

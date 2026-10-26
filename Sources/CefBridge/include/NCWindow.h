@@ -130,6 +130,10 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// The page is in HTML fullscreen, asked of the engine per call (CefBrowserHost::IsFullscreen). The CefDisplayHandler::OnFullscreenModeChange
 /// callback is raised only by the Alloy runtime, never by this engine's Chrome-style browsers.
 @property(nonatomic, readonly) BOOL isHTMLFullscreen;
+#ifdef NOCHE_TESTHOOKS
+/// Test support: makes isHTMLFullscreen answer YES with no engine fullscreen (a real one takes the owner's screen and makes the app frontmost).
++ (void)testForceHTMLFullscreen:(BOOL)on;
+#endif
 @property(nonatomic, readonly, nullable) NSImage *favicon;
 /// The address of the icon Chrome reported for the page (the first of its list), nil when the page has none.
 @property(nonatomic, readonly, copy, nullable) NSString *faviconURL;
