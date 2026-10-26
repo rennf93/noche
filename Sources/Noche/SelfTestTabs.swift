@@ -196,9 +196,18 @@ extension SelfTest {
         let reply = await extension_(opener, #"{"what":"click","n":1,"x":\#(xy[0]),"y":\#(xy[1])}"#)
         guard reply?["ok"] as? Bool == true else { return finish(false, "extension click \(String(describing: reply))") }
         guard await until(10, { rowCount == rows + 1 }) else { return finish(false, "no new row after the click (rows=\(rowCount))") }
+        // The new tab is the engine's own (blank for a moment, then b.html): once it loaded, the New Tab card holds no focus and the page is where keys go.
+        guard let linked = win.activeTab, linked !== opener, await until(15, { linked.url.hasSuffix("b.html") && !linked.isLoading }) else { return finish(false, "the new tab never loaded b.html (\(win.activeTab?.url ?? "nil"))") }
+        _ = await until(2, { !ctl.newTabShown && !ctl.commandBar.isOpen })
+        guard !ctl.newTabShown, !ctl.commandBar.isOpen else { return finish(false, "after the load the New Tab card is still up (surface \(ctl.newTabShown), bar open \(ctl.commandBar.isOpen))") }
+        guard let ns = ctl.nsWindow, let page = findView(ofClass: "RenderWidgetHostViewCocoa", in: win.chromeHost) ?? win.webView else { return finish(false, "no page view in the window") }
+        let responder = ns.firstResponder
+        let inPage = responder.map { r in (r as? NSView).map { $0 === page || $0.isDescendant(of: page) } ?? false } ?? false
+        guard inPage else { return finish(false, "after the link's tab loaded, first responder is \(String(describing: responder)), not the page (the card took it and never gave it back)") }
+        guard await pageTakesKeys(linked, page, "blank-link") else { return finish(false, "the page took no key in 15 s after the target=_blank tab loaded") }
         try? await Task.sleep(for: .milliseconds(500))
         finish(rowCount == rows + 1 && selected == 1 && win.tabs.count == rows + 1 && ownWindows() == 1 && violations.isEmpty,
-               "target=_blank click: one new row at index \(selected.map(String.init) ?? "nil") (opener 0), active; rows=\(rowCount) engine tabs=\(win.tabs.count) windows=\(ownWindows()) \(violations)")
+               "target=_blank click: one new row at index \(selected.map(String.init) ?? "nil") (opener 0), active; the New Tab card is gone, the page holds first responder and takes keys; rows=\(rowCount) engine tabs=\(win.tabs.count) windows=\(ownWindows()) \(violations)")
     }
 
     /// Cmd+L, the text, Return: the way a person navigates. False when the command bar did not take the text.

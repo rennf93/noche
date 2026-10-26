@@ -48,6 +48,15 @@ public struct SiteEntry: Equatable, Sendable {
 }
 
 /// URL text for rows and the field: no scheme, no leading "www.", no single trailing "/"; path and query stay.
+/// What a typed token is matched by: a leading `http://` or `https://` and `www.` are dropped (an address is stored with them, the bar shows it without).
+/// A token that is nothing but those stays as typed.
+public func typedWithoutSchemeAndWww(_ typed: String) -> String {
+    var r = Substring(typed)
+    for p in ["https://", "http://"] where r.lowercased().hasPrefix(p) { r = r.dropFirst(p.count); break }
+    if r.lowercased().hasPrefix("www.") { r = r.dropFirst(4) }
+    return r.isEmpty ? typed : String(r)
+}
+
 public func urlDisplay(_ url: String) -> String {
     var s = Substring(url)
     if let r = s.range(of: "://") { s = s[r.upperBound...] }

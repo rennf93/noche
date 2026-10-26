@@ -84,6 +84,15 @@ final class PageStoreTests: XCTestCase {
         XCTAssertEqual(try s.pageCandidates(prefix: "o", limit: 1).count, 1)
     }
 
+    func testTypedSchemeAndWwwAreIgnored() throws {
+        let s = try Store.inMemory()
+        try s.recordVisit(url: "https://github.com/", title: "GitHub", typed: false, at: at(1))
+        for typed in ["https://git", "http://git", "www.git", "https://www.git", "HTTPS://GIT", "git"] {
+            XCTAssertEqual(try s.pageCandidates(prefix: typed).map(\.url), ["https://github.com/"], typed)
+        }
+        XCTAssertTrue(try s.pageCandidates(prefix: "https://zzz").isEmpty)
+    }
+
     func testLikeWildcardsAreEscaped() throws {
         let s = try Store.inMemory()
         try s.recordVisit(url: "https://a.com/", title: "plain", typed: false, at: at(1))

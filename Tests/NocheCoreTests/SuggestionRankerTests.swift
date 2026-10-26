@@ -35,6 +35,16 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(inline?.selectedRange, NSRange(location: 7, length: inline!.text.utf16.count - 7))
     }
 
+    func testTypedSchemeAndWwwStillMatchHistory() {
+        let gh = page("https://github.com/", host: "github.com", title: "GitHub")
+        for typed in ["https://git", "http://git", "www.git", "https://www.git"] {
+            let rows = rank(typed, pages: [gh])
+            XCTAssertEqual(rows.first?.kind, .page, typed)
+            XCTAssertEqual(rows.first?.url, "https://github.com/", typed)
+        }
+        XCTAssertNotEqual(rank("https://zzz", pages: [gh]).first?.kind, .page)
+    }
+
     func testEmptyQueryHasNoRows() { XCTAssertTrue(rank("  ").isEmpty) }
 
     func testNoHistoryQueryIsRowOne() {

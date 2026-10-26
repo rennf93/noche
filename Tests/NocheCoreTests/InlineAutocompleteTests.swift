@@ -20,6 +20,17 @@ final class InlineAutocompleteTests: XCTestCase {
         XCTAssertEqual(c?.selectedRange, NSRange(location: 2, length: 8))
         XCTAssertNil(InlineAutocomplete.completion(typed: "İ", topHit: hit("https://x.com"), justDeleted: false))
     }
+    func testSchemeTypedKeepsTheSchemeAndTheFullAddress() {
+        let r = InlineAutocomplete.completion(typed: "https://gi", topHit: hit("https://github.com/"), justDeleted: false)
+        XCTAssertEqual(r?.text, "https://github.com/")
+        XCTAssertEqual(r?.selectedRange, NSRange(location: 10, length: 9))
+        XCTAssertEqual(InlineAutocomplete.completion(typed: "HTTPS://gi", topHit: hit("https://github.com/"), justDeleted: false)?.text, "HTTPS://github.com/")
+        XCTAssertNil(InlineAutocomplete.completion(typed: "http://gi", topHit: hit("https://github.com/"), justDeleted: false))
+    }
+    func testWwwTypedCompletesOnlyWhatTheAddressHas() {
+        XCTAssertEqual(InlineAutocomplete.completion(typed: "www.gi", topHit: hit("https://www.github.com/x"), justDeleted: false)?.text, "www.github.com/x")
+        XCTAssertNil(InlineAutocomplete.completion(typed: "www.gi", topHit: hit("https://github.com/x"), justDeleted: false))
+    }
     func testNoneAfterDelete() {
         XCTAssertNil(InlineAutocomplete.completion(typed: "exam", topHit: hit("https://example.com"), justDeleted: true))
     }

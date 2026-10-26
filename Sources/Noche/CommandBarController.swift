@@ -82,6 +82,9 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         openOverlay()
     }
 
+    /// The address the overlay opened with, for the Escape that finds it untouched.
+    private var prefilled = ""
+
     func openOverlay() {
         guard let tab = owner.activeTab, let id = owner.list.activeID else { return }
         if !(isOpen && placement == .overlay) {
@@ -89,6 +92,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
             placement = .overlay
             overlayTabID = id
             state = CommandBarState(typed: Self.displayText(owner.shownURL(tab)))
+            prefilled = state.typed
             inline = nil
             attach()
             setText(state.typed)
@@ -273,7 +277,9 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         state.rows = q.isEmpty ? [] : rank(q)
         state.selected = 0
         inline = nil
-        if let c = InlineAutocomplete.completion(typed: typed, topHit: state.rows.first, justDeleted: BarHook.on("BAR_INLINE") ? false : deleting) {
+        // Text still being composed (IME) is never rewritten: setText would end the composition (negative control: BAR_IME ignores it).
+        let composing = (view.field.currentEditor() as? NSTextView)?.hasMarkedText() == true && !BarHook.on("BAR_IME")
+        if !composing, let c = InlineAutocomplete.completion(typed: typed, topHit: state.rows.first, justDeleted: BarHook.on("BAR_INLINE") ? false : deleting) {
             inline = c
             setText(c.text, selection: c.selectedRange)
         }
@@ -319,8 +325,10 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         return true
     }
 
-    /// Escape: text and rows go first; on an empty bar an overlay closes and the card gives up focus.
+    /// Escape: text and rows go first (an untouched prefilled address closes the overlay at once); on an empty bar an overlay closes and the card gives up focus.
     private func escape() {
+        // An overlay whose text is still the page's own address: one Escape closes it (negative control: BAR_ESCPREFILL clears first).
+        if placement == .overlay, !prefilled.isEmpty, editorText == prefilled, !BarHook.on("BAR_ESCPREFILL") { return close() }
         if !state.typed.isEmpty || !editorText.isEmpty {
             state = CommandBarState()
             inline = nil

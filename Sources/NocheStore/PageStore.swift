@@ -64,7 +64,7 @@ extension Store {
     /// The scheme-less url match is four LIKEs on |url|, no extra column. Ranking is the caller's job.
     public func pageCandidates(prefix: String, limit: Int = 50) throws -> [PageCandidate] {
         guard !prefix.isEmpty else { return [] }
-        let q = Self.escapeLike(prefix.lowercased()), tq = q
+        let q = Self.escapeLike(typedWithoutSchemeAndWww(prefix).lowercased()), tq = q
         return try db.read { db in
             try PageRow.all().live()
                 .filter(sql: """

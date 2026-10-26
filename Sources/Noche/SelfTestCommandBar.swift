@@ -269,6 +269,12 @@ extension SelfTest {
     func cbEscape() async {
         guard await ready(), let ctl, let win else { return }
         guard await fixtureTitleReady() else { return finish(false, "no fixture title") }
+        // An untouched prefilled address: one Escape closes the bar and the page is first responder again (after an edit, Escape clears first: below).
+        guard await openBar() else { return finish(false, "no bar") }
+        let prefilled = barText
+        guard !prefilled.isEmpty else { return finish(false, "the overlay on a loaded page has no prefilled address") }
+        press(.escape)
+        guard await until(5, { !barOpen() && inPage() }) else { return finish(false, "Escape on the untouched address '\(prefilled)': text '\(barText)' open \(barOpen()) in page \(inPage())") }
         seed("http://wx-1.test/page", "Weather 1")
         guard await openBar() else { return finish(false, "no bar") }
         barType("wx")
@@ -290,7 +296,7 @@ extension SelfTest {
         }
         press(.escape)
         guard await until(5, { barEditor == nil && barOpen() && win.webContentHidden }) else { return finish(false, "card Escape 2: editor \(barEditor != nil) open \(barOpen()) hidden \(win.webContentHidden)") }
-        finish(violations.isEmpty, "loaded page: Escape clears text and rows with the bar still open, a second Escape closes it and the page view is first responder; New Tab: Escape clears to the 3 starter rows, a second Escape unfocuses the card \(violations)")
+        finish(violations.isEmpty, "loaded page: one Escape on the untouched prefilled address closes the bar; after typing, Escape clears text and rows with the bar still open, a second Escape closes it and the page view is first responder; New Tab: Escape clears to the 3 starter rows, a second Escape unfocuses the card \(violations)")
     }
 
     // MARK: cb-arrows
@@ -377,7 +383,22 @@ extension SelfTest {
         press(.escape)
         barType("italy")
         guard barText == "italy" else { return finish(false, "a title-only match completed: \(state())") }
-        finish(violations.isEmpty, "'weather' completes to the stored page's URL with the remainder selected; Backspace deletes the completion and nothing completes again (also after a second Backspace); typing again completes; case as typed; no completion with a space or for a title-only match \(violations)")
+        // A typed scheme finds the page and completes to the whole address, scheme included.
+        press(.escape)
+        barType("https://weather")
+        guard await until(2, { barText == u }) else { return finish(false, "'https://weather': \(state()), want the whole address '\(u)'") }
+        // IME: text that is still being composed (marked) is never rewritten by a completion.
+        press(.escape)
+        guard let ed = barEditor as? NSTextView else { return finish(false, "no field editor for the composition case") }
+        ed.setMarkedText("weather", selectedRange: NSRange(location: 7, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        guard ed.hasMarkedText() else { return finish(false, "setMarkedText left the field with no marked text, the composition cannot be driven") }
+        ed.didChangeText()  // the notification a composing keystroke posts (setMarkedText alone does not post it here)
+        // The bar must have seen the composed text (rows for it), or the case proves nothing.
+        guard await until(2, { !(bar?.state.rows.isEmpty ?? true) }) else { return finish(false, "the bar did not see the composed text: typed '\(bar?.state.typed ?? "nil")' rows \(rowValues)") }
+        try? await Task.sleep(for: .milliseconds(400))
+        guard barText == "weather", ed.hasMarkedText() else { return finish(false, "while composing 'weather' the bar completed or ended the composition: \(state()) marked \(ed.hasMarkedText())") }
+        ed.unmarkText()
+        finish(violations.isEmpty, "'weather' completes to the stored page's URL with the remainder selected; Backspace deletes the completion and nothing completes again (also after a second Backspace); typing again completes; case as typed; no completion with a space or for a title-only match, 'https://weather' completes to the whole address, none while the text is marked (IME) \(violations)")
     }
 
     // MARK: cb-switch-tab

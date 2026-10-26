@@ -98,6 +98,10 @@ final class ToolbarView: DragView {
 final class AddressLabel: NSTextField {
     var onClick: (() -> Void)?
     override func mouseDown(with event: NSEvent) { onClick?() }
+    // A button for VoiceOver (its value is the address text): the press does what the click does.
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { BarHook.on("A11Y_NOADDRESS") ? .staticText : .button }  // negative control: a plain label
+    override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
 }
 
 final class DividerView: NSView {

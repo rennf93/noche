@@ -297,7 +297,14 @@ extension SelfTest {
         before = loads
         tab.loadURL(fixture("b.html"))
         guard await until(15, { loads > before && rows[0].showsPlaceholder }) else { return finish(false, "the row kept the previous favicon after a page without one \(bad)") }
-        finish(bad.isEmpty && violations.isEmpty, "rows (button, title label, selected state), New Tab row and 4 toolbar buttons and 3 window buttons labelled; the row favicon returns to the placeholder \(bad) \(violations)")
+        // The toolbar address is a button for VoiceOver: its press action opens the command bar on the loaded page.
+        expect("address", ctl.toolbar.address, "Address")
+        _ = await until(5, { !ctl.newTabShown && win.activeTab?.url.hasSuffix("b.html") == true })
+        if ctl.commandBar.isOpen { bad.append("the command bar is open before the address press") }
+        if !ctl.toolbar.address.accessibilityPerformPress() { bad.append("the address refused accessibilityPerformPress") }
+        if !(await until(5, { ctl.commandBar.isOpen && ctl.commandBar.placement == .overlay })) { bad.append("the address press did not open the command bar (open \(ctl.commandBar.isOpen))") }
+        ctl.commandBar.close()
+        finish(bad.isEmpty && violations.isEmpty, "rows (button, title label, selected state), New Tab row and 4 toolbar buttons and 3 window buttons labelled; the toolbar address is a button whose press opens the command bar; the row favicon returns to the placeholder \(bad) \(violations)")
     }
 }
 #endif

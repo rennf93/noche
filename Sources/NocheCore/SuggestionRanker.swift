@@ -9,7 +9,7 @@ public enum SuggestionRanker {
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let q = typed.lowercased()
         guard !q.isEmpty else { return [] }
-        let tokens = q.split(whereSeparator: \.isWhitespace).map(String.init)
+        let tokens = q.split(whereSeparator: \.isWhitespace).map { typedWithoutSchemeAndWww(String($0)) }
 
         var seen = Set<String>()
         let matches = pages
@@ -34,7 +34,7 @@ public enum SuggestionRanker {
 
         var head: [Suggestion] = []
         var topURL: String?
-        if tokens.count == 1, let top = matches.first(where: { urlDisplay($0.0.url).lowercased().hasPrefix(q) }) {
+        if tokens.count == 1, let top = matches.first(where: { urlDisplay($0.0.url).lowercased().hasPrefix(tokens[0]) }) {
             head.append(pageRow(top.0, top.1, tabByURL[top.0.url]))
             topURL = top.0.url
         } else if let url = AddressInput.resolve(typed, searchTemplate: probeTemplate), url.scheme != "noche-probe" {
