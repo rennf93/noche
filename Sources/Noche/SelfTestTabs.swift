@@ -384,10 +384,18 @@ extension SelfTest {
         reset(); key("g", code: 5, [.command, .shift], chars: "G"); await settle(); verify("Shift+Cmd+G", "findPrevious")
         ctl.closeFind()
         reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
+        // Cmd+Y: Noche's own History window (M1.5), no new tab.
         reset(); key("y", code: 16)
-        guard await until(10, { rowCount == 2 && win.activeTab?.url.hasPrefix("chrome://history") == true }) else { return finish(false, "Cmd+Y opened rows=\(rowCount) active \(win.activeTab?.url ?? "nil"), want a new tab at chrome://history") }
+        guard await until(10, { app.history.window.isVisible }), rowCount == 1 else { return finish(false, "Cmd+Y opened no History window (visible \(app.history.window.isVisible), rows \(rowCount))") }
         await settle(); verify("Cmd+Y", "showHistory")
-        cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W did not close the chrome://history tab") }
+        app.history.window.close()
+        // The engine's own chord (IDC_SHOW_HISTORY) is answered by the same window.
+        reset()
+        guard ctl.window(win, shouldHandleChromeCommand: ChromeCommand.showHistory), await until(10, { app.history.window.isVisible }), rowCount == 1 else {
+            return finish(false, "IDC_SHOW_HISTORY was not answered with the History window (rows \(rowCount))")
+        }
+        await settle(); verify("IDC_SHOW_HISTORY", "showHistory")
+        app.history.window.close()
         // Shift+Cmd+J: Noche's own Downloads window (M1.5), no new tab.
         reset(); key("j", code: 38, [.command, .shift], chars: "J")
         guard await until(10, { app.downloads.windowController.window.isVisible }), rowCount == 1 else { return finish(false, "Shift+Cmd+J opened no Downloads window (visible \(app.downloads.windowController.window.isVisible), rows \(rowCount))") }

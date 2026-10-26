@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #endif
     private(set) var controllers: [BrowserWindowController] = []
     let downloads = DownloadsController()
+    lazy var history = HistoryWindowController(app: self)
     var writer: StoreWriter?
     private(set) var restored: [WindowSnapshot] = []
     private(set) var storeURL: URL?
@@ -234,9 +235,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func inspectElements(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_INSPECT", note: "inspectElements") }
     @objc func javaScriptConsole(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_CONSOLE", note: "javaScriptConsole") }
     @objc func duplicateTab(_ s: Any?) { active?.duplicateTab() }
-    /// History is Chromium's own page in a new tab until M1.5 has Noche's; Downloads is Noche's own window.
-    @objc func showHistory(_ s: Any?) { openPage("chrome://history", note: "showHistory") }
+    /// History and Downloads are Noche's own windows.
+    @objc func showHistory(_ s: Any?) { if !closing { history.show() } }
     @objc func showDownloads(_ s: Any?) { if !closing { downloads.show() } }
+    /// A double click on a History row: a new tab, for a stored address whose scheme is still on the allowlist.
+    func openHistoryURL(_ url: String) {
+        guard let scheme = URL(string: url)?.scheme?.lowercased(), scheme == "http" || scheme == "https", AddressInput.allowedSchemes.contains(scheme) else { return }
+        openPage(url, note: "historyOpen")
+    }
     private func openPage(_ url: String, note: String) {
         if let a = active { a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
     }

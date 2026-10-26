@@ -239,7 +239,7 @@ enum MenuTable {
             later("Other Bookmarks", "M1.5"),
         ]),
         menu("History", [
-            app("Show History...", "history.show", #selector(AppDelegate.showHistory(_:)), enabled: always),  // chrome://history until M1.5
+            app("Show History...", "history.show", #selector(AppDelegate.showHistory(_:)), enabled: always),  // Noche's own History window (M1.5)
         ]),
         menu("Extensions", [
             later("Add Extension...", "M1.9"),

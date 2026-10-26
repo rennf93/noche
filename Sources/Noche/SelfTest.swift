@@ -159,6 +159,8 @@ final class SelfTest {
             case "tab-chords": await tabChords()
             case "move-tab-relaunch": await moveTabRelaunch()
             case "history-record": await historyRecord()
+            case "title-throttle": await titleThrottle()
+            case "history-window": await historyWindow()
             case "cb-layout": await cbLayout()
             case "cb-open": await cbOpen()
             case "cb-motion": await cbMotion()

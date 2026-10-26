@@ -74,6 +74,7 @@ extension BrowserWindowController {
         ids[tab.identifier] = nil
         typedLoads[tab.identifier] = nil
         recordedTitle[tab.identifier] = nil
+        titleThrottle.forget(tab.identifier)
         failed[tab.identifier] = nil
         finds[tab.identifier] = nil
         closing[tab.identifier] = nil
@@ -175,6 +176,7 @@ extension BrowserWindowController {
         case ChromeCommand.zoomNormal: zoom(0)
         case ChromeCommand.devTools: showDevTools()
         case ChromeCommand.showDownloads: app.showDownloads(nil)  // Cmd+Opt+L: Noche's window, not Chromium's page
+        case ChromeCommand.showHistory where !BarHook.on("HIST_NOCMD"): app.showHistory(nil)  // Cmd+Y: Noche's window, not Chromium's page
         case ChromeCommand.find: openFind()
         case ChromeCommand.findNext: findStep(forward: true)
         case ChromeCommand.findPrevious: findStep(forward: false)

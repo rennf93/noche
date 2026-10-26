@@ -26,6 +26,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// Tabs (engine ids) whose next load came from the address entry: that visit is a typed one. Cleared when the load ends or fails.
     var typedLoads: [Int: String] = [:]   // engine id to the address a typed load was asked for
     var recordedTitle: [Int: String] = [:]
+    var titleThrottle = TitleThrottle(interval: BarHook.on("NO_TITLE_THROTTLE") ? 0 : BrowserWindowController.titleInterval)  // negative control: no minimum interval
 
     let backdrop = BackdropView(frame: .zero)
     let overlay = ChromeOverlayView(frame: .zero)
@@ -383,7 +384,7 @@ enum ChromeCommand {
     static var newWindow = -1, closeWindow = -1, newTab = -1, closeTab = -1, selectNextTab = -1, selectPreviousTab = -1
     static var restoreTab = -1, selectTab0 = -1, selectLastTab = -1, moveTabNext = -1, moveTabPrevious = -1
     static var zoomPlus = -1, zoomNormal = -1, zoomMinus = -1, focusLocation = -1, devTools = -1
-    static var find = -1, findNext = -1, findPrevious = -1, closeFindOrStop = -1, showDownloads = -1
+    static var find = -1, findNext = -1, findPrevious = -1, closeFindOrStop = -1, showDownloads = -1, showHistory = -1
 
     static func resolve() {
         func id(_ name: String) -> Int {
@@ -400,6 +401,6 @@ enum ChromeCommand {
         selectTab0 = id("IDC_SELECT_TAB_0")  // IDC_SELECT_TAB_1 to _7 follow it (34018 to 34025 in cef_command_ids.h)
         zoomPlus = id("IDC_ZOOM_PLUS"); zoomNormal = id("IDC_ZOOM_NORMAL"); zoomMinus = id("IDC_ZOOM_MINUS")
         focusLocation = id("IDC_FOCUS_LOCATION"); devTools = id("IDC_DEV_TOOLS")
-        find = id("IDC_FIND"); findNext = id("IDC_FIND_NEXT"); findPrevious = id("IDC_FIND_PREVIOUS"); closeFindOrStop = id("IDC_CLOSE_FIND_OR_STOP"); showDownloads = id("IDC_SHOW_DOWNLOADS")  // Noche's own find pill answers all three: Chromium's find bar never shows
+        find = id("IDC_FIND"); findNext = id("IDC_FIND_NEXT"); findPrevious = id("IDC_FIND_PREVIOUS"); closeFindOrStop = id("IDC_CLOSE_FIND_OR_STOP"); showDownloads = id("IDC_SHOW_DOWNLOADS"); showHistory = id("IDC_SHOW_HISTORY")  // Noche's own find pill answers all three: Chromium's find bar never shows
     }
 }
