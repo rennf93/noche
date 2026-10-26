@@ -50,6 +50,7 @@ enum MainMenu {
             let menu = NSMenu(title: e.title)
             menu.autoenablesItems = true
             for s in sub where !(drift && s.title == "Show History...") { menu.addItem(item(s, app: app)) }
+            if e.title == "Bookmarks", e.id == nil, e.submenu?.contains(where: { $0.id == "bookmarks.add" }) == true { menu.delegate = app.bookmarksMenuDelegate }
             i.submenu = menu
             switch e.role {
             case .services: NSApp.servicesMenu = menu

@@ -5,16 +5,24 @@ public enum SuggestionRanker {
 
     /// Tiered, not scored across kinds: top hit, literal query, remote, tabs, sites, history. Row 0 is the selected one.
     public static func rank(query: String, pages: [PageCandidate], tabs: [TabItem], sites: [SiteEntry],
-                            remote: [String], activeTabID: TabID?, now: Date = Date()) -> [Suggestion] {
+                            remote: [String], activeTabID: TabID?, now: Date = Date(), bookmarks: [BookmarkCandidate] = []) -> [Suggestion] {
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let q = typed.lowercased()
         guard !q.isEmpty else { return [] }
         let tokens = q.split(whereSeparator: \.isWhitespace).map { typedWithoutSchemeAndWww(String($0)) }
 
+        // A bookmark joins the history pages (one that was never visited is a page of its own) and its page's frecency counts bookmarkBonus times.
+        let marked = Set(bookmarks.map(\.url))
+        let known = Set(pages.map(\.url))
+        let bookmarkPages = bookmarks.filter { !known.contains($0.url) }.compactMap { b -> PageCandidate? in
+            guard var host = URLComponents(string: b.url)?.host?.lowercased(), !host.isEmpty else { return nil }
+            if host.hasPrefix("www.") { host.removeFirst(4) }
+            return PageCandidate(url: b.url, host: host, title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
+        }
         var seen = Set<String>()
-        let matches = pages
+        let matches = (pages + bookmarkPages)
             .filter { pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: $0.host.lowercased(), title: $0.title) }
-            .map { ($0, frecency($0, now: now)) }
+            .map { ($0, frecency($0, now: now) * (marked.contains($0.url) ? bookmarkBonus : 1)) }
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 > b.1 }
                 if a.0.lastVisitAt != b.0.lastVisitAt { return a.0.lastVisitAt > b.0.lastVisitAt }
@@ -86,11 +94,14 @@ public enum SuggestionRanker {
         Suggestion(kind: .page, title: "\(p.title.isEmpty ? p.host : p.title) - \(urlDisplay(p.url))", url: p.url, tabID: tab, frecency: f)
     }
 
+    /// A bookmarked page counts double (builder value). A bookmark never visited counts as one visit.
+    static let bookmarkBonus = 2.0
+
     /// Age weights are builder numbers: 1.0 up to 4 days, 0.7 (14), 0.5 (31), 0.3 (90), 0.1 older; typed visits count double.
     static func frecency(_ p: PageCandidate, now: Date) -> Double {
         let days = max(0, now.timeIntervalSince(p.lastVisitAt)) / 86400
         let w = days <= 4 ? 1.0 : days <= 14 ? 0.7 : days <= 31 ? 0.5 : days <= 90 ? 0.3 : 0.1
-        return Double(p.visitCount + p.typedCount) * w
+        return Double(max(1, p.visitCount + p.typedCount)) * w
     }
 
     private static func words(_ s: String) -> [String] {
@@ -104,7 +115,8 @@ public enum SuggestionRanker {
         }
     }
 
-    private static func siteMatches(_ q: String, _ s: SiteEntry) -> Bool {
+    private static func siteMatches(_ typed: String, _ s: SiteEntry) -> Bool {
+        let q = typedWithoutSchemeAndWww(typed)  // the host list is matched without a typed scheme or www., as the pages are
         let label = s.host.lowercased().split(separator: ".").first.map(String.init) ?? ""
         return label.hasPrefix(q) || words(s.name).contains { $0.hasPrefix(q) }
     }

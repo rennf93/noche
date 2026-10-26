@@ -1,0 +1,156 @@
+import AppKit
+import CefBridge
+import NocheCore
+import NocheStore
+
+/// Bookmarks (M1.5 Task 6) at the app level: the bar mode, every change to the store (so each window's bar, the Bookmarks menu, the manager and the
+/// command bar follow at once), and the menu actions.
+extension AppDelegate {
+    @objc func bookmarkThisPage(_ s: Any?) { active?.bookmarkThisPage() }
+    @objc func manageBookmarks(_ s: Any?) { if !closing { bookmarksWindow.show() } }
+    /// Always, On New Tab Only and Never, by tag.
+    @objc func setBookmarksBarMode(_ s: NSMenuItem) { setBarMode(BookmarksBarMode.allCases[s.tag]) }
+    @objc func toggleBookmarksBar(_ s: Any?) {
+        guard let a = active else { return }
+        setBarMode(barMode.toggled(onNewTab: a.newTabShown))
+    }
+
+    func setBarMode(_ mode: BookmarksBarMode) {
+        BrowserWindowController.note("bookmarksBar")
+        barMode = mode
+        try? writer?.store.setSetting(BookmarksBarMode.settingKey, mode.rawValue)
+        controllers.forEach { $0.bookmarksBarModeChanged() }
+    }
+
+    func bookmarksChanged() {
+        controllers.forEach { $0.refreshBookmarks() }
+        madeBookmarksWindow?.reload()
+    }
+
+    /// Every folder with its depth, in tree order (the Cmd+D card's popup).
+    func bookmarkFolders() -> [(id: String, title: String, depth: Int)] {
+        guard let store = writer?.store else { return [] }
+        var out: [(id: String, title: String, depth: Int)] = []
+        func walk(_ b: Bookmark, _ depth: Int) {
+            out.append((b.id, b.title, depth))
+            for c in (try? store.bookmarkChildren(of: b.id)) ?? [] where c.kind == .folder { walk(c, depth + 1) }
+        }
+        for r in (try? store.bookmarkRoots()) ?? [] { walk(r, 0) }
+        return out
+    }
+
+    /// A bookmark opens a stored address, so its scheme is checked again (as a History row's is).
+    func openBookmark(_ b: Bookmark, newTab: Bool) {
+        guard b.kind == .url, let url = b.url, let scheme = URL(string: url)?.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              AddressInput.allowedSchemes.contains(scheme) else { return }
+        if let a = active { a.openBookmark(url, newTab: newTab) } else if !closing { BrowserWindowController.note("bookmarkOpen"); newWindow(url: url) }
+    }
+
+    func renameBookmark(_ id: String, to title: String) {
+        do { try writer?.store.renameBookmark(id: id, title: title) } catch { logBookmark("rename", error) }
+        bookmarksChanged()
+    }
+
+    func deleteBookmark(_ id: String) {
+        do { try writer?.store.deleteBookmark(id: id) } catch { logBookmark("delete", error) }
+        bookmarksChanged()
+    }
+
+    func addBookmarkFolder(title: String, parentId: String) {
+        do { try writer?.store.addFolder(title: title, parentId: parentId) } catch { logBookmark("add folder", error) }
+        bookmarksChanged()
+    }
+
+    func logBookmark(_ what: String, _ error: any Error) {
+        FileHandle.standardError.write(Data("NOCHE bookmark \(what) failed: \(error)\n".utf8))
+    }
+}
+
+/// The dynamic part of the Bookmarks menu, rebuilt each time it opens: Recent Bookmarks (the 5 newest) under the first separator, and the trees of
+/// "Bookmarks Bar" and "Other Bookmarks". None of these rows carries the table's mark: they are not part of the menu table.
+@MainActor
+final class BookmarksMenuDelegate: NSObject, NSMenuDelegate {
+    unowned let app: AppDelegate
+    private static let dynamic = NSUserInterfaceItemIdentifier("noche.menu.bookmarks.dynamic")
+    init(app: AppDelegate) { self.app = app }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        for i in menu.items.reversed() where i.identifier == Self.dynamic { menu.removeItem(i) }
+        guard let store = app.writer?.store else { return }
+        let open: @MainActor (Bookmark) -> Void = { [weak app] b in app?.openBookmark(b, newTab: NSApp.currentEvent?.modifierFlags.contains(.command) == true) }
+        // Recent Bookmarks after the first separator.
+        let recent = (try? store.recentBookmarks(limit: 5)) ?? []
+        if let at = menu.items.firstIndex(where: \.isSeparatorItem) {
+            var rows: [NSMenuItem] = []
+            if !recent.isEmpty {
+                let header = NSMenuItem(title: "Recent Bookmarks", action: nil, keyEquivalent: "")
+                rows.append(header)
+                rows += recent.map { BookmarkMenus.item($0, open: open) }
+                rows.append(.separator())
+            }
+            for (k, r) in rows.enumerated() { r.identifier = Self.dynamic; menu.insertItem(r, at: at + 1 + k) }
+        }
+        let roots = (try? store.bookmarkRoots()) ?? []
+        for root in roots {
+            guard let sub = menu.items.first(where: { $0.title == root.title && $0.identifier == MenuTable.mark })?.submenu else { continue }
+            sub.removeAllItems()
+            sub.autoenablesItems = false
+            BookmarkMenus.fill(sub, store: store, folder: root, open: open)
+        }
+    }
+}
+
+/// Menus of bookmarks: a folder is a submenu, a page an item that runs |open|.
+@MainActor
+enum BookmarkMenus {
+    static func item(_ b: Bookmark, open: @escaping @MainActor (Bookmark) -> Void) -> NSMenuItem {
+        let title = b.title.isEmpty ? (b.url ?? "") : b.title
+        let item = NSMenuItem(title: title.count > 60 ? String(title.prefix(60)) + "..." : title, action: #selector(ContextMenus.Target.fire(_:)), keyEquivalent: "")
+        item.target = ContextMenus.target
+        item.representedObject = ContextMenus.Run { MainActor.assumeIsolated { open(b) } }
+        item.toolTip = b.url
+        return item
+    }
+
+    /// The children of |folder| (a folder with none shows a disabled "(Empty)").
+    static func fill(_ menu: NSMenu, store: Store, folder: Bookmark, open: @escaping @MainActor (Bookmark) -> Void) {
+        let children = (try? store.bookmarkChildren(of: folder.id)) ?? []
+        if children.isEmpty {
+            let empty = NSMenuItem(title: "(Empty)", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+        for c in children {
+            if c.kind == .folder {
+                let i = NSMenuItem(title: c.title, action: nil, keyEquivalent: "")
+                let sub = NSMenu(title: c.title)
+                sub.autoenablesItems = false
+                fill(sub, store: store, folder: c, open: open)
+                i.submenu = sub
+                menu.addItem(i)
+            } else {
+                menu.addItem(item(c, open: open))
+            }
+        }
+    }
+
+    /// The menu a folder chip shows (or, with |folder| nil, the overflow chip: the rest of the bar's rows).
+    static func menu(folder: Bookmark?, rest: [Bookmark], store: Store, open: @escaping @MainActor (Bookmark) -> Void) -> NSMenu {
+        let menu = NSMenu(title: folder?.title ?? "")
+        menu.autoenablesItems = false
+        if let folder { fill(menu, store: store, folder: folder, open: open); return menu }
+        for c in rest {
+            if c.kind == .folder {
+                let i = NSMenuItem(title: c.title, action: nil, keyEquivalent: "")
+                let sub = NSMenu(title: c.title)
+                sub.autoenablesItems = false
+                fill(sub, store: store, folder: c, open: open)
+                i.submenu = sub
+                menu.addItem(i)
+            } else {
+                menu.addItem(item(c, open: open))
+            }
+        }
+        return menu
+    }
+}

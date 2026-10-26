@@ -15,6 +15,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var controllers: [BrowserWindowController] = []
     let downloads = DownloadsController()
     lazy var history = HistoryWindowController(app: self)
+    /// Built on first use (a bookmark change before that has no window to reload).
+    var madeBookmarksWindow: BookmarksWindowController?
+    var bookmarksWindow: BookmarksWindowController {
+        if let w = madeBookmarksWindow { return w }
+        let w = BookmarksWindowController(app: self)
+        madeBookmarksWindow = w
+        return w
+    }
+    lazy var bookmarksMenuDelegate = BookmarksMenuDelegate(app: self)
+    /// View > Show Bookmarks Bar (stored in the `setting` table as `bookmarksBar`, loaded when the store opens).
+    var barMode = BookmarksBarMode.newTabOnly
     var writer: StoreWriter?
     private(set) var restored: [WindowSnapshot] = []
     private(set) var storeURL: URL?
@@ -133,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for (k, v) in settings where (k == "quitBehavior" && ["preserve", "close"].contains(v)) || (k == "suggestRemote" && ["0", "1"].contains(v)) {
             try? store.setSetting(k, v)
         }
+        barMode = BookmarksBarMode(stored: try? store.setting(BookmarksBarMode.settingKey))
         let w = StoreWriter(store: store)
         w.snapshot = { [weak self] id in
             guard let self, let i = self.controllers.firstIndex(where: { $0.id == id }) else { return nil }

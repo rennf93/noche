@@ -38,6 +38,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// Find state per tab (engine id): the pill's text and the last count and active match the engine reported. A tab with no entry is not searching.
     var finds: [Int: FindState] = [:]
     let permissionPrompt = PermissionPromptView(frame: .zero)
+    let bookmarksBar = BookmarksBarView(frame: .zero)
+    let bookmarkEditor = BookmarkEditView(frame: .zero)
+    /// What Bookmark All Tabs saves (the tabs when the card opened), and the tab the Cmd+D card belongs to.
+    var bookmarkTabs: [(title: String, url: String)] = []
+    var bookmarkEditorTab: Int?
     /// Site permission requests the engine waits for, oldest first; the card shows the first one of the active tab.
     var permissionQueue: [PermissionRequest] = []
     var lastFindText = ""   // the window's last search text: Cmd+F and Cmd+G open the pill with it after Escape, as Chrome does
@@ -121,7 +126,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in MainActor.assumeIsolated { self?.restoring = false } }
         }
         window = NCWindow(url: url, frame: frame, mode: app.hidden ? .hidden : .normal, delegate: self)
-        window.webInsets = ChromeLayout(size: frame.size, cardX: cardX).webInsets
+        window.webInsets = ChromeLayout(size: frame.size, cardX: cardX, barHeight: app.barMode.visible(onNewTab: false) ? ChromeStyle.bookmarksBarHeight : 0).webInsets
         window.webCornerRadius = ChromeStyle.cardRadius
     }
 
@@ -180,6 +185,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         overlay.addSubview(findBar)
         overlay.addSubview(permissionPrompt)
         setUpPermissionPrompt()
+        overlay.addSubview(bookmarksBar)
+        overlay.addSubview(bookmarkEditor)
+        setUpBookmarks()
         overlay.addSubview(border)
         setUpFind()
         toolbar.zoom.onClick = { [weak self] in self?.zoom(0) }
@@ -212,8 +220,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 
     func applyLayout() {
         guard installed else { return }
-        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX)
+        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX, barHeight: barPushesPage ? ChromeStyle.bookmarksBarHeight : 0, barShown: barVisible)
         backdrop.card.frame = layout.card
+        bookmarksBar.frame = layout.bookmarksBar
+        bookmarksBar.isHidden = !barVisible
+        bookmarkEditor.frame = layout.bookmarkEditor
         toolbar.frame = layout.toolbar
         findBar.frame = layout.findBar
         permissionPrompt.frame = layout.permissionPrompt
@@ -240,6 +251,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         syncFind()
         syncZoom()
         syncPermissionPrompt()
+        syncBookmarkEditor()
     }
 
     // MARK: sidebar motion (live-ui.md section 8)

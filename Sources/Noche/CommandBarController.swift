@@ -266,7 +266,10 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     private func rank(_ q: String) -> [Suggestion] {
         let first = q.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? q
         let pages = ((try? owner.app.writer?.store.pageCandidates(prefix: first, limit: 50)) ?? nil) ?? []
-        return SuggestionRanker.rank(query: q, pages: pages, tabs: owner.list.items, sites: Self.sites, remote: state.remote, activeTabID: owner.list.activeID)
+        // Read from the store on every keystroke, never kept: a bookmark that was deleted is gone from the next row list.
+        let marks = ((try? owner.app.writer?.store.urlBookmarks()) ?? nil)?.map { BookmarkCandidate(url: $0.url ?? "", title: $0.title, addedAt: $0.createdAt) } ?? []
+        return SuggestionRanker.rank(query: q, pages: pages, tabs: owner.list.items, sites: Self.sites, remote: state.remote, activeTabID: owner.list.activeID,
+                                     bookmarks: BarHook.on("BM_NOSUGGEST") ? [] : marks)
     }
 
     private func refresh(deleting: Bool) {

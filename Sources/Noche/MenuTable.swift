@@ -193,11 +193,11 @@ enum MenuTable {
             later("Focus Previous Split Pane", "view.focusPreviousSplitPane", "M1.10"),
             sep,
             menu("Show Bookmarks Bar", [
-                later("Always", "view.bookmarksBar.always", "M1.5"),
-                later("On New Tab Only", "view.bookmarksBar.newTabOnly", "M1.5"),
-                later("Never", "view.bookmarksBar.never", "M1.5"),
+                app("Always", "view.bookmarksBar.always", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .always }, tag: 0),
+                app("On New Tab Only", "view.bookmarksBar.newTabOnly", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .newTabOnly }, tag: 1),
+                app("Never", "view.bookmarksBar.never", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .never }, tag: 2),
                 sep,
-                later("Toggle Bookmarks Bar", "view.toggleBookmarksBar", "M1.5"),
+                app("Toggle Bookmarks Bar", "view.toggleBookmarksBar", #selector(AppDelegate.toggleBookmarksBar(_:)), enabled: always),
             ]),
             app("Show Full URL", nil, #selector(AppDelegate.toggleFullURL(_:)), enabled: always, state: { $0.app.showFullURL }),
             sep,
@@ -232,11 +232,12 @@ enum MenuTable {
             later("Change Icon...", "M1.6"),
         ]),
         menu("Bookmarks", [
-            later("Bookmark This Page", "bookmarks.add", "M1.5"),
-            later("Manage Bookmarks", "bookmarks.manage", "M1.5"),
+            app("Bookmark This Page", "bookmarks.add", #selector(AppDelegate.bookmarkThisPage(_:)),
+                enabled: { $0.window?.activeTab.map { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") } ?? false }),
+            app("Manage Bookmarks", "bookmarks.manage", #selector(AppDelegate.manageBookmarks(_:)), enabled: always),
             sep,
-            later("Bookmarks Bar", "M1.5"),
-            later("Other Bookmarks", "M1.5"),
+            menu("Bookmarks Bar", []),  // the rows of both trees and Recent Bookmarks are added when the menu opens (BookmarksMenuDelegate)
+            menu("Other Bookmarks", []),
         ]),
         menu("History", [
             app("Show History...", "history.show", #selector(AppDelegate.showHistory(_:)), enabled: always),  // Noche's own History window (M1.5)

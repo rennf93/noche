@@ -37,6 +37,18 @@ public struct PageCandidate: Equatable, Sendable {
     }
 }
 
+/// A stored bookmark that can be suggested (an address, its title and when it was added).
+public struct BookmarkCandidate: Equatable, Sendable {
+    public let url: String
+    public let title: String
+    public let addedAt: Date
+    public init(url: String, title: String, addedAt: Date) {
+        self.url = url
+        self.title = title
+        self.addedAt = addedAt
+    }
+}
+
 /// A built-in site list row.
 public struct SiteEntry: Equatable, Sendable {
     public let name: String

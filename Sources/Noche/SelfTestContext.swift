@@ -172,7 +172,7 @@ extension SelfTest {
         }
         guard let a = await open() else { return finish(false, "no sidebar menu from a right click on empty space") }
         guard titles(a.menu) == want else { return finish(false, "sidebar menu \(titles(a.menu)), want \(want)") }
-        guard enabledTitles(a.menu) == ["New Tab", "Auto-Hide Tabs", "Close All Tabs"] else { return finish(false, "enabled items \(enabledTitles(a.menu)) with a page loaded and nothing closed yet") }
+        guard enabledTitles(a.menu) == ["New Tab", "Bookmark All Tabs", "Auto-Hide Tabs", "Close All Tabs"] else { return finish(false, "enabled items \(enabledTitles(a.menu)) with a page loaded and nothing closed yet") }
         for t in ["New Tab", "Reopen Closed Tab", "Show Tabs in Sidebar", "Auto-Hide Tabs", "Close All Tabs"] where !sameKey(item(a.menu, t), menuItem(t)) { return finish(false, "\(t) key differs from the menu bar's") }
         guard item(a.menu, "Show Tabs in Sidebar")?.state == .on, item(a.menu, "Auto-Hide Tabs")?.state == .off else { return finish(false, "check marks: Show Tabs in Sidebar on, Auto-Hide Tabs off") }
         BrowserWindowController.actionCounts = [:]

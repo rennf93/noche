@@ -140,6 +140,43 @@ final class BookmarkStoreTests: XCTestCase {
     }
 }
 
+extension BookmarkStoreTests {
+    func testUrlBookmarksListsReachableUrlsOnly() throws {
+        let (s, bar, other) = try make()
+        _ = try s.addBookmark(title: "a", url: "https://a.com", parentId: bar.id)
+        let f = try s.addFolder(title: "f", parentId: other.id)
+        _ = try s.addBookmark(title: "b", url: "https://b.com", parentId: f.id)
+        let gone = try s.addBookmark(title: "c", url: "https://c.com", parentId: bar.id)
+        try s.deleteBookmark(id: gone.id)
+        XCTAssertEqual(Set(try s.urlBookmarks().map(\.url)), ["https://a.com", "https://b.com"])
+        try s.deleteBookmark(id: f.id)
+        XCTAssertEqual(try s.urlBookmarks().map(\.url), ["https://a.com"])
+    }
+
+    func testAddFolderWithBookmarksKeepsOrderInOneStep() throws {
+        let (s, bar, _) = try make()
+        _ = try s.addBookmark(title: "first", url: "https://first.com", parentId: bar.id)
+        let folder = try s.addFolder(title: "New Folder", parentId: bar.id, bookmarks: [("one", "https://1.com"), ("two", "https://2.com"), ("three", "https://3.com")])
+        XCTAssertEqual(try titles(s, bar), ["first", "New Folder"])
+        XCTAssertEqual(try s.bookmarkChildren(of: folder.id).map(\.title), ["one", "two", "three"])
+        try dense(s, folder)
+        XCTAssertThrowsError(try s.addFolder(title: "x", parentId: "missing", bookmarks: [("a", "https://a.com")]))
+        XCTAssertEqual(try titles(s, bar), ["first", "New Folder"])
+    }
+
+    func testBarModeSettingSurvivesReopen() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("noche-bm-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("noche.sqlite")
+        do {
+            let s = try Store.open(at: file)
+            XCTAssertNil(try s.setting("bookmarksBar"))
+            try s.setSetting("bookmarksBar", "never")
+        }
+        XCTAssertEqual(try Store.open(at: file).setting("bookmarksBar"), "never")
+    }
+}
+
 private final class LockedBox: @unchecked Sendable {
     private let lock = NSLock()
     private var v: Double

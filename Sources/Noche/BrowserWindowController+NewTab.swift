@@ -45,6 +45,7 @@ extension BrowserWindowController {
         newTabPage = nil
         commandBar.hideCard()
         window.webContentHidden = false
+        applyLayout()  // the bar (On New Tab Only) goes, or pushes the page down (Always)
     }
 
     /// The page surface rect, in host coordinates (origin bottom-left): the web insets.

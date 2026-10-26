@@ -178,6 +178,34 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(rank("git", sites: sites).filter { $0.kind == .site }.map(\.url), ["https://github.com"])
     }
 
+    func testTypedSchemeAndWwwStillMatchSites() {
+        let sites = [SiteEntry(name: "GitHub", host: "github.com"), SiteEntry(name: "Weather.com", host: "weather.com")]
+        for typed in ["www.git", "https://git", "http://www.git", "https://www.git"] {
+            XCTAssertTrue(rank(typed, sites: sites).contains { $0.kind == .site && $0.url == "https://github.com" }, typed)
+        }
+        XCTAssertFalse(rank("www.git", sites: sites).contains { $0.url == "https://weather.com" })
+    }
+
+    func testBookmarkOnlyPageIsARow() {
+        let b = BookmarkCandidate(url: "https://docs.example.org/guide", title: "Team Guide", addedAt: now)
+        let rows = SuggestionRanker.rank(query: "team", pages: [], tabs: [], sites: [], remote: [], activeTabID: nil, now: now, bookmarks: [b])
+        XCTAssertTrue(rows.contains { $0.kind == .page && $0.url == "https://docs.example.org/guide" && $0.title.hasPrefix("Team Guide") })
+        let none = SuggestionRanker.rank(query: "team", pages: [], tabs: [], sites: [], remote: [], activeTabID: nil, now: now, bookmarks: [])
+        XCTAssertFalse(none.contains { $0.kind == .page })
+    }
+
+    func testBookmarkedPageGainsDoubleFrecency() {
+        let a = page("https://a.example/x", host: "a.example", title: "Note one", visits: 3)
+        let b = page("https://b.example/x", host: "b.example", title: "Note two", visits: 4)
+        let plain = SuggestionRanker.rank(query: "note", pages: [a, b], tabs: [], sites: [], remote: [], activeTabID: nil, now: now)
+        XCTAssertEqual(plain.filter { $0.kind == .page }.first?.url, "https://b.example/x")
+        let marked = SuggestionRanker.rank(query: "note", pages: [a, b], tabs: [], sites: [], remote: [], activeTabID: nil, now: now,
+                                           bookmarks: [BookmarkCandidate(url: "https://a.example/x", title: "Note one", addedAt: now)])
+        let pages = marked.filter { $0.kind == .page }
+        XCTAssertEqual(pages.first?.url, "https://a.example/x")
+        XCTAssertEqual(pages.first?.frecency, 6)  // 3 visits at 1.0, doubled
+    }
+
     func testUrlDisplay() {
         XCTAssertEqual(urlDisplay("https://www.example.com/"), "example.com")
         XCTAssertEqual(urlDisplay("http://a.com/p?q=1"), "a.com/p?q=1")

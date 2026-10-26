@@ -120,6 +120,34 @@ extension Store {
         }
     }
 
+    /// Every reachable url bookmark, newest first (the command bar ranks them on each keystroke, so a deleted one is gone at once).
+    public func urlBookmarks(limit: Int = 500) throws -> [Bookmark] {
+        try db.read { db in
+            try BookmarkRow.fetchAll(db, sql: Self.reachable + " ORDER BY createdAt DESC, rowid DESC LIMIT ?",
+                                     arguments: [Schema.defaultProfileID, limit]).compactMap(\.bookmark)
+        }
+    }
+
+    /// A folder holding one url bookmark per entry, in order, in one transaction (Bookmark All Tabs).
+    @discardableResult
+    public func addFolder(title: String, parentId: String, bookmarks: [(title: String, url: String)]) throws -> Bookmark {
+        let t = now().timeIntervalSince1970
+        let folderId = UUID().uuidString
+        return try db.write { db in
+            let parent = try Self.folder(db, parentId)
+            try db.execute(sql: """
+                INSERT INTO bookmark (id, profileId, parentId, kind, title, url, position, createdAt, updatedAt) VALUES (?, ?, ?, 'folder', ?, NULL, 0, ?, ?)
+                """, arguments: [folderId, parent.profileId, parentId, title, t, t])
+            try Self.renumber(db, parent: parentId, excluding: folderId, inserting: folderId, at: nil, now: t)
+            for (i, b) in bookmarks.enumerated() {
+                try db.execute(sql: """
+                    INSERT INTO bookmark (id, profileId, parentId, kind, title, url, position, createdAt, updatedAt) VALUES (?, ?, ?, 'url', ?, ?, ?, ?, ?)
+                    """, arguments: [UUID().uuidString, parent.profileId, folderId, b.title, b.url, i, t, t])
+            }
+            return try Self.bookmarkOrThrow(Self.row(db, folderId))
+        }
+    }
+
     public func bookmark(forURL url: String) throws -> Bookmark? {
         try db.read { db in
             try BookmarkRow.fetchOne(db, sql: Self.reachable + " AND url = ? ORDER BY createdAt DESC, rowid DESC",

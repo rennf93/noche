@@ -196,9 +196,10 @@ extension BrowserWindowController {
 #if NOCHE_TESTHOOKS
         if ContextMenus.env("NOCHE_TEST_CTX_NOREOPEN") { reopen.enabled = false }  // negative control: Reopen Closed Tab stays disabled
 #endif
+        let bookmarkAll = CtxEntry(title: "Bookmark All Tabs", run: { [weak self] in self?.bookmarkAllTabs() }, enabled: !bookmarkableTabs.isEmpty)
         return [tableRow("file.newTab") { [weak self] in self?.newTab() }, reopen, .sep,
                 .later("New Group", "M1.6"), .later("New Live Group", "M1.6", submenu: true), .later("New Profile...", "M1.7"), .sep,
-                .later("Bookmark All Tabs", "M1.5"), .sep,
+                bookmarkAll, .sep,
                 .later("Show Tabs in Sidebar", "M1.6", id: "view.showTabsInSidebar", checked: true),
                 tableRow("view.autoHideTabs") { [weak self] in self?.toggleSidebar() }, .sep, closeAll]
     }
