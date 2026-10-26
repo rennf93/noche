@@ -703,3 +703,253 @@ datasharing=off run=18 rc=0 NOCHE_TEST quit-early pass quit right after the firs
 datasharing=off run=19 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
 datasharing=off run=20 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
 RESULT: DataSharing ON 20 of 20 clean (rc 0, pass, no crash report); DataSharing OFF (shipped) 20 of 20 clean.
+
+## RED (pre-patch engine 3659, rerun)
+Engine: vendor/cef = 156.0.14-noche.3659+g18b1359 (patches 0001 to 0006 only), fetched with CEF_DIST=<distrib 3659> scripts/fetch-cef.sh (vendor/CEF-VERSION.txt checked). Probe built at 9891e2d plus the surfaces.mm failure-path print, API switches off where the API is absent (NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 only), run by scripts/probe-engine.sh, raw PROBE lines below (no edits). Rewritten commit hashes: 0007 73be396, 0008 3d40c61, 0009 e6fc218, 0010 2a02fee, app 59ee574.
+Command: scripts/probe-engine.sh download-tab-close download-tab-close-start download-keep-stream download-keep-complete download-restart-1 download-restart-2 (no NOCHE_DOWNLOAD_API: the profile handler is not in this engine, each missing-API assertion fails by design; the abort shows as the cancelled download, line "no in-progress event ... OnResourceLoadComplete ... status=4" for the kept-request check).
+Note: download-keep-stream passes on both engines, it is the non-regression guard for patch 0008 (a request without a download must not outlive its tab).
+PROBE download-tab-close info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info assert profile-handler-api FAIL: CefRequestContext::SetDownloadHandler is not in this engine build (NOCHE_DOWNLOAD_API unset): events for a download whose tab is gone cannot be observed through a profile handler
+PROBE download-tab-close info OnDownloadUpdated id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=25165824 path= t=0.9s (events so far 1)
+PROBE download-tab-close info OnBeforeDownload id=86 browser=1 name=mid.bin url=http://127.0.0.1:52816/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin
+PROBE download-tab-close info download started (navigation): id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=7 recv=1835008 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=1.9s
+PROBE download-tab-close info OnDownloadUpdated id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=2686976 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=2.4s (events so far 5)
+PROBE download-tab-close info OnDownloadUpdated id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5308416 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s (events so far 8)
+PROBE download-tab-close info assert control-open-tab-grows PASS: tab still open: dir bytes 1835008 -> 5439488 over 2 s
+PROBE download-tab-close info tab 2 closed (gone=1); dir bytes 0; events so far 8; last: id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5308416 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s
+PROBE download-tab-close info assert a-partial-grows-after-close FAIL: dir bytes 0 -> 0 over 2.5 s after the tab was gone; files (empty)
+PROBE download-tab-close info assert b-profile-handler-events-without-browser FAIL: 0 in-progress OnDownloadUpdated events with browser=0 for id 86 after close (all events after close: 0)
+PROBE download-tab-close info assert c1-pause-stops-growth FAIL: after Pause(): dir bytes 0 -> 0 over 2.5 s (want a non-empty partial that stopped growing)
+PROBE download-tab-close info assert c2-resume-restarts-growth FAIL: after Resume(): dir bytes 0 -> 0 over 3 s
+PROBE download-tab-close info assert d1-completes-within-40s FAIL: files (empty); last event: id=86 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5308416 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s
+PROBE download-tab-close info assert d2-sha256-equals-pattern FAIL: file (unreadable or short) expected f10c2d19a4cd4f16219903d374526faf4c1249ba2e2177d57e30f5a2aeb27759
+PROBE download-tab-close info assert e-downloads-page-not-canceled FAIL: chrome://downloads row mid.bin status word: Canceled
+PROBE download-tab-close info alpha-guard hooked calls=5
+PROBE download-tab-close info activate calls blocked=0
+PROBE download-tab-close fail tab-close download (navigation variant): 8 assertion(s) failed: profile-handler-api, a-partial-grows-after-close, b-profile-handler-events-without-browser, c1-pause-stops-growth, c2-resume-restarts-growth, d1-completes-within-40s, d2-sha256-equals-pattern, e-downloads-page-not-canceled
+PROBE download-tab-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close fail exit-rc=1 watchdog=0
+PROBE download-tab-close info frontmost samples=104 probe-frontmost=0 unknown=0
+PROBE download-tab-close info crash reports: none new
+PROBE download-tab-close-start info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info assert profile-handler-api FAIL: CefRequestContext::SetDownloadHandler is not in this engine build (NOCHE_DOWNLOAD_API unset): events for a download whose tab is gone cannot be observed through a profile handler
+PROBE download-tab-close-start info OnDownloadUpdated id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=25165824 path= t=0.9s (events so far 1)
+PROBE download-tab-close-start info OnBeforeDownload id=87 browser=1 name=mid.bin url=http://127.0.0.1:52816/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin
+PROBE download-tab-close-start info download started (StartDownload): id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=7 recv=1835008 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=1.9s
+PROBE download-tab-close-start info OnDownloadUpdated id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=2752512 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=2.4s (events so far 5)
+PROBE download-tab-close-start info OnDownloadUpdated id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5439488 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s (events so far 8)
+PROBE download-tab-close-start info assert control-open-tab-grows PASS: tab still open: dir bytes 1900544 -> 5570560 over 2 s
+PROBE download-tab-close-start info tab 2 closed (gone=1); dir bytes 0; events so far 8; last: id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5439488 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s
+PROBE download-tab-close-start info assert a-partial-grows-after-close FAIL: dir bytes 0 -> 0 over 2.5 s after the tab was gone; files (empty)
+PROBE download-tab-close-start info assert b-profile-handler-events-without-browser FAIL: 0 in-progress OnDownloadUpdated events with browser=0 for id 87 after close (all events after close: 0)
+PROBE download-tab-close-start info assert c1-pause-stops-growth FAIL: after Pause(): dir bytes 0 -> 0 over 2.5 s (want a non-empty partial that stopped growing)
+PROBE download-tab-close-start info assert c2-resume-restarts-growth FAIL: after Resume(): dir bytes 0 -> 0 over 3 s
+PROBE download-tab-close-start info assert d1-completes-within-40s FAIL: files (empty); last event: id=87 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=21 recv=5439488 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=3.9s
+PROBE download-tab-close-start info assert d2-sha256-equals-pattern FAIL: file (unreadable or short) expected f10c2d19a4cd4f16219903d374526faf4c1249ba2e2177d57e30f5a2aeb27759
+PROBE download-tab-close-start info assert e-downloads-page-not-canceled FAIL: chrome://downloads row mid.bin status word: Canceled
+PROBE download-tab-close-start info alpha-guard hooked calls=5
+PROBE download-tab-close-start info activate calls blocked=0
+PROBE download-tab-close-start fail tab-close download (StartDownload variant): 8 assertion(s) failed: profile-handler-api, a-partial-grows-after-close, b-profile-handler-events-without-browser, c1-pause-stops-growth, c2-resume-restarts-growth, d1-completes-within-40s, d2-sha256-equals-pattern, e-downloads-page-not-canceled
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-tab-close-start fail exit-rc=1 watchdog=0
+PROBE download-tab-close-start info frontmost samples=104 probe-frontmost=0 unknown=0
+PROBE download-tab-close-start info crash reports: none new
+PROBE download-keep-stream info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info assert a-request-reached-server PASS: tab 2 asked the fixture server for /hold.html?keep=475049e8ae592800
+PROBE download-keep-stream info assert b-first-bytes-arrived-and-stream-open PASS: title|readyState 'hold|loading', IsLoading=1 (the document started and the response is still open)
+PROBE download-keep-stream info assert c-server-sees-connection-closed-within-5s PASS: server log line 'closed /hold.html?keep=475049e8ae592800' appeared 209 ms after CloseBrowser (limit 5000)
+PROBE download-keep-stream info assert d-on-resource-load-complete-at-most-once PASS: 1 OnResourceLoadComplete for the held request (want <= 1): browser=2 status=4 valid=0
+PROBE download-keep-stream info assert e-tab-gone PASS: the closed tab is no longer listed
+PROBE download-keep-stream info alpha-guard hooked calls=5
+PROBE download-keep-stream info activate calls blocked=0
+PROBE download-keep-stream pass kept-request contract, non-download stream: every assertion held
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-stream info frontmost samples=10 probe-frontmost=0 unknown=0
+PROBE download-keep-stream info crash reports: none new
+PROBE download-keep-complete info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info assert profile-handler-api FAIL: CefRequestContext::SetDownloadHandler is not in this engine build (NOCHE_DOWNLOAD_API unset): a kept download whose tab is gone cannot be observed through a profile handler
+PROBE download-keep-complete info OnDownloadUpdated id=88 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=25165824 path= t=0.8s (events so far 1)
+PROBE download-keep-complete info OnBeforeDownload id=88 browser=1 name=mid.bin url=http://127.0.0.1:52816/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin
+PROBE download-keep-complete info no in-progress event with bytes after 30 s; OnResourceLoadComplete for mid.bin: browser=2 status=4 valid=0; tab 2 listed: 0
+PROBE download-keep-complete info alpha-guard hooked calls=5
+PROBE download-keep-complete info activate calls blocked=0
+PROBE download-keep-complete fail download never started in the tab
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NativeWidgetMacNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-keep-complete fail exit-rc=1 watchdog=0
+PROBE download-keep-complete info frontmost samples=57 probe-frontmost=0 unknown=0
+PROBE download-keep-complete info crash reports: none new
+PROBE download-restart-1 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info OnDownloadUpdated id=89 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=0 recv=0 total=25165824 path= t=0.8s (events so far 1)
+PROBE download-restart-1 info OnBeforeDownload id=89 browser=1 name=mid.bin url=http://127.0.0.1:52816/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin
+PROBE download-restart-1 info OnDownloadUpdated id=89 browser=1 inProgress=1 paused=0 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=2752512 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=2.3s (events so far 5)
+PROBE download-restart-1 info pausing at pct=10 recv=2752512
+PROBE download-restart-1 info OnDownloadUpdated id=89 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=2752512 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=2.3s (events so far 6)
+PROBE download-restart-1 info before quit: id=89 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=10 recv=2752512 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin t=2.3s files: mid.bin:2752512
+PROBE download-restart-1 info assert prefix-on-disk-matches-pattern PASS: first 2752512 bytes of the partial: sha eb5c1f0c6116a31886261026f1640d97e650318dba902d7d1a5e834cb5272f59 pattern eb5c1f0c6116a31886261026f1640d97e650318dba902d7d1a5e834cb5272f59
+PROBE download-restart-1 info alpha-guard hooked calls=5
+PROBE download-restart-1 info activate calls blocked=0
+PROBE download-restart-1 pass launch 1: paused download recorded (id=89 recv=2752512), quitting with it paused; every assertion held
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-1 info History files copied: History:393216 
+PROBE download-restart-1 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 89|2|41|0|"noche-probe-mid.bin" 88|2|40|0|"noche-probe-mid.bin" 87|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restart-1 info frontmost samples=10 probe-frontmost=0 unknown=0
+PROBE download-restart-1 info crash reports: none new
+PROBE download-restart-2 info alpha-guard active (setAlphaValue clamped to 0; orderWindow:relativeTo:, orderFront:, orderBack:, orderFrontRegardless, makeKeyAndOrderFront: zero alpha and ignore mouse first)
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=1.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info launch 1 state: id=89 recv=2752512 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin sha=eb5c1f0c6116a31886261026f1640d97e650318dba902d7d1a5e834cb5272f59; files now: (empty)
+PROBE download-restart-2 info assert profile-handler-api FAIL: CefRequestContext::SetDownloadHandler is not in this engine build (NOCHE_DOWNLOAD_API unset): the replay of a restored download cannot be observed through a profile handler
+PROBE download-restart-2 info events received before any resume: 0
+PROBE download-restart-2 info assert a-replayed-as-interrupted-without-browser FAIL: no browser=0 event for id 89 (profile handler absent or the item was dropped)
+PROBE download-restart-2 info assert b-partial-kept-with-matching-prefix FAIL: partial /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.pglpiHZMg6/mid.bin size 0 (want >= 2752512), prefix sha (missing or short) (want eb5c1f0c6116a31886261026f1640d97e650318dba902d7d1a5e834cb5272f59)
+PROBE download-restart-2 info assert resume-callback-available FAIL: no OnDownloadUpdated callback for the item, cannot Resume()
+PROBE download-restart-2 info assert c-resume-sent-range-request FAIL: server saw Range start -1 for /mid.bin since this launch began (want 1..2752512); log: 
+PROBE download-restart-2 info assert d1-completes-within-40s FAIL: files (empty); last event: (none)
+PROBE download-restart-2 info assert d2-sha256-equals-pattern FAIL: file (unreadable or short) expected f10c2d19a4cd4f16219903d374526faf4c1249ba2e2177d57e30f5a2aeb27759
+PROBE download-restart-2 info alpha-guard hooked calls=5
+PROBE download-restart-2 info activate calls blocked=0
+PROBE download-restart-2 fail launch 2 (after clean quit): 7 assertion(s) failed: profile-handler-api, a-replayed-as-interrupted-without-browser, b-partial-kept-with-matching-prefix, resume-callback-available, c-resume-sent-range-request, d1-completes-within-40s, d2-sha256-equals-pattern
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=CefNSWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 info guard orderWindow:relativeTo: class=NSStatusBarWindow alpha before=0.00 after=0.00 parent=0
+PROBE download-restart-2 fail exit-rc=1 watchdog=0
+PROBE download-restart-2 info History files copied: History:393216 
+PROBE download-restart-2 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 89|2|41|0|"noche-probe-mid.bin" 88|2|40|0|"noche-probe-mid.bin" 87|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restart-2 info frontmost samples=94 probe-frontmost=0 unknown=0
+PROBE download-restart-2 info crash reports: none new
+
+## Step 3b control, 90 more quit-early runs with DataSharing on (NOCHE_TEST_DATASHARING_ON=1, hook build, 3663 engine)
+Result: 89 of 90 pass with no new crash report; run 49 printed 'fail no-output' (rc=1) with no crash report. Run 49 overlapped the main repo implementer's app-test runs on the shared 'Noche Test' profile (the gate later found the profile collision); it is not a crash. A 1-in-10 fault would survive 90 runs about 0.01 percent of the time.
+datasharing=on run=1 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=2 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=3 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=4 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=5 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=6 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=7 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=8 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=9 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=10 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=11 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=12 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=13 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=14 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=15 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=16 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=17 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=18 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=19 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=20 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=21 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=22 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=23 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=24 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=25 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=26 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=27 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=28 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=29 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=30 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=31 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=32 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=33 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=34 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=35 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=36 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=37 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=38 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=39 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=40 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=41 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=42 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=43 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=44 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=45 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=46 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=47 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=48 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=49 rc=1 NOCHE_TEST quit-early fail no-output crash=1
+datasharing=on run=50 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=51 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=52 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=53 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=54 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=55 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=56 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=57 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=58 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=59 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=60 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=61 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=62 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=63 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=64 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=65 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=66 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=67 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=68 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=69 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=70 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=71 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=72 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=73 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=74 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=75 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=76 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=77 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=78 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=79 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=80 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=81 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=82 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=83 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=84 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=85 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=86 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=87 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=88 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=89 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+datasharing=on run=90 rc=0 NOCHE_TEST quit-early pass quit right after the first load crash=1
+
+Fix round 2: the kept-state pin that aborts quit (download-keep-quit, expected red until build), the retry give-up log and the E15 item 3 status are in docs/engine/evidence/fix-round-2.txt.

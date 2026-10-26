@@ -75,9 +75,12 @@ class NCApp : public CefApp, public CefBrowserProcessHandler {
     // PrepopulatedEnginesMigration + ApplySearchEngineTypeMigration: keep the keywords DB migration bits consistent
     // (the rollback check in template_url_prepopulate_data_resolver.cc is fatal when the bits are set and the feature is off).
     std::string enable = line->GetSwitchValue("enable-features").ToString();
-    line->AppendSwitchWithValue("enable-features",
-                                (enable.empty() ? "" : enable + ",") +
-                                    "WebContentsDiscard,KeepPausedDownloadsAtShutdown,PrepopulatedEnginesMigration,ApplySearchEngineTypeMigration");
+    std::string noche_enable = "WebContentsDiscard,KeepPausedDownloadsAtShutdown,PrepopulatedEnginesMigration,ApplySearchEngineTypeMigration";
+#ifdef NOCHE_TESTHOOKS
+    // profile-upgrade RED leg: without the two migration names a profile an older engine made aborts at start.
+    if (getenv("NOCHE_TEST_NO_UPGRADE_FEATURES")) noche_enable = "WebContentsDiscard,KeepPausedDownloadsAtShutdown";
+#endif
+    line->AppendSwitchWithValue("enable-features", (enable.empty() ? "" : enable + ",") + noche_enable);
   }
 
   // May arrive on any thread.

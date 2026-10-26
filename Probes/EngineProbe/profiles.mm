@@ -3,6 +3,7 @@
 // hidden window. Every check records named assertions ("PROBE <check> info assert <name> PASS|FAIL: ...") and passes only if all hold.
 // Hidden rule as everywhere: windows are alpha 0, click-through, never shown, activated or made key.
 #import "surfaces.h"
+#include "resloads.h"
 #include <algorithm>
 #include <chrono>
 #include <map>
@@ -185,7 +186,7 @@ void End(H h, NSString* what) {
   NSMutableString* d = [NSMutableString stringWithFormat:@"%@: ", what];
   if (ok) [d appendString:@"every assertion held"];
   else { [d appendString:@"FAILED assertions"]; for (auto& f : g_c.failed) [d appendFormat:@" %s", f.c_str()]; }
-  CloseAll(h, [=] { h->finish(ok, d); });
+  CloseAll(h, [=] { SurfRelease(); h->finish(ok, d); });
 }
 
 // ---- cookies ----
@@ -818,6 +819,53 @@ void ChromeWitness(H h, NSString* tok, WP wB, CefRefPtr<CefRequestContext> cB, s
     });
   });
 }
+
+// Basic-auth witness for ClearHttpAuthCredentials (profile Default). Tab 1 opens /auth: the server answers 401, the client's GetAuthCredentials supplies noche:probe,
+// the retry carries Authorization. A second navigation then reaches the server already with Authorization (the auth cache). After ClearHttpAuthCredentials the
+// next navigation must reach the server WITHOUT Authorization again. The server's request log is the witness, not the engine.
+struct AuthSt { CefRefPtr<RlRecorder> rec; CefRefPtr<RlClient> cl; int tab = -1; std::string url, credUrl; size_t seen = 0; bool cached = false; bool tabAlive = false; };
+std::vector<std::string> AuthLines() {
+  std::vector<std::string> o;
+  NSString* l = [NSString stringWithContentsOfFile:@(getenv("NOCHE_PROBE_SLOW_LOG") ?: "/dev/null") encoding:NSUTF8StringEncoding error:nil] ?: @"";
+  for (NSString* line in [l componentsSeparatedByString:@"\n"]) if ([line hasPrefix:@"/auth auth="]) o.push_back(line.UTF8String);
+  return o;
+}
+CefRefPtr<CefBrowser> AuthTab(H h, const std::shared_ptr<AuthSt>& st) { return TabOf(h->view(), st->tab); }
+void AuthNav(H h, std::shared_ptr<AuthSt> st, std::function<void(bool)> cb) {  // navigates the auth tab and waits for its load end
+  const int want = st->cl->loads + 1;
+  if (auto t = AuthTab(h, st)) t->GetMainFrame()->LoadURL(st->url);
+  WaitFor(h, 15000, [=] { return st->cl->loads >= want; }, cb);
+}
+void AuthPrime(H h, std::function<void(std::shared_ptr<AuthSt>)> cb) {
+  auto st = std::make_shared<AuthSt>();
+  st->rec = new RlRecorder(); st->rec->answerAuth = true;
+  st->cl = new RlClient(st->rec, nullptr);
+  st->url = SlowFile(@"auth").UTF8String;
+  st->credUrl = [SlowFile(@"auth") stringByReplacingOccurrencesOfString:@"http://" withString:@"http://noche:probe@"].UTF8String;  // the client supplies the credentials in the URL: a Chrome-style tab never asked GetAuthCredentials
+  const size_t log0 = AuthLines().size();
+  auto b = h->view()->AddTab(st->credUrl, st->cl, CefBrowserSettings(), nullptr, false);
+  st->tab = b ? b->GetIdentifier() : -1;
+  WaitFor(h, 15000, [=] { return st->cl->loads >= 1; }, [=](bool first) {
+    auto after1 = AuthLines();
+    const size_t k = after1.size();
+    g_c.Ok("auth-first-request-challenged-then-credentialed", first && k >= log0 + 2 && after1[log0] == "/auth auth=no" && after1.back() == "/auth auth=yes", [NSString stringWithFormat:@"server log /auth lines %zu..%zu: first '%s', last '%s'; credentials sent in the URL (GetAuthCredentials answered %d time(s))", log0, k, k > log0 ? after1[log0].c_str() : "(none)", k ? after1.back().c_str() : "(none)", st->rec->authAsked.load()]);
+    AuthNav(h, st, [=](bool second) {
+      auto after2 = AuthLines();
+      st->cached = second && after2.size() > k && after2[k] == "/auth auth=yes";
+      g_c.Ok("auth-control-cached-credentials-sent-before-clear", st->cached, [NSString stringWithFormat:@"second navigation: first new server line '%s' (want auth=yes, from the auth cache)", after2.size() > k ? after2[k].c_str() : "(none)"]);
+      st->seen = after2.size();
+      cb(st);
+    });
+  });
+}
+void AuthAfter(H h, std::shared_ptr<AuthSt> st, std::function<void()> next) {
+  AuthNav(h, st, [=](bool third) {
+    auto lines = AuthLines();
+    g_c.Ok("A-ClearHttpAuthCredentials-next-request-has-no-Authorization", third && lines.size() > st->seen && lines[st->seen] == "/auth auth=no", [NSString stringWithFormat:@"after ClearHttpAuthCredentials the first new server line is '%s' (want auth=no); lines since: %zu", lines.size() > st->seen ? lines[st->seen].c_str() : "(none)", lines.size() - st->seen]);
+    if (auto t = AuthTab(h, st)) t->GetHost()->CloseBrowser(true);
+    next();
+  });
+}
 void CheckClear(H h) {
   NSString* tok = Token();
   auto cB = MakeCtx(Dir(@"Profile 1"));
@@ -847,8 +895,12 @@ void CheckClear(H h) {
             g_c.Ok("A-DeleteCookies", deleted >= 1, [NSString stringWithFormat:@"DeleteCookies(\"\",\"\") in A deleted %d", deleted]);
             cA->ClearHttpCache(new CB([=] {
               PI(@"A ClearHttpCache completed");
+              AuthPrime(h, [=](std::shared_ptr<AuthSt> st) {
+              auto calls = std::make_shared<int>(0);
               cA->ClearHttpAuthCredentials(new CB([=] {
-                g_c.Ok("A-ClearHttpAuthCredentials-completed", true, @"callback ran (no observable effect without an authenticated page)");
+                ++*calls;
+                AuthAfter(h, st, [=] {
+                g_c.Ok("A-ClearHttpAuthCredentials-callback-once", *calls == 1, [NSString stringWithFormat:@"callback ran %d time(s) by the time the next navigation finished (want 1)", *calls]);
                 ListCk(cA, [=](std::vector<std::string> a) { ListCk(cB, [=](std::vector<std::string> b) {
                   g_c.Ok("A-cookies-empty", !Has(a, "clearA"), [NSString stringWithFormat:@"A cookies: %@", Join(a)]);
                   g_c.Ok("B-keeps-its-cookie", Has(b, "clearB"), [NSString stringWithFormat:@"B cookies: %@", Join(b)]);
@@ -866,7 +918,9 @@ void CheckClear(H h) {
                     });
                   }); });
                 }); });
+                });
               }));
+              });
             }));
           });
         }); });
@@ -1026,6 +1080,94 @@ void CheckDelete2(H h) {
   End(h, @"profile-delete-2");
 }
 
+
+// ---- profile-clear-callbacks (0010 callback contract: exactly once, also for an unknown mask and a destroyed context) ----
+void CheckClearCallbacks(H h) {
+#ifndef NOCHE_CLEAR_API
+  PI(@"CefRequestContext::ClearBrowsingData is not in this engine build (NOCHE_CLEAR_API unset); needs patch 0010");
+  g_c.Ok("clear-api", false, @"NOT RUN: CefRequestContext::ClearBrowsingData (engine patch 0010) missing; build with NOCHE_CLEAR_API=1 against the 0010 engine");
+  End(h, @"profile-clear-callbacks");
+#else
+  auto ctxReady = [=](CefRefPtr<CefRequestContext> c, std::function<void(bool)> then) {
+    auto inited = std::make_shared<bool>(false);
+    c->GetCookieManager(new CB([inited] { *inited = true; }));
+    WaitFor(h, 15000, [=] { return *inited; }, then);
+  };
+  auto cB = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 1")));
+  ctxReady(*cB, [=](bool ok1) {
+    g_c.Ok("context-initialized", ok1, @"Profile 1 context initialized");
+    // (a) a mask with no known bit, and the empty mask: the callback runs once, and never from inside the call.
+    const int kUnknown = (1 << 20) | (1 << 30);
+    auto nUnknown = std::make_shared<int>(0), nZero = std::make_shared<int>(0);
+    (*cB)->ClearBrowsingData(kUnknown, CefBaseTime(), new CB([=] { ++*nUnknown; }));
+    (*cB)->ClearBrowsingData(0, CefBaseTime(), new CB([=] { ++*nZero; }));
+    const int syncU = *nUnknown, syncZ = *nZero;
+    Later(3.0, [=] {
+      g_c.Ok("unknown-mask-callback-once", syncU == 0 && *nUnknown == 1, [NSString stringWithFormat:@"mask 0x%x: callbacks %d inside the call (want 0), %d after 3 s (want 1)", kUnknown, syncU, *nUnknown]);
+      g_c.Ok("empty-mask-callback-once", syncZ == 0 && *nZero == 1, [NSString stringWithFormat:@"mask 0: callbacks %d inside the call (want 0), %d after 3 s (want 1)", syncZ, *nZero]);
+      // (b) the context is destroyed right after the removal started: no crash, the callback runs at most once.
+      auto cC = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 2")));
+      ctxReady(*cC, [=](bool ok2) {
+        g_c.Ok("context-2-initialized", ok2, @"Profile 2 context initialized");
+        auto nDestroyed = std::make_shared<int>(0);
+        const int kAll = CEF_BROWSING_DATA_COOKIES | CEF_BROWSING_DATA_CACHE | CEF_BROWSING_DATA_SITE_STORAGE | CEF_BROWSING_DATA_HISTORY | CEF_BROWSING_DATA_DOWNLOADS | CEF_BROWSING_DATA_FORM_DATA | CEF_BROWSING_DATA_PASSWORDS;
+        (*cC)->ClearBrowsingData(kAll, CefBaseTime(), new CB([=] { ++*nDestroyed; }));
+        *cC = nullptr;  // the last reference
+        Later(3.0, [=] {
+          g_c.Ok("destroyed-context-callback-once", *nDestroyed == 1, [NSString stringWithFormat:@"callbacks after the context was released mid-removal and 3 s: %d (want exactly 1, measured; the engine is still running, so no crash)", *nDestroyed]);
+          PI(@"destroyed-context callback ran %d time(s)", *nDestroyed);
+          End(h, @"profile-clear-callbacks");
+        });
+      });
+    });
+  });
+#endif
+}
+
+// ---- download-keep-quit (0008: a kept request must not pin a request context past CefShutdown) ----
+// Profile 1's window navigates to mid.bin (24 MB at about 2 MB/s) and is closed mid-download: the download is kept, the request holds its CefBrowser and with it the
+// browser's request context. The probe releases every reference of its own and finishes, so the engine shuts down with the kept download running. Before the 0008
+// kept-state release the quit aborted: "DCHECK failed: all_.empty()" at cef/libcef/browser/browser_context.cc:45, rc 134 (docs/engine/evidence/m1-5-engine-run.txt).
+// EXPECTED RED until the engine is rebuilt with the amended 0008 patch; the check's own pass line prints before the engine shuts down, the script then reports rc 134.
+unsigned long long DirBytesOf(NSString* dir) {
+  unsigned long long t = 0;
+  for (NSString* n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil]) t += [NSFileManager.defaultManager attributesOfItemAtPath:[dir stringByAppendingPathComponent:n] error:nil].fileSize;
+  return t;
+}
+// download-keep-quit-control: the same flow with the download finished (small.bin, 4 KB) before the window closes, so no request is kept. It must pass (rc 0)
+// on every engine, which isolates the kept request as the pin in download-keep-quit.
+void CheckKeepQuit(H h, int mode) {  // 0 kept download, 1 finished download, 2 no download
+  const bool control = mode != 0;
+  const char* mid = getenv("NOCHE_PROBE_MID_URL");
+  const char* dl = getenv("NOCHE_PROBE_DL_DIR");
+  if (!mid || !dl) { h->finish(false, @"NOCHE_PROBE_MID_URL / NOCHE_PROBE_DL_DIR not set (run through probe-engine.sh)"); return; }
+  NSString* midUrl = mode == 1 ? [@(mid) stringByReplacingOccurrencesOfString:@"mid.bin" withString:@"small.bin"] : mode == 2 ? Localhost(Page(h, @"index.html?side=B&n=2")) : @(mid);
+  NSString* dir = @(dl);
+  const unsigned long long want = mode == 1 ? 4096 : mode == 2 ? 0 : 1000000;
+  auto cB = std::make_shared<CefRefPtr<CefRequestContext>>(MakeCtx(Dir(@"Profile 1")));
+  auto wB = std::make_shared<WP>(Open(*cB, Localhost(Page(h, @"index.html?side=B"))));
+  WaitFor(h, 20000, [=] { return Loaded(*wB, (*wB)->first()); }, [=](bool loaded) {
+    g_c.Ok("window-loaded", loaded, @"B first tab loaded");
+    TabOf((*wB)->view, (*wB)->first())->GetMainFrame()->LoadURL(midUrl.UTF8String);  // becomes the download
+    auto t0 = std::make_shared<CFAbsoluteTime>(CFAbsoluteTimeGetCurrent());
+    WaitFor(h, 30000, [=] { return DirBytesOf(dir) >= want && (!control || CFAbsoluteTimeGetCurrent() - *t0 > 2.5); }, [=](bool started) {  // control: the 4 KB download has had time to finish
+      g_c.Ok("download-started", started, [NSString stringWithFormat:@"download dir holds %llu bytes", DirBytesOf(dir)]);
+      (*wB)->window->Close();
+      WaitFor(h, 10000, [=] { return (*wB)->destroyed; }, [=](bool destroyed) {
+        const unsigned long long b0 = DirBytesOf(dir);
+        Later(2.5, [=] {
+          const unsigned long long b1 = DirBytesOf(dir);
+          if (mode == 2) g_c.Ok("window-closed-no-download", destroyed, @"window destroyed, no download in this flow");
+          else if (mode == 1) g_c.Ok("download-finished-before-close", destroyed && b0 == 4096 && b1 == 4096, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes (want 4096 both: finished, nothing kept)", (int)destroyed, b0, b1]);
+          else g_c.Ok("window-closed-download-kept", destroyed && b1 > b0 + 500000, [NSString stringWithFormat:@"window destroyed=%d; download dir %llu -> %llu bytes over 2.5 s with no window (want growth)", (int)destroyed, b0, b1]);
+          g_wins.clear(); *wB = nullptr; *cB = nullptr;  // every reference of the probe is released; the download still runs when the engine shuts down
+          Later(0.5, [=] { End(h, @"download-keep-quit"); });
+        });
+      });
+    });
+  });
+}
+
 // ---- profile-upgrade ----
 // A profile made by an older engine (run it against a copy, NOCHE_PROBE_ROOT) must start on this engine and load a page. The failure this
 // guards is a startup abort (CefInitialize never returns), so reaching this code at all is most of the proof.
@@ -1078,7 +1220,7 @@ void ProfilesPreEngine(NSString* check, NSString* root) {
 
 bool RunProfilesCheck(NSString* check, const SurfHost& host) {
   static NSDictionary* table = @{ @"profile-dirs" : @0, @"profile-cookie" : @1, @"profile-cookie-2" : @2, @"profile-storage" : @3, @"profile-ext" : @4, @"profile-close" : @5,
-                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11 };
+                                  @"profile-incognito" : @6, @"profile-incognito-2" : @7, @"profile-clear" : @8, @"profile-delete" : @9, @"profile-delete-2" : @10, @"profile-upgrade" : @11, @"profile-clear-callbacks" : @12, @"download-keep-quit" : @13, @"download-keep-quit-control" : @14, @"download-keep-quit-none" : @15 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1096,6 +1238,10 @@ bool RunProfilesCheck(NSString* check, const SurfHost& host) {
     case 8: CheckClear(h); break;
     case 9: CheckDelete(h); break;
     case 11: CheckUpgrade(h); break;
+    case 12: CheckClearCallbacks(h); break;
+    case 13: CheckKeepQuit(h, 0); break;
+    case 14: CheckKeepQuit(h, 1); break;
+    case 15: CheckKeepQuit(h, 2); break;
     default: CheckDelete2(h); break;
   }
   return true;

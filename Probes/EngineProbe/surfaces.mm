@@ -1,5 +1,6 @@
 // Surfaces checks: see surfaces.h. Every check prints facts as "PROBE <check> info ..." and passes when the experiment ran.
 #import "surfaces.h"
+#include "resloads.h"
 #include <chrono>
 #include <map>
 #include <memory>
@@ -20,8 +21,9 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler() { return nullptr; }
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
+void SurfRelease() {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-keep-quit-control", @"download-keep-quit-none", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -501,6 +503,119 @@ void DownloadTabClose(H h, bool viaStartDownload) {
   RunSteps(S);
 }
 
+// ---- 0008 kept-request contract (review E15) ----
+// The keep rule is "the response arrived", not "is a download", so two controls pair up. A tab on /hold.html (a text/html stream that never ends) is closed
+// after its first bytes: the request must NOT outlive the tab (the server sees the connection close) and the client's OnResourceLoadComplete runs at most once.
+// A tab whose navigation became a download is closed: the request is kept, its single completion arrives after the download finished, with the original
+// browser (IsValid() false by then). Both read the server's request log and a per-tab RlRecorder, not the engine's own reports.
+NSString* Token() { return [NSString stringWithFormat:@"%llx", (unsigned long long)(arc4random() | ((uint64_t)arc4random() << 32))]; }
+bool LogHas(NSString* needle) { return [ServerLogSinceStart() containsString:needle]; }
+NSString* RecFacts(const std::vector<RlRec>& v) {
+  NSMutableArray* o = [NSMutableArray array];
+  for (auto& r : v) [o addObject:[NSString stringWithFormat:@"browser=%d status=%d valid=%d", r.browserId, r.status, (int)(r.browser && r.browser->IsValid())]];
+  return o.count ? [o componentsJoinedByString:@"; "] : @"(none)";
+}
+void KeepStream(H h) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto rec = CefRefPtr<RlRecorder>(new RlRecorder());
+  rec->keepNeedle = "hold.html?keep=";
+  auto cl = CefRefPtr<RlClient>(new RlClient(rec, nullptr));
+  NSString* path = [@"/hold.html?keep=" stringByAppendingString:Token()];
+  NSString* url = [[@(SlowUrl()) stringByReplacingOccurrencesOfString:@"/big.bin" withString:@""] stringByAppendingString:path];
+  auto id = std::make_shared<int>(-1);
+  auto closedAt = std::make_shared<double>(0);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) {
+    auto v = h->view();
+    auto b = v ? v->AddTab(url.UTF8String, cl, CefBrowserSettings(), nullptr, false) : nullptr;
+    if (!b) { Done(h, false, @"AddTab returned NULL"); return; }
+    *id = b->GetIdentifier();
+    WaitFor(h, 15000, [=] { return LogHas(@"hold.html"); }, [=](bool reached) {
+      A->Check("a-request-reached-server", reached, [NSString stringWithFormat:@"tab %d asked the fixture server for %@", *id, path]);
+      n();
+    });
+  });
+  S->push_back(Sleep(1.5));
+  S->push_back([=](Next n) {
+    Eval(h, *id, @"document.title + '|' + document.readyState", false, [=](NSString* r) {
+      auto b = ById(h, *id);
+      A->Check("b-first-bytes-arrived-and-stream-open", [r hasPrefix:@"hold|"] && ![r hasSuffix:@"|complete"] && b && b->IsLoading(), [NSString stringWithFormat:@"title|readyState '%@', IsLoading=%d (the document started and the response is still open)", r, b ? (int)b->IsLoading() : -1]);
+      *closedAt = NowMs();
+      if (b) b->GetHost()->CloseBrowser(true);
+      n();
+    });
+  });
+  S->push_back([=](Next n) {
+    NSString* line = [@"closed " stringByAppendingString:path];
+    WaitFor(h, 5000, [=] { return LogHas(line); }, [=](bool closed) {
+      A->Check("c-server-sees-connection-closed-within-5s", closed, [NSString stringWithFormat:@"server log line '%@' %@ %.0f ms after CloseBrowser (limit 5000)", line, closed ? @"appeared" : @"did NOT appear within 5 s;", NowMs() - *closedAt]);
+      n();
+    });
+  });
+  S->push_back(Sleep(2.0));
+  S->push_back([=](Next) {
+    auto recs = rec->Recs("hold.html?keep=");
+    A->Check("d-on-resource-load-complete-exactly-once", recs.size() == 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for the held request (want exactly 1, measured on 3659 and 3663): %@", recs.size(), RecFacts(recs)]);
+    A->Check("e-tab-gone", ById(h, *id) == nullptr, @"the closed tab is no longer listed");
+    NSString* sum = A->Summary();
+    rec->Clear();
+    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, non-download stream: %@", sum]);
+  });
+  RunSteps(S);
+}
+
+void KeepComplete(H h) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto rec = CefRefPtr<RlRecorder>(new RlRecorder());
+  rec->keepNeedle = "mid.bin";
+  auto cl = CefRefPtr<RlClient>(new RlClient(rec, CefRefPtr<CefDownloadHandler>(g_dl)));
+  auto id = std::make_shared<int>(-1);
+  auto early = std::make_shared<bool>(false);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) {
+    A->Api("a kept download whose tab is gone");
+    auto v = h->view();
+    auto b = v ? v->AddTab(MidUrl(), cl, CefBrowserSettings(), nullptr, false) : nullptr;  // the navigation becomes the download
+    if (!b) { Done(h, false, @"AddTab returned NULL"); return; }
+    *id = b->GetIdentifier();
+    WaitFor(h, 30000, [=] { return !g_dl_events.empty() && g_dl_events.back().inprog && g_dl_events.back().recv > 1000000; }, [=](bool started) {
+      if (!started) {
+        PI(@"no in-progress event with bytes after 30 s; OnResourceLoadComplete for mid.bin: %@; tab %d listed: %d", RecFacts(rec->Recs("mid.bin")), *id, (int)(ById(h, *id) != nullptr));
+        rec->Clear();
+        Done(h, false, @"download never started in the tab");
+        return;
+      }
+      PI(@"download started from tab %d: %s", *id, DlStr(g_dl_events.back()).c_str());
+      auto t = ById(h, *id);
+      PI(@"tab %d still listed when the probe closes it: %d (0 means the engine already closed it when the navigation became a download)", *id, (int)(t != nullptr));
+      if (t) t->GetHost()->CloseBrowser(true);
+      n();
+    });
+  });
+  S->push_back(Sleep(3.0));
+  S->push_back([=](Next n) {
+    auto r = rec->Recs("mid.bin");
+    A->Check("a-no-completion-while-download-runs", r.empty() && FileSize(MidPath()) < kMid, [NSString stringWithFormat:@"3 s after the tab closed: %zu OnResourceLoadComplete for mid.bin (want 0, the kept request is not reported as aborted), file %llu of %llu bytes", r.size(), FileSize(MidPath()), kMid]);
+    WaitFor(h, 40000, [=] { if (FileSize(MidPath()) < kMid && !rec->Recs("mid.bin").empty()) *early = true; return FileSize(MidPath()) == kMid && !g_dl_events.empty() && g_dl_events.back().complete; }, [=](bool done) {
+      A->Check("b-download-completes", done, [NSString stringWithFormat:@"files %@; last event: %s", DirListing(), g_dl_events.empty() ? "(none)" : DlStr(g_dl_events.back()).c_str()]);
+      n();
+    });
+  });
+  S->push_back(Sleep(2.5));
+  S->push_back([=](Next) {
+    auto r = rec->Recs("mid.bin");
+    A->Check("c-exactly-one-completion", r.size() == 1, [NSString stringWithFormat:@"%zu OnResourceLoadComplete for mid.bin after the download finished (want 1): %@", r.size(), RecFacts(r)]);
+    A->Check("d-completion-only-after-the-bytes-arrived", !*early, @"no completion was seen at any 100 ms sample while the file was still short");
+    A->Check("e-original-browser-and-invalid", r.size() == 1 && r[0].browserId == *id && r[0].browser && !r[0].browser->IsValid(), [NSString stringWithFormat:@"completion browser id %d (want %d), IsValid=%d (want 0)", r.empty() ? -1 : r[0].browserId, *id, r.empty() || !r[0].browser ? -1 : (int)r[0].browser->IsValid()]);
+    NSString* sum = A->Summary();
+    rec->Clear();  // drops the CefBrowser references the records hold: a browser still referenced at shutdown aborts the engine
+    Done(h, A->ok(), [NSString stringWithFormat:@"kept-request contract, kept download: %@", sum]);
+  });
+  RunSteps(S);
+}
+
 // ---- R6: restart ----
 // Launch 1 starts the download, pauses it at 10 percent and records what is on disk. With crash=false it then quits normally (the paused
 // download is interrupted at shutdown with patch 0008); with crash=true it prints ready-to-kill and waits for the script's kill -9.
@@ -967,11 +1082,11 @@ void TargetIdOf(const H& h, int id, const char* label, std::function<void()> nex
   });
 }
 
-// P1 (feature on) and P1b (default flags): 6 tabs (first active, 5 background), discard the 5 through chrome.tabs.discard (the extension API
+// P1 (feature on, from the bridge): 6 tabs (first active, 5 background), discard the 5 through chrome.tabs.discard (the extension API
 // that ends in the lifecycle unit, like chrome://discards), then activate one, then try the active tab. Judged (P1 only): at least one
 // background tab discarded, every CefBrowser id still valid, activating the discarded tab reloads (OnLoadEnd fires), and the process lives.
-void CheckDiscard(H h, bool featureOn) {
-  PI(@"mode: WebContentsDiscard %s; switches: %@", featureOn ? "ON (--enable-features)" : ([g_name isEqualToString:@"discard-p1b-off"] ? "OFF (explicit --disable-features=WebContentsDiscard)" : "OFF (default flags)"), ArgsFact());
+void CheckDiscard(H h) {
+  PI(@"mode: WebContentsDiscard ON (the bridge enables it by name); switches: %@", ArgsFact());
   auto ids = std::make_shared<std::vector<int>>();
   for (int i = 1; i <= 5; i++) ids->push_back(DiscTab(h, Page(h, [NSString stringWithFormat:@"index.html?t=%d", i])));
   PI(@"AddTab ids %d %d %d %d %d (first tab %d, active %d)", (*ids)[0], (*ids)[1], (*ids)[2], (*ids)[3], (*ids)[4], h->first()->GetIdentifier(), ActiveId(h));
@@ -1001,7 +1116,7 @@ void CheckDiscard(H h, bool featureOn) {
               int loadsBefore = g_ds[tid].loads;
               double t0 = NowMs();
               auto tb = ById(h, tid);
-              if (!tb) { PI(@"activate: no CefBrowser with id %d (replaced?)", tid); DiscDone(h, !featureOn, [NSString stringWithFormat:@"%s: discarded=%d, browser %d gone after discard", featureOn ? "RED" : "facts", nDisc, tid]); return; }
+              if (!tb) { PI(@"activate: no CefBrowser with id %d (replaced?)", tid); DiscDone(h, false, [NSString stringWithFormat:@"discarded=%d, browser %d gone after discard", nDisc, tid]); return; }
               h->view()->SetActiveTab(tb);
               WaitFor(h, 10000, [=] { return g_ds[tid].loads > loadsBefore; }, [=](bool reloaded) {
                 double ms = NowMs() - t0;
@@ -1022,7 +1137,7 @@ void CheckDiscard(H h, bool featureOn) {
                           PI(@"final: %@", h->fallback());
                           bool ok = nDisc >= 1 && allValid && reloaded;
                           NSString* d = [NSString stringWithFormat:@"discarded=%d of 5 background tabs, all original CefBrowser ids valid=%d, activation reload OnLoadEnd=%d (%.0f ms), active-tab explicit discard reply %@", nDisc, (int)allValid, (int)reloaded, ms, Js(dr)];
-                          DiscDone(h, featureOn ? ok : true, featureOn ? d : [@"facts only (feature off): " stringByAppendingString:d]);
+                          DiscDone(h, ok, d);
                         });
                       });
                     });
@@ -1048,6 +1163,37 @@ void CheckDiscard(H h, bool featureOn) {
       });
     });
   });
+}
+
+// discard-p1b and discard-p1b-off run this same check on purpose: both names stay for continuity with the evidence files and usage lines; the feature is truly off. The bridge enables WebContentsDiscard on every launch, and the probe adds --disable-features=WebContentsDiscard;
+// the disable list wins (base/feature_list.cc:454 registers --disable-features before --enable-features, and RegisterOverride at :1470 keeps only the first override of a name).
+// Asserts the switch is on the command line, then that DiscardTab() on a loaded background tab returns false, the browser stays valid and OnTabDiscarded never runs.
+void CheckDiscardOff(H h) {
+#ifndef NOCHE_DISCARD_API
+  PI(@"CefBrowserHost::DiscardTab is not in this engine build (NOCHE_DISCARD_API unset): nothing to call; needs patch 0009");
+  DiscDone(h, false, @"NOT RUN: engine patch 0009 API missing (build with NOCHE_DISCARD_API=1 against the 0009 engine)");
+#else
+  PI(@"mode: WebContentsDiscard OFF (--disable-features=WebContentsDiscard beats the bridge's --enable-features); switches: %@", ArgsFact());
+  auto cl = CefCommandLine::GetGlobalCommandLine();
+  const std::string dis = cl ? cl->GetSwitchValue("disable-features").ToString() : "";
+  const bool offOnLine = ("," + dis + ",").find(",WebContentsDiscard,") != std::string::npos;
+  int a = DiscTab(h, Page(h, @"index.html?t=31"));
+  if (a < 0) { DiscDone(h, false, @"AddTab returned NULL"); return; }
+  WaitFor(h, 20000, [=] { return g_load.count(a) > 0; }, [=](bool loaded) {
+    if (!loaded) { DiscDone(h, false, @"tab did not finish loading in 20 s"); return; }
+    auto ba = ById(h, a);
+    const bool background = a != ActiveId(h);
+    const bool r = ba && ba->GetHost()->DiscardTab();
+    PI(@"DiscardTab() on background tab %d (background=%d) returned %d", a, (int)background, (int)r);
+    Later(2.0, [=] {
+      auto after = ById(h, a);
+      const bool valid = after && after->IsValid();
+      PI(@"after: %@; OnTabDiscarded(true) calls %d, (false) calls %d", DiscDump(h), g_ds[a].discardedCb, g_ds[a].restoredCb);
+      DiscDone(h, offOnLine && background && !r && valid && g_ds[a].discardedCb == 0 && g_ds[a].restoredCb == 0,
+               [NSString stringWithFormat:@"feature off on the command line=%d, background=%d, DiscardTab()=%d (want 0), browser valid=%d, OnTabDiscarded calls=%d/%d (want 0/0)", (int)offOnLine, (int)background, (int)r, (int)valid, g_ds[a].discardedCb, g_ds[a].restoredCb]);
+    });
+  });
+#endif
 }
 
 // P2: pin immunity. chrome://discards (its mojo DetailsProvider, loaded from the page with a dynamic import) lists can_discard and the reasons, and
@@ -1185,6 +1331,8 @@ void CheckDiscardApi(H h) {
     PI(@"DiscardTab() on background tab %d returned %d; active tab %d", a, (int)r, ActiveId(h));
     Later(2.0, [=] {
       PI(@"after: %@", DiscDump(h));
+      auto afterDiscard = ById(h, a);
+      bool validAfter = afterDiscard && afterDiscard->IsValid();
       bool discardedCb = g_ds[a].discardedCb == 1;
       PI(@"OnTabDiscarded(true) calls for %d: %d", a, g_ds[a].discardedCb);
       int act = ActiveId(h);
@@ -1194,8 +1342,11 @@ void CheckDiscardApi(H h) {
       int loads = g_ds[a].loads;
       h->view()->SetActiveTab(ById(h, a));
       WaitFor(h, 10000, [=] { return g_ds[a].loads > loads; }, [=](bool reloaded) {
-        PI(@"activation of the discarded tab: reload OnLoadEnd=%d OnTabDiscarded(false) calls=%d", (int)reloaded, g_ds[a].restoredCb);
-        DiscDone(h, r && discardedCb && activeRefused && reloaded && g_ds[a].restoredCb == 1, @"DiscardTab + OnTabDiscarded(true then false) + active tab refused + reload");
+        PI(@"activation of the discarded tab: reload OnLoadEnd=%d OnTabDiscarded(false) calls=%d browser valid after discard=%d", (int)reloaded, g_ds[a].restoredCb, (int)validAfter);
+        Eval(h, a, @"String(document.wasDiscarded)", false, [=](NSString* wd) {
+          PI(@"document.wasDiscarded after activation -> %@", wd.length ? wd : @"(no value)");
+          DiscDone(h, r && discardedCb && activeRefused && reloaded && g_ds[a].restoredCb == 1 && validAfter && [wd containsString:@"true"], [NSString stringWithFormat:@"DiscardTab + OnTabDiscarded(true then false) + active tab refused + reload + browser valid after discard=%d + document.wasDiscarded=%@", (int)validAfter, wd]);
+        });
       });
     });
   });
@@ -1274,6 +1425,7 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler() { return g_ctx_on ? Ce
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler() { return g_dl_on ? CefRefPtr<CefDownloadHandler>(g_dl) : nullptr; }
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return g_perm_on ? CefRefPtr<CefPermissionHandler>(g_perm) : nullptr; }
 void SurfOnLoadEnd(int id, int status) { g_load[id] = status; }
+void SurfRelease() { g_dl_hook = nullptr; g_ctx_hook = nullptr; g_dl_cbs.clear(); }
 
 bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
   if (RunProfilesCheck(check, host)) return true;
@@ -1282,7 +1434,7 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,
     @"download-restart-crash-1" : @10, @"download-restart-crash-2" : @11, @"download-control-cancel-1" : @12,
     @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15,
-    @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20, @"discard-p5" : @22 };
+    @"download-keep-stream" : @23, @"download-keep-complete" : @24, @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20, @"discard-p5" : @22 };
   NSNumber* n = table[check];
   if (!n) return false;
   g_name = check;
@@ -1303,13 +1455,15 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     case 5: CheckCtx(h); break;
     case 6: CheckZoom(h); break;
     case 7: CheckChromePages(h); break;
-    case 16: CheckDiscard(h, true); break;
-    case 17: CheckDiscard(h, false); break;
+    case 16: CheckDiscard(h); break;
+    case 17: CheckDiscardOff(h); break;
     case 18: CheckDiscardP2(h); break;
     case 19: CheckDiscardP3(h); break;
     case 20: CheckDiscardApi(h); break;
-    case 21: CheckDiscard(h, false); break;
+    case 21: CheckDiscardOff(h); break;
     case 22: CheckDiscardP5(h); break;
+    case 23: KeepStream(h); break;
+    case 24: KeepComplete(h); break;
     default: CheckZoomNoBubble(h); break;
   }
   return true;

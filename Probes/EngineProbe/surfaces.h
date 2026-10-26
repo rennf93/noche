@@ -38,6 +38,8 @@ CefRefPtr<CefContextMenuHandler> SurfContextMenuHandler();
 CefRefPtr<CefDownloadHandler> SurfDownloadHandler();
 CefRefPtr<CefPermissionHandler> SurfPermissionHandler();
 void SurfOnLoadEnd(int browserId, int status);
+// Drops the references the surfaces checks keep in statics (download callbacks, hooks): a CEF object still referenced at CefShutdown aborts the engine. Run by every check end.
+void SurfRelease();
 // Multi-profile checks (engine patch 0010 research): profile-dirs, profile-cookie(-2), profile-storage, profile-ext, profile-close,
 // profile-incognito(-2), profile-clear, profile-delete(-2). Same contract as RunSurfacesCheck.
 bool RunProfilesCheck(NSString* check, const SurfHost& host);
