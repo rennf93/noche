@@ -877,7 +877,7 @@ static NSInteger g_preempted = 0;
     NSView* page = self.webView ? FindByClass(self.webView, @"RenderWidgetHostViewCocoa") : nil;
     if (!page || self.nsWindow.firstResponder != page) return NO;
     if ([(id<NSTextInputClient>)page hasMarkedText]) return NO;
-    if (self.activeTab.isHTMLFullscreen) return NO;
+    if (self.activeTab.isHTMLFullscreen && !NC_TEST_FLAG("NOCHE_TEST_FS_CLAIM")) return NO;  // the flag is a negative control: Escape is claimed in fullscreen
     id<NCWindowDelegate> d = _delegate;
     if (!d || ![d windowShouldClaimEscape:self]) return NO;
   } else if (![table[key] containsObject:@(m)]) {

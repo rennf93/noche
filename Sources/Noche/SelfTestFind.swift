@@ -429,31 +429,39 @@ extension SelfTest {
         // Another view has focus (not the page, not the pill's field): not the page's Escape.
         ns.makeFirstResponder(nil)
         if let m = unclaimed("while the window itself was the first responder") { return finish(false, m) }
-        // HTML fullscreen: Escape leaves it. A real engine fullscreen of the hidden window makes the test app frontmost (the owner's screen), so the
-        // default forces tab.isHTMLFullscreen on instead; NOCHE_TEST_REAL_FULLSCREEN=1 asks the page to enter it for real (owner check 14).
+        // HTML fullscreen: Escape leaves it, the next Escape closes the pill. A real engine fullscreen of the hidden window makes the test app
+        // frontmost (the owner's screen), so the default forces tab.isHTMLFullscreen on, then off, and never enters one. NOCHE_TEST_REAL_FULLSCREEN=1
+        // asks the page to enter it for real (owner check 14): only on a locked screen or in a visible run.
+        // The window was left with no first responder by the guard above, so the page takes it here, once; nothing sets it again between the two
+        // Escapes, and the claim below is judged from what the responder is then.
         ns.makeFirstResponder(page)
-        var note = "an HTML fullscreen page (the engine's answer forced, no real fullscreen; NOCHE_TEST_REAL_FULLSCREEN=1 enters one)"
+        defer { NCTab.testForceHTMLFullscreen(false) }  // process-wide switch: cleared on every exit of this function, finish(false) returns included
+        var note = "an HTML fullscreen page (the engine's answer forced on, then off; no real fullscreen, NOCHE_TEST_REAL_FULLSCREEN=1 enters one)"
         if ProcessInfo.processInfo.environment["NOCHE_TEST_REAL_FULLSCREEN"] == nil {
             NCTab.testForceHTMLFullscreen(true)
-            let m = unclaimed("while the page was in HTML fullscreen")
+            if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
             NCTab.testForceHTMLFullscreen(false)
-            if let m { return finish(false, m) }
         } else {
             _ = await evaluate(tab, "document.documentElement.requestFullscreen().catch(() => {}); 1")
             let fsState = await evaluate(tab, "JSON.stringify([document.fullscreenEnabled, document.fullscreenElement === null])") ?? "nil"
-            note = "the HTML fullscreen row DID NOT RUN, the page could not enter fullscreen in the hidden run ([fullscreenEnabled, no element] = \(fsState))"
+            note = "the HTML fullscreen row DID NOT RUN, the page could not enter fullscreen ([fullscreenEnabled, no element] = \(fsState))"
             if await until(5, { tab.isHTMLFullscreen }) {
                 if let m = unclaimed("while the page was in HTML fullscreen") { return finish(false, m) }
                 _ = await evaluate(tab, "document.exitFullscreen(); 1")
-                note = "an HTML fullscreen page (entered, IsFullscreen true)"
+                note = "an HTML fullscreen page (entered for real, IsFullscreen true)"
             }
         }
-        // The claim itself still works once the guards are clear.
-        ns.makeFirstResponder(page)
+        // The next Escape, with the page out of fullscreen.
         guard await until(5, { !tab.isHTMLFullscreen }) else { return finish(false, "the page stayed in fullscreen") }
+        let responder = ns.firstResponder.map { NSStringFromClass(type(of: $0)) } ?? "nil"
+        line("info", "before the Escape that closes the pill: first responder \(responder) isPage \(ns.firstResponder === page) fullscreen \(tab.isHTMLFullscreen) pill hidden \(ctl.findBar.isHidden) pill for this tab \(ctl.findShownFor == tab.identifier) marked text \(client.hasMarkedText()) key window \(ns.isKeyWindow)")
         let before = NCWindow.testPreemptedKeys()
         NSApp.sendEvent(ev)
-        guard await until(5, { ctl.findBar.isHidden }), NCWindow.testPreemptedKeys() - before == 1 else { return finish(false, "Escape with the page focused and no composition did not close the pill") }
+        let closed = await until(5, { ctl.findBar.isHidden })
+        let delta = NCWindow.testPreemptedKeys() - before
+        line("info", "after it: pill hidden \(ctl.findBar.isHidden) claim delta \(delta) first responder \(ns.firstResponder.map { NSStringFromClass(type(of: $0)) } ?? "nil")")
+        if !closed { return finish(false, "pill still shown, Escape not claimed or not acted on (claim delta \(delta), first responder was \(responder), want the page view)") }
+        if delta != 1 { return finish(false, "pill already hidden, claim delta \(delta) (want 1): something other than the Escape claim closed it (first responder was \(responder))") }
         finish(violations.isEmpty, "Escape is not claimed during an IME composition in the page view, with the window as first responder, or \(note); with the guards clear it closes the pill")
     }
 }
