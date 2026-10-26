@@ -1,0 +1,197 @@
+Build 0008: ONE engine build of the patch series at 81c8043, then GREEN in the probe worktree (2026-10-26)
+
+## Build (one locked command: engine/build.sh patch && build && distrib, NOCHE_ENGINE_JOBS=8, inside the shared lockf lock)
+Started at load 8.74 (under 12).
+start 2026-10-26 01:37:27 load 8.74 6.94 6.48
+lock acquired 01:38:08
+log: /Volumes/K3Trunk/noche-engine/logs/patch-20261026T003808Z.log
+patched: 22bc63482
+log: /Volumes/K3Trunk/noche-engine/logs/build-20261026T003810Z.log
+The build has finished successfully.
+log: /Volumes/K3Trunk/noche-engine/logs/distrib-20261026T004059Z.log
+distrib: /Volumes/K3Trunk/noche-engine/distrib/cef_binary_156.0.18-noche.3663+g22bc634+chromium-156.0.8078.48_macosarm64_minimal
+rc=0 end 2026-10-26 01:41:49
+Logs: /Volumes/K3Trunk/noche-engine/logs/patch-20261026T003808Z.log, build-20261026T003810Z.log, distrib-20261026T004059Z.log
+Build rc=0, 01:37:27 to 01:41:49 (lock acquired 01:38:08). Step count: the build log runs in siso --quiet mode and prints no step counter; the only count in it is the GN line "Done. Made 36639 targets from 5030 files in 5351ms", then "The build has finished successfully." (an incremental build, as the earlier follow-up builds).
+Engine tree after patch: cef HEAD 22bc63482 ("patched: 22bc63482").
+Version string of the new distrib (include/cef_version.h): CEF_VERSION "156.0.18-noche.3663+g22bc634+chromium-156.0.8078.48", distrib dir cef_binary_156.0.18-noche.3663+g22bc634+chromium-156.0.8078.48_macosarm64_minimal. The previous one was g50b4e3d.
+
+## Vendored into the probe worktree only
+CEF_DIST=<new distrib> scripts/fetch-cef.sh rc=0; vendor/CEF-VERSION.txt: cef_version=156.0.18-noche.3663+g22bc634+chromium-156.0.8078.48. Probe rebuilt (rc=0, plain, all API switches). The main repo's vendor/ and engine/ were not touched.
+
+## download-keep-quit 5 of 5, controls (every call under the lock)
+run=1 rc=0 :: PROBE download-keep-quit pass download-keep-quit: every assertion held|
+   fatal lines: 0
+run=2 rc=0 :: PROBE download-keep-quit pass download-keep-quit: every assertion held|
+   fatal lines: 0
+run=3 rc=0 :: PROBE download-keep-quit pass download-keep-quit: every assertion held|
+   fatal lines: 0
+run=4 rc=0 :: PROBE download-keep-quit pass download-keep-quit: every assertion held|
+   fatal lines: 0
+run=5 rc=0 :: PROBE download-keep-quit pass download-keep-quit: every assertion held|
+   fatal lines: 0
+download-keep-quit-control rc=0 :: PROBE download-keep-quit-control pass download-keep-quit: every assertion held|
+download-keep-quit-none rc=0 :: PROBE download-keep-quit-none pass download-keep-quit: every assertion held|
+KQ DONE
+
+Each run: rc=0, no FATAL line in probe.log (fatal lines: 0), so no "DCHECK failed: all_.empty()" and no "Object reference incorrectly held at CefShutdown". On g50b4e3d the same check was red every time quoted (fix-round-2.txt, fix-round-3.txt: rc 134 and the all_.empty() line); its controls passed there too.
+
+## Full probe group list on g22bc634 (gate6, every call under the lock, load under 12)
+48 groups, 48 with rc=0, 54 PASS lines, 0 fail lines. Group results as printed:
+### ext-loaded load=8.11 8.80 8.22
+PROBE ext-loaded pass service worker answered {"sw":"1.3","count":1,"ids":[1055841815],"activeId":1055841815}
+rc=0
+### tabs-one load=7.34 8.44 8.12
+PROBE tabs-one pass count=1 ids=1055841887 activeId=1055841887
+rc=0
+### tabs-20 load=8.18 8.42 8.14
+PROBE tabs-20 pass extension count=20 GetTabs=20 GetTabCount=20 OnTabAdded=19
+rc=0
+### ext-create load=7.14 8.09 8.03
+PROBE ext-create pass OnTabAdded=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+rc=0
+### ext-activate load=6.91 7.86 7.95
+PROBE ext-activate pass OnActiveTabChanged=1 GetActiveTab is tab 7=1 callback active is tab 7=1
+rc=0
+### switch-latency load=7.63 7.90 7.96
+PROBE switch-latency pass median=8.6ms p90=11.1ms range=6.4..13.5ms (30 timed after 3 warm-up, fixed cycle order) limits median<=16.7ms p90<=33.3ms (Ruling 14); no recent hybrid control (info only); old reference 11.6ms (S1 harness) is met
+rc=0
+### rss-20 load=6.85 7.55 7.61
+PROBE rss-20 pass rss=5204.1 MB then 5174.6 MB (27 then 26 processes, 20 loaded) limit=6400 MB (U6, hybrid control 5364-5426 MB)
+rc=0
+### blank-link load=5.17 7.47 7.53
+PROBE blank-link pass OnTabAdded=1 new tab URL has ?blank-link=1 windows before=1 after=1 (must be unchanged) GetTabs before=1 after=2 (must be +1)
+rc=0
+### per-tab-client load=12.56 9.34 8.63
+PROBE per-tab-client pass own: A=1(id 2, want 2) B=1(id 3, want 3); chrome.tabs.create: OnTabAdded=1 first client OnAfterCreated 1->2 last id=4 new tab id=4; tabs=4 windows 1->1
+rc=0
+### close-non-last load=6.15 7.86 8.13
+PROBE close-non-last pass phase 1 (background tab): OnTabClosed=1 id ok=1 gone=1 window and view alive=1 windows before=1 after=1 GetTabs=19 extension count=19; phase 2 (active tab): OnTabClosed=1 gone=1 GetActiveTab id=7 (closed 6) GetTabs=18 (want 18) OnActiveTabChanged after close=1 window alive=1
+rc=0
+### close-last load=6.68 7.92 8.14
+PROBE close-last pass window closed with the last tab (documented behavior), no crash; OnTabClosed=3 of 3 (info only)
+rc=0
+### close-callbacks load=6.39 7.83 8.11
+PROBE close-callbacks pass last tab closed: judged callback runs=2 (want 2: OnBeforeClose, OnBrowserDestroyed) windows=0 (want 0) every call answered NULL/0/empty
+rc=0
+### window-normal load=5.78 7.66 8.05
+PROBE window-normal pass windows.getAll normal=1 (window tabs 3) tabs.query normal=3 query all=3 GetTabCount=3 GetTabs=3
+rc=0
+### cmd-enabled load=5.48 7.56 8.01
+PROBE cmd-enabled pass CanExecuteChromeCommand printed for 3 states; 3 unintercepted commands executed (3 s apart), facts above
+rc=0
+### bubbles load=4.87 7.25 7.88
+PROBE bubbles pass zoom bubbles and permission bubbles recorded (no handler, then deny handler)
+rc=0
+### download-restart-1 download-restart-2 load=5.36 7.23 7.87
+PROBE download-restart-1 pass launch 1: paused download recorded (id=122 recv=2949120), quitting with it paused; every assertion held
+PROBE download-restart-2 pass launch 2 (after clean quit): every assertion held
+rc=0
+### download-tab-close load=4.10 6.74 7.66
+PROBE download-tab-close pass tab-close download (navigation variant): every assertion held
+rc=0
+### download-tab-close-start load=4.17 6.59 7.59
+PROBE download-tab-close-start pass tab-close download (StartDownload variant): every assertion held
+rc=0
+### download-keep-stream load=3.12 6.16 7.40
+PROBE download-keep-stream pass kept-request contract, non-download stream: every assertion held
+rc=0
+### download-keep-complete load=3.26 6.09 7.36
+PROBE download-keep-complete pass kept-request contract, kept download: every assertion held
+rc=0
+### download-keep-quit load=2.76 5.79 7.22
+PROBE download-keep-quit pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit-control load=2.64 5.66 7.16
+PROBE download-keep-quit-control pass download-keep-quit: every assertion held
+rc=0
+### download-keep-quit-none load=2.47 5.53 7.10
+PROBE download-keep-quit-none pass download-keep-quit: every assertion held
+rc=0
+### download-restart-crash-1 download-restart-crash-2 load=2.71 5.48 7.06
+PROBE download-restart-crash-1 pass killed with SIGKILL by the harness after ready-to-kill
+PROBE download-restart-crash-2 pass launch 2 (after kill -9): every assertion held
+rc=0
+### download-control-cancel-1 download-control-cancel-2 load=3.08 5.21 6.88
+PROBE download-control-cancel-1 pass launch 1: client-cancelled download id=127 recorded (canceled=1)
+PROBE download-control-cancel-2 pass control client-cancelled: every assertion held
+rc=0
+### download-control-rejected load=2.75 5.00 6.77
+PROBE download-control-rejected pass control rejected download: every assertion held
+rc=0
+### download-control-noprofile load=2.41 4.85 6.69
+PROBE download-control-noprofile pass control no profile handler: every assertion held
+rc=0
+### ctx-ext-items load=2.30 4.71 6.61
+PROBE ctx-ext-items pass context menu model dumped; extension item id=49000; onClicked seen=1 right tab=1
+rc=0
+### zoom-scope load=2.10 4.59 6.54
+PROBE zoom-scope pass zoom scope facts recorded
+rc=0
+### chrome-pages load=2.23 4.54 6.50
+PROBE chrome-pages pass 3 chrome:// pages opened as tabs, facts above
+rc=0
+### zoom-no-bubble load=2.12 4.44 6.44
+PROBE zoom-no-bubble pass no zoom bubble window and zoom moved as expected
+rc=0
+### discard-p1 load=1.95 4.36 6.40
+PROBE discard-p1 pass discarded=5 of 5 background tabs, all original CefBrowser ids valid=1, activation reload OnLoadEnd=1 (135 ms), active-tab explicit discard reply {"id":1055844428,"discarded":true,"ok":true}
+rc=0
+### discard-p1b load=1.95 4.25 6.33
+PROBE discard-p1b pass feature off on the command line=1, background=1, DiscardTab()=0 (want 0), browser valid=1, OnTabDiscarded calls=0/0 (want 0/0)
+rc=0
+### discard-p1b-off load=1.88 4.19 6.30
+PROBE discard-p1b-off pass feature off on the command line=1, background=1, DiscardTab()=0 (want 0), browser valid=1, OnTabDiscarded calls=0/0 (want 0/0)
+rc=0
+### discard-p2 load=1.89 4.16 6.27
+PROBE discard-p2 pass pinned tab survived the URGENT discard=1, unpinned control discarded by the same call=1 (the control must discard or the pin result proves nothing), active tab survived URGENT=1
+rc=0
+### discard-p3 load=2.07 4.08 6.21
+PROBE discard-p3 pass visible 9.76/s, hidden after 10 s 0.96/s (want <= 2.5, about 1), hidden=1, freeze not within 50 s
+rc=0
+### discard-api load=2.28 3.78 5.95
+PROBE discard-api pass DiscardTab + OnTabDiscarded(true then false) + active tab refused + reload + browser valid after discard=1 + document.wasDiscarded=true
+rc=0
+### discard-p5 load=3.94 4.09 6.05
+PROBE discard-p5 pass discarded=20 of 20, renderer RSS 7687.0 MB (33 procs) -> 2933.6 MB (13 procs), 4753.4 MB saved, 237.7 MB per tab
+rc=0
+### profile-dirs load=3.70 4.02 5.97
+PROBE profile-dirs pass profile-dirs: every assertion held
+rc=0
+### profile-cookie profile-cookie-2 load=3.11 3.88 5.89
+PROBE profile-cookie pass profile-cookie (relaunch half: profile-cookie-2): every assertion held
+PROBE profile-cookie-2 pass profile-cookie-2: every assertion held
+rc=0
+### profile-storage load=2.81 3.75 5.80
+PROBE profile-storage pass profile-storage: every assertion held
+rc=0
+### profile-ext load=2.98 3.77 5.79
+PROBE profile-ext pass profile-ext: every assertion held
+rc=0
+### profile-close load=3.44 3.85 5.79
+PROBE profile-close pass profile-close: every assertion held
+rc=0
+### profile-incognito profile-incognito-2 load=3.41 3.82 5.75
+PROBE profile-incognito pass profile-incognito (relaunch half: profile-incognito-2): every assertion held
+PROBE profile-incognito-2 pass profile-incognito-2: every assertion held
+rc=0
+### profile-clear load=3.24 3.76 5.69
+PROBE profile-clear pass profile-clear: every assertion held
+rc=0
+### profile-delete profile-delete-2 load=2.93 3.56 5.46
+PROBE profile-delete pass profile-delete (relaunch half: profile-delete-2): every assertion held
+PROBE profile-delete-2 pass profile-delete-2: every assertion held
+rc=0
+### profile-upgrade load=2.38 3.39 5.36
+PROBE profile-upgrade pass profile-upgrade: every assertion held
+rc=0
+### profile-clear-callbacks load=2.39 3.36 5.32
+PROBE profile-clear-callbacks pass profile-clear-callbacks: every assertion held
+rc=0
+
+## Pause and resume give-up
+No probe reaches it (it needs a download item that never gets a full path); the log line "CefDownloadItemCallback::Pause() gave up for download" was not produced by any run, so it stays unobserved. The patch change is built and compiles.
+
+## Re-review 4 Minor items parked
+2 (README:21 header line numbers): fixed, now cef/include/cef_resource_request_handler.h:170 and :191 in the engine tree (checked with grep on the engine tree, which carries the patch's header hunk) and :167 and :188 in the distrib copy.
+1 (residual IO drop after Set), 3 (posted drop at quit is best effort), 4 (83-column lambda line): code only, left. The build and the 5 of 5 runs show the quit path works with them.
