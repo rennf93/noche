@@ -173,6 +173,7 @@ extension BrowserWindowController {
         case ChromeCommand.zoomMinus: zoom(-1)
         case ChromeCommand.zoomNormal: zoom(0)
         case ChromeCommand.devTools: showDevTools()
+        case ChromeCommand.showDownloads: app.showDownloads(nil)  // Cmd+Opt+L: Noche's window, not Chromium's page
         case ChromeCommand.find: openFind()
         case ChromeCommand.findNext: findStep(forward: true)
         case ChromeCommand.findPrevious: findStep(forward: false)

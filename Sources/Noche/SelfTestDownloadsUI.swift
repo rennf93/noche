@@ -42,9 +42,9 @@ extension SelfTest {
     func downloads(named name: String) -> [NCDownloadItem] { dc.items.filter { $0.suggestedName == name } }
 
     /// Starts a slow download in |tab| and waits until it is running with some bytes; nil (after finishing the check) when it never did.
-    func startSlow(_ tab: NCTab, server: SlowServer, minBytes: Int64 = 1) async -> NCDownloadItem? {
+    func startSlow(_ tab: NCTab, server: SlowServer, minBytes: Int64 = 1, path: String = "slow.bin") async -> NCDownloadItem? {
         let before = Set(dc.items.map(\.identifier))
-        tab.loadURL("http://127.0.0.1:\(server.port)/slow.bin")
+        tab.loadURL("http://127.0.0.1:\(server.port)/\(path)")
         guard await until(15, { dc.items.contains { !before.contains($0.identifier) && $0.state == .inProgress && $0.receivedBytes >= minBytes } }),
               let it = dc.items.first(where: { !before.contains($0.identifier) }) else {
             finish(false, "the slow download never reached \(minBytes) bytes (items: \(dc.items.map { "\($0.suggestedName):\($0.state.rawValue):\($0.receivedBytes)" }))")
@@ -67,6 +67,18 @@ extension SelfTest {
         let tabsBefore = win.tabs.count
         app.showDownloads(nil)
         guard await until(5, { dc.windowController.window.isVisible }) else { return finish(false, "Window > Downloads did not show the Downloads window") }
+        // Hidden runs: the Downloads window is held to the same terms as a browser window (`hidden` check): alpha 0, not key, floating, mouse ignored, the app not
+        // active. The guards are the swizzles in NCWindow.mm (`installHiddenGuards`: GuardWindow zeroes alpha and ignores the mouse on every order-in, and
+        // swz_makeKeyAndOrderFront orders the window in without making it key), installed by AppDelegate for every self-test.
+        let shown = dc.windowController.window
+        try? await Task.sleep(for: .milliseconds(300))
+        func serverAlpha(_ w: NSWindow?) -> Double? {
+            (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]])?.first { ($0[kCGWindowNumber as String] as? Int) == w?.windowNumber }?[kCGWindowAlpha as String] as? Double
+        }
+        let hiddenTerms = "alpha \(shown.alphaValue), key \(shown.isKeyWindow), level \(shown.level.rawValue), mouse ignored \(shown.ignoresMouseEvents), app active \(NSApp.isActive), window server alpha \(String(describing: serverAlpha(shown))) (browser window \(String(describing: serverAlpha(win.nsWindow))))"
+        guard shown.alphaValue == 0, !shown.isKeyWindow, shown.level == .floating, shown.ignoresMouseEvents, !NSApp.isActive else {
+            return finish(false, "the Downloads window can show: \(hiddenTerms)")
+        }
         let rows = dc.windowController.rows
         guard rows.count == 2, win.tabs.count == tabsBefore else { return finish(false, "\(rows.count) rows (want 2), tabs \(tabsBefore) -> \(win.tabs.count)") }
         let names = rows.map(\.nameField.stringValue), details = rows.map(\.detailField.stringValue)
@@ -83,7 +95,7 @@ extension SelfTest {
             return finish(false, "NSWorkspace calls \(log), want open \(paths[0]) and reveal \(paths[1])")
         }
         // A third, running download shows size, percent and a progress bar, and sits on top.
-        guard let server = await SlowServer.start(size: Self.slowSize) else { return finish(false, "the slow download server did not start") }
+        guard let server = await startSlowServer(size: Self.slowSize) else { return finish(false, "the slow download server did not start") }
         defer { server.stop() }
         guard let running = await startSlow(tab, server: server, minBytes: 200_000) else { return }
         guard await until(5, { dc.windowController.rows.count == 3 }) else { return finish(false, "no third row for the running download") }
@@ -98,11 +110,11 @@ extension SelfTest {
         guard await until(10, { item(running.identifier)?.state == .canceled }) else { return finish(false, "Cancel did not end canceled") }
         try? await Task.sleep(for: .milliseconds(300))
         finish(listing(home) == homeBefore && violations.isEmpty,
-               "two downloads of download.bin listed newest first as \(names) with \(details[0]), Open and Show in Finder reached NSWorkspace (\(log)), a running download showed \(detail), ~/Downloads untouched \(violations)")
+               "the window is hidden (\(hiddenTerms)), two downloads of download.bin listed newest first as \(names) with \(details[0]), Open and Show in Finder reached NSWorkspace (\(log)), a running download showed \(detail), ~/Downloads untouched \(violations)")
     }
 
     func dlControls() async {
-        guard await ready(), let win, let tab = win.activeTab, let server = await SlowServer.start(size: Self.slowSize) else { return }
+        guard await ready(), let win, let tab = win.activeTab, let server = await startSlowServer(size: Self.slowSize) else { return }
         defer { server.stop() }
         guard let started = await startSlow(tab, server: server) else { return }
         let id = started.identifier
@@ -131,7 +143,7 @@ extension SelfTest {
     }
 
     func dlTabClose() async {
-        guard await ready(), let win, let server = await SlowServer.start(size: Self.slowSize) else { return }
+        guard await ready(), let win, let server = await startSlowServer(size: Self.slowSize) else { return }
         defer { server.stop() }
         guard await openTabs(2), win.tabs.count == 2 else { return finish(false, "no second tab") }
         guard let tab = win.tabs.last, let started = await startSlow(tab, server: server, minBytes: 100_000) else { return }
@@ -151,9 +163,9 @@ extension SelfTest {
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
         let serverLog = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-server.log").path
         if phase == 1 {
-            guard await ready(), let tab = win?.activeTab, let server = await SlowServer.start(size: Self.slowSize, log: serverLog) else { return }
+            guard await ready(), let tab = win?.activeTab, let server = await startSlowServer(size: Self.slowSize, log: serverLog) else { return }
             slowServer = server
-            guard let started = await startSlow(tab, server: server, minBytes: 800_000) else { return }
+            guard let started = await startSlow(tab, server: server, minBytes: 800_000, path: "") else { return }  // a bare host address: the restored row is named after the host
             relaunchID = started.identifier
             try? "\(server.port) \(server.sha)".write(to: state, atomically: true, encoding: .utf8)
             app.selfTestFinished(ok: true)  // the quit itself: beforeExit judges what it did to the download
@@ -161,14 +173,15 @@ extension SelfTest {
         }
         let saved = ((try? String(contentsOf: state, encoding: .utf8)) ?? "").split(separator: " ").map(String.init)
         guard saved.count >= 3, let port = Int(saved[0]), let before = Int64(saved[2]) else { return finish(false, "phase 1 left no state (\(saved))") }
-        guard await ready(), await until(20, { dc.items.contains { $0.suggestedName == "slow.bin" } }), let restored = dc.items.first(where: { $0.suggestedName == "slow.bin" }) else {
+        guard await ready(), await until(20, { dc.items.contains { $0.suggestedName == "127.0.0.1" } }), let restored = dc.items.first(where: { $0.suggestedName == "127.0.0.1" }) else {
             return finish(false, "the download did not come back after the relaunch (items \(dc.items.map { "\($0.suggestedName):\($0.state.rawValue):\($0.receivedBytes)/\($0.totalBytes) \($0.url) at \($0.fullPath)" }))")
         }
         guard restored.state == .paused, restored.receivedBytes > 0, restored.receivedBytes <= before else {
             return finish(false, "restored download is state \(restored.state.rawValue) with \(restored.receivedBytes) bytes (phase 1 had \(before) at exit), want paused")
         }
-        guard let server = await SlowServer.start(size: Self.slowSize, port: port, log: serverLog), server.sha == saved[1] else { return finish(false, "the slow server did not come back on port \(port)") }
-        defer { server.stop() }
+        guard let server = await startSlowServer(size: Self.slowSize, port: port, log: serverLog) else { return finish(false, "the slow server did not come back on port \(port)") }
+        slowServer = server  // stopped by beforeExit on every way out
+        guard server.sha == saved[1] else { return finish(false, "the slow server's content changed (SHA-256 \(server.sha), phase 1 had \(saved[1]))") }
         app.showDownloads(nil)
         guard await until(5, { dc.windowController.rows.first?.visibleButtons == ["Resume", "Cancel"] }) else { return finish(false, "restored row buttons \(dc.windowController.rows.first?.visibleButtons ?? [])") }
         dc.windowController.rows[0].button("Resume")?.performClick(nil)
@@ -184,12 +197,12 @@ extension SelfTest {
 
     /// Phase 1's verdict, after the quit's pause: the download must be paused with bytes, and the state file gets the bytes at exit.
     func dlQuitVerdict() {
+        defer { slowServer?.stop() }  // every way out, with or without a verdict
         guard check == "dl-quit-relaunch", phase == 1, !verdictPrinted, let id = relaunchID else { return }
         let it = item(id)
         let ok = it?.state == .paused && (it?.receivedBytes ?? 0) >= 800_000
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
         if let it, let old = try? String(contentsOf: state, encoding: .utf8) { try? "\(old) \(it.receivedBytes)".write(to: state, atomically: true, encoding: .utf8) }
-        slowServer?.stop()
         line(ok && violations.isEmpty ? "pass" : "fail", "download in progress at the quit, paused by it (state \(it?.state.rawValue ?? -1), \(it?.receivedBytes ?? 0) bytes, folder \(folderFiles())) \(violations)")
         if !(ok && violations.isEmpty) { app.exitCodeOverride = 1 }
     }
@@ -212,7 +225,7 @@ extension SelfTest {
     }
 
     func dlRing() async {
-        guard await ready(), let ctl, let win, let tab = win.activeTab, let server = await SlowServer.start(size: Self.slowSize) else { return }
+        guard await ready(), let ctl, let win, let tab = win.activeTab, let server = await startSlowServer(size: Self.slowSize) else { return }
         defer { server.stop() }
         let button = ctl.sidebar.downloadButton
         guard let idleRep = snapshot(button), let box = ctl.frame(ofIdentifier: "sidebar.downloads"), box.minX < ChromeStyle.sidebarWidth / 2, box.maxY > win.nsWindow!.frame.height - 60 else {

@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         // The profile's download handler goes in before any window or session is restored: downloads whose tab closed, and downloads restored
         // from the last session, report to the Downloads window, and the quit can pause them.
-        if !BarHook.on("DL_NOSTART") { NCDownloads.shared.start(observer: downloads) }
+        NCDownloads.shared.start(observer: downloads)
         ChromeCommand.resolve()
         restoreWindows(startupURL: url, startupFrame: frame)
 

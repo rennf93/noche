@@ -393,6 +393,13 @@ extension SelfTest {
         guard await until(10, { app.downloads.windowController.window.isVisible }), rowCount == 1 else { return finish(false, "Shift+Cmd+J opened no Downloads window (visible \(app.downloads.windowController.window.isVisible), rows \(rowCount))") }
         await settle(); verify("Shift+Cmd+J", "showDownloads")
         app.downloads.windowController.window.close()
+        // The engine's own chord (Cmd+Opt+L, IDC_SHOW_DOWNLOADS) is answered by the same window.
+        reset()
+        guard ctl.window(win, shouldHandleChromeCommand: ChromeCommand.showDownloads), await until(10, { app.downloads.windowController.window.isVisible }), rowCount == 1 else {
+            return finish(false, "IDC_SHOW_DOWNLOADS was not answered with the Downloads window (rows \(rowCount))")
+        }
+        await settle(); verify("Cmd+Opt+L (IDC_SHOW_DOWNLOADS)", "showDownloads")
+        app.downloads.windowController.window.close()
         guard await openTabs(3) else { return finish(false, "no 3 tabs for Close All Tabs (rows=\(rowCount))") }
         reset(); key("k", code: 40, [.command, .shift], chars: "K")
         guard await until(10, { rowCount == 1 && win.tabs.count == 1 && ctl.list.items.first?.url == "about:blank" }) else {

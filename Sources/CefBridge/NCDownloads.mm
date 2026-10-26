@@ -75,6 +75,7 @@ CefRefPtr<CefDownloadHandler> NCDownloadHandlerInstance() {
 - (void)startWithObserver:(id<NCDownloadsObserver>)observer {
   _observer = observer;
   // Existing items are announced inside this call, through the handler.
+  if (NC_TEST_FLAG("NOCHE_TEST_DL_NOPROFILE")) return;  // negative control: no profile level handler, so downloads without a tab are not reported
   if (CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext()) context->SetDownloadHandler(NCDownloadHandlerInstance());
 }
 
@@ -93,7 +94,9 @@ CefRefPtr<CefDownloadHandler> NCDownloadHandlerInstance() {
   // A download restored from the last session has no name of Chromium's suggesting, only the intermediate file's: the address's last component
   // stands in for the target name (shortcut: the real target name is not in the CEF API, a Content-Disposition name is lost until it completes).
   if (!_names[@(d.identifier)] && !item->IsComplete() && [d.suggestedName hasSuffix:@".crdownload"]) {
-    NSString* fromURL = [d.url hasPrefix:@"http"] ? [[NSURL URLWithString:d.url].lastPathComponent stringByRemovingPercentEncoding] : nil;
+    NSURL* address = [d.url hasPrefix:@"http"] ? [NSURL URLWithString:d.url] : nil;
+    NSString* fromURL = [address.lastPathComponent stringByRemovingPercentEncoding];
+    if (!fromURL.length || [fromURL isEqualToString:@"/"]) fromURL = address.host;  // a bare host address has no path component
     if (fromURL.length) d.suggestedName = fromURL;
   }
   d.receivedBytes = item->GetReceivedBytes();

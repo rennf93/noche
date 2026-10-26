@@ -54,7 +54,7 @@ final class DownloadRowView: NSView {
         progress.isHidden = !live
         progress.doubleValue = Double(max(0, item.percent))
         progress.isIndeterminate = live && item.percent < 0
-        if progress.isIndeterminate { progress.startAnimation(nil) }
+        if progress.isIndeterminate { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
         let shown: Set<String> = switch item.state {
         case .inProgress: ["Pause", "Cancel"]
         case .paused, .interrupted: ["Resume", "Cancel"]

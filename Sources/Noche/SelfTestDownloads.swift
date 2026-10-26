@@ -22,19 +22,23 @@ extension BrowserWindowController {
 /// A local server that trickles a file of |size| bytes (16 KB every 20 ms, so 800 KB/s) and honors `Range: bytes=N-` with a strong validator, so
 /// Chromium can resume a download from it. Byte i of the file is i % 251, so a wrong resume changes the SHA-256, which the server computes itself
 /// (python's hashlib, independent of the app) and prints with its port. Each request's range start is appended to |log|. The one process it
-/// starts is stopped by its PID.
+/// starts is stopped by its PID, and it also ends by itself when its stdin closes (the pipe the app holds: any end of the app closes it, SIGKILL included),
+/// so it cannot outlive the app. NOCHE_TEST_STRAY_SERVER=1 (negative control) turns off both the stop and that watch.
 final class SlowServer: @unchecked Sendable {
     let process = Process()
+    private let input = Pipe()  // its write end stays open while the app lives
     private(set) var port = 0
     private(set) var sha = ""
+    private(set) var pid: Int32 = 0
 
     static func start(size: Int = 40_000_000, port: Int = 0, log: String = "") async -> SlowServer? {
         let server = SlowServer()
         let out = Pipe()
         server.process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         server.process.arguments = ["-I", "-c", """
-        import http.server, time, hashlib, sys
-        SIZE, PORT, LOG = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+        import http.server, time, hashlib, sys, os, threading
+        SIZE, PORT, LOG, WATCH = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
+        if WATCH == '1': threading.Thread(target=lambda: (sys.stdin.read(), os._exit(0)), daemon=True).start()
         PAT = bytes(range(251)) * 70
         def chunk(off, n): return PAT[off % 251:off % 251 + n]
         h = hashlib.sha256()
@@ -63,25 +67,34 @@ final class SlowServer: @unchecked Sendable {
                     pass
             def log_message(self, *a): pass
         s = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), H)
-        print(s.server_address[1], h.hexdigest(), flush=True)
+        print(s.server_address[1], h.hexdigest(), os.getpid(), flush=True)
         s.serve_forever()
-        """, String(size), String(port), log]
+        """, String(size), String(port), log, BarHook.on("STRAY_SERVER") ? "0" : "1"]
+        server.process.standardInput = server.input
         server.process.standardOutput = out
         guard (try? server.process.run()) != nil else { return nil }
         let first = await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
             DispatchQueue.global().async { c.resume(returning: String(data: out.fileHandleForReading.availableData, encoding: .utf8) ?? "") }
         }
         let parts = first.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
-        guard parts.count == 2, let port = Int(parts[0]) else { server.stop(); return nil }
+        guard parts.count == 3, let port = Int(parts[0]), let pid = Int32(parts[2]) else { server.stop(); return nil }
         server.port = port
         server.sha = String(parts[1])
+        server.pid = pid
         return server
     }
 
-    func stop() { if process.isRunning { process.terminate() } }
+    func stop() { if process.isRunning, !BarHook.on("STRAY_SERVER") { process.terminate() } }
 }
 
 extension SelfTest {
+    /// Starts a slow server and prints its PID, which scripts/app-test.sh checks is gone once the app has exited (`stray-server`).
+    func startSlowServer(size: Int = 40_000_000, port: Int = 0, log: String = "") async -> SlowServer? {
+        let server = await SlowServer.start(size: size, port: port, log: log)
+        if let server { line("info", "slow-server-pid \(server.pid)") }
+        return server
+    }
+
     /// Never allow: a test run must not reach a macOS permission dialog (camera, microphone, location, notifications).
     func permissionAnswer(_ mask: NCPermissionMask) -> (allow: Bool, remember: Bool) { (false, true) }
 
@@ -126,7 +139,7 @@ extension SelfTest {
         guard ok else { return finish(false, detail) }
         line("info", detail)
         // A slow download (a local server that trickles 40 MB): pause, resume, pauseAllForQuit and cancel reach the engine and come back as states.
-        guard let slow = await SlowServer.start() else { return finish(false, "the slow download server did not start") }
+        guard let slow = await startSlowServer() else { return finish(false, "the slow download server did not start") }
         defer { slow.stop() }
         let before = Set(sink.updates.map(\.identifier))
         tab.loadURL("http://127.0.0.1:\(slow.port)/slow.bin")
