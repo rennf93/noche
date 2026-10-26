@@ -276,7 +276,7 @@ extension SelfTest {
         reset(); key("r", code: 15); await settle(); verify("Cmd+R", "reload")
         reset(); key("r", code: 15, [.command, .shift]); await settle(); verify("Shift+Cmd+R", "forceReload")
         reset(); key("=", code: 24, [.command, .shift], chars: "+"); await settle(); verify("Cmd+Shift+= (Zoom In)", "zoom")
-        if tab.zoomLevel != 0.5 { bad.append("Zoom In left the zoom at \(tab.zoomLevel)") }
+        if ZoomPillView.percent(forLevel: tab.zoomLevel) != 110 { bad.append("Zoom In left the zoom at \(tab.zoomLevel) (\(ZoomPillView.percent(forLevel: tab.zoomLevel)) percent), want 110") }
         reset(); key("-", code: 27); await settle(); verify("Cmd+- (Zoom Out)", "zoom")
         reset(); key("0", code: 29); await settle(); verify("Cmd+0 (Actual Size)", "zoom")
         if tab.zoomLevel != 0 { bad.append("Zoom Out and Actual Size left the zoom at \(tab.zoomLevel)") }
@@ -365,6 +365,8 @@ extension SelfTest {
             resolves("Shift+Cmd+] folded", "]", "}", cs, "Next Tab")
             resolves("Shift+Cmd+[ kept", "{", "{", cs, "Previous Tab")
             resolves("Shift+Cmd+[ folded", "[", "{", cs, "Previous Tab")
+            // Ctrl+Cmd+F is the system's key for Enter Full Screen (the item has none in the table). Resolved only, never performed: a real fullscreen takes the owner's screen.
+            resolves("Ctrl+Cmd+F", "f", "f", [.control, .command], "Enter Full Screen")
         } else { bad.append("no ShortcutMenu or window for the shifted punctuation rows") }
         reset(); key("p", code: 35); await settle(); verify("Cmd+P", "print")
         // Find (M1.4 task 4): each chord is one Noche action, with the pill (not Chromium's find bar) answering. Nothing is typed, so Cmd+G and Shift+Cmd+G only step.

@@ -36,6 +36,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let findBar = FindBarView(frame: .zero)
     /// Find state per tab (engine id): the pill's text and the last count and active match the engine reported. A tab with no entry is not searching.
     var finds: [Int: FindState] = [:]
+    var lastFindText = ""   // the window's last search text: Cmd+F and Cmd+G open the pill with it after Escape, as Chrome does
     var findShownFor: Int?   // the tab whose state the pill shows now; nil with the pill hidden
     /// Built on first use, so a window that never used the bar never builds its view (and its teardown skips it).
     var madeCommandBar: CommandBarController?
@@ -175,7 +176,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         overlay.addSubview(findBar)
         overlay.addSubview(border)
         setUpFind()
-        toolbar.zoom.onClick = { [weak self] in self?.zoom(nil) }
+        toolbar.zoom.onClick = { [weak self] in self?.zoom(0) }
 
         sidebar.lights[0].onClick = { [weak self] in self?.close() }
         sidebar.lights[1].onClick = { [weak self] in self?.nsWindow?.miniaturize(nil) }
@@ -301,7 +302,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     func goForward() { note("forward"); navigated(); activeTab?.goForward() }
     func reload() { note("reload"); navigated(); activeTab?.reload() }
     func forceReload() { note("forceReload"); navigated(); activeTab?.reloadIgnoringCache() }
-    func zoom(_ delta: Double?) {
+    /// `step` 1 zooms in, -1 out and 0 resets; the engine moves through Chromium's preset factors (`CefBrowserHost::Zoom`, 25 to 500 percent).
+    func zoom(_ step: Int) {
         note("zoom")
         guard let tab = activeTab else { return }
 #if NOCHE_TESTHOOKS
@@ -311,7 +313,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             w.orderFront(nil)
         }
 #endif
-        tab.zoomLevel = delta.map { min(5, max(-5, tab.zoomLevel + $0)) } ?? 0
+        tab.zoomStep(step)
         syncZoom()
         // The engine applies the level on its own turn in some paths: read it again once it did.
         DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.syncZoom() } }

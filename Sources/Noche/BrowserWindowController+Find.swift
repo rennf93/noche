@@ -23,9 +23,11 @@ extension BrowserWindowController: NSTextFieldDelegate {
     }
 
     /// Cmd+F: the pill opens on the active tab (with the text it had) and its field takes focus with the text selected.
-    func openFind(text: String? = nil, counted: Bool = true) {
+    func openFind(text given: String? = nil, counted: Bool = true) {
         if counted { note("find") }
         guard installed, let tab = activeTab else { return }
+        // No pill yet: the window's last text (negative control: FIND_NOREMEMBER forgets it).
+        let text = given ?? (finds[tab.identifier] == nil && !lastFindText.isEmpty && !BarHook.on("FIND_NOREMEMBER") ? lastFindText : nil)
         var state = finds[tab.identifier] ?? FindState()
         let shown = findShownFor == tab.identifier, changed = text.map { $0 != state.text } ?? false
         if let text { state.text = text }
@@ -85,6 +87,7 @@ extension BrowserWindowController: NSTextFieldDelegate {
             state.floor = state.latest
         }
         finds[tab.identifier] = state
+        if !state.text.isEmpty { lastFindText = state.text }
         tab.find(state.text, forward: forward, matchCase: false, findNext: next)
     }
 

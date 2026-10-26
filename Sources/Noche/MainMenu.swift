@@ -126,6 +126,11 @@ final class ShortcutMenu: NSMenu {
             if let sub = item.submenu, let hit = match(sub, keys, mods) { return hit }
             let own = [item.keyEquivalent, (item.representedObject as? MainMenu.Rule)?.usKey ?? ""].compactMap { $0.lowercased().first }
             if own.contains(where: keys.contains), item.keyEquivalentModifierMask == mods { return item }
+            // Enter Full Screen has no key in the table and AppKit does not put one on it: Ctrl+Cmd+F is the system's, matched by the item's action.
+#if NOCHE_TESTHOOKS
+            if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_FSKEY"] == "1" { continue }  // negative control: Ctrl+Cmd+F matches nothing
+#endif
+            if item.action == #selector(NSWindow.toggleFullScreen(_:)), keys.contains("f"), mods == [.control, .command] { return item }
         }
         return nil
     }

@@ -133,7 +133,7 @@ extension BrowserWindowController {
         app.tabLoadFailed(code: code)
     }
 
-    /// Chrome commands that duplicate a Noche action run the Noche action and are answered YES.
+    /// A key the bridge claimed before the page: the claimed Escape closes the find pill, any other chord goes through the main menu.
     func window(_ window: NCWindow, handlePreemptedKey event: NSEvent) {
         if event.keyCode == 53 { closeFind(); return }  // the claimed Escape (windowShouldClaimEscape)
         _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
@@ -145,6 +145,7 @@ extension BrowserWindowController {
         return true
     }
 
+    /// Chrome commands that duplicate a Noche action run the Noche action and are answered YES.
     func window(_ window: NCWindow, shouldHandleChromeCommand commandId: Int) -> Bool {
 #if NOCHE_TESTHOOKS
         Self.commandLog.append(commandId)
@@ -168,9 +169,9 @@ extension BrowserWindowController {
         case ChromeCommand.focusLocation:
             if BarHook.on("BAR_NOFOCUSLOC") { return false }  // negative control: the engine's focus-location command is not answered
             focusAddress()
-        case ChromeCommand.zoomPlus: zoom(0.5)
-        case ChromeCommand.zoomMinus: zoom(-0.5)
-        case ChromeCommand.zoomNormal: zoom(nil)
+        case ChromeCommand.zoomPlus: zoom(1)
+        case ChromeCommand.zoomMinus: zoom(-1)
+        case ChromeCommand.zoomNormal: zoom(0)
         case ChromeCommand.devTools: showDevTools()
         case ChromeCommand.find: openFind()
         case ChromeCommand.findNext: findStep(forward: true)

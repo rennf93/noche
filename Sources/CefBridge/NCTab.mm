@@ -112,6 +112,10 @@ static BOOL g_force_html_fullscreen = NO;
   if (_browser) _browser->GetHost()->SetZoomLevel(zoomLevel);
 }
 
+- (void)zoomStep:(NSInteger)step {
+  if (_browser) _browser->GetHost()->Zoom(step > 0 ? CEF_ZOOM_COMMAND_IN : step < 0 ? CEF_ZOOM_COMMAND_OUT : CEF_ZOOM_COMMAND_RESET);
+}
+
 - (void)loadURL:(NSString*)url {
   if (_browser && _browser->GetMainFrame()) _browser->GetMainFrame()->LoadURL(url.UTF8String);
 }

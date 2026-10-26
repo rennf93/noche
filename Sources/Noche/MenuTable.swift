@@ -67,7 +67,7 @@ enum MenuTable {
     private static let hasWindow: E.Rule = { $0.window != nil }
     private static let sep = E(title: "", separator: true)
 
-    /// Find acts on a page: not on the New Tab surface, where the page is hidden.
+    /// Find and Print act on a page: not on the New Tab surface, where the page is hidden.
     private static let pageShown: E.Rule = { $0.window.map { !$0.newTabShown || BarHook.on("FIND_NTENABLED") } ?? false }  // the hook is a negative control
     /// A working item whose target is the AppDelegate.
     private static func app(_ title: String, _ id: String?, _ action: Selector, enabled: @escaping E.Rule = hasWindow, state: E.Rule? = nil, tag: Int = 0) -> E {
@@ -117,7 +117,7 @@ enum MenuTable {
             sep,
             app("Share...", "file.share", #selector(AppDelegate.share(_:)),
                 enabled: { $0.window?.activeTab.map { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") } ?? false }),
-            app("Print...", "file.print", #selector(AppDelegate.printPage(_:))),
+            app("Print...", "file.print", #selector(AppDelegate.printPage(_:)), enabled: pageShown),
         ]),
         menu("Edit", [
             std("Undo", NSSelectorFromString("undo:"), "edit.undo"),

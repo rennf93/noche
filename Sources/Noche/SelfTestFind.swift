@@ -70,6 +70,20 @@ extension SelfTest {
         BrowserWindowController.actionCounts = [:]
         guard ctl.findBar.isHidden else { return finish(false, "the find pill shows before Cmd+F") }
 
+        // A narrow card: the pill shrinks with it (12 pt from each card edge) down to a floor that keeps the field and the count readable, then stays right-aligned.
+        for (w, cardX) in [(1280, 197), (520, 197), (420, 197), (300, 197), (300, 6)] as [(CGFloat, CGFloat)] {
+            let l = ChromeLayout(size: CGSize(width: w, height: 600), cardX: cardX), pill = l.findBar
+            let want = min(ChromeStyle.findWidth, max(ChromeStyle.findMinWidth, l.card.width - 2 * ChromeStyle.findRight))
+            guard pill.width == want, pill.maxX == l.card.maxX - ChromeStyle.findRight, want > ChromeStyle.findMinWidth ? pill.minX >= l.card.minX + ChromeStyle.findRight : true else {
+                return finish(false, "window \(w) wide, card \(l.card.width): the pill is \(pill) in a card \(l.card), want width \(want) (floor \(ChromeStyle.findMinWidth)), right edge \(l.card.maxX - ChromeStyle.findRight)")
+            }
+        }
+        let small = FindBarView(frame: NSRect(x: 0, y: 0, width: ChromeStyle.findMinWidth, height: ChromeStyle.findHeight))
+        small.layoutSubtreeIfNeeded()
+        guard small.field.frame.width >= 70, small.field.frame.maxX <= small.count.frame.minX, small.count.frame.width >= 50, small.count.frame.maxX <= small.previous.frame.minX, small.close.frame.maxX <= small.bounds.width else {
+            return finish(false, "at the floor width the pill's parts are field \(small.field.frame), count \(small.count.frame), buttons \(small.previous.frame) \(small.close.frame): the field wants 70 pt, the count 50 and all inside \(small.bounds.width)")
+        }
+
         key("f", code: 3)
         guard await until(5, { !ctl.findBar.isHidden && ctl.findBar.field.currentEditor() != nil }) else {
             return finish(false, "Cmd+F: pill hidden \(ctl.findBar.isHidden), field focused \(ctl.findBar.field.currentEditor() != nil) (keys \(keyLog))")
@@ -111,9 +125,22 @@ extension SelfTest {
         }
         guard left == "\"\"" else { return finish(false, "Escape left the highlight: the page's selection is \(left)") }
 
+        // The window remembers the last text: Cmd+F after Escape opens the pill with it selected and searched; Cmd+G with no pill opens it the same way.
+        key("f", code: 3)
+        guard await until(10, { !ctl.findBar.isHidden && ctl.findBar.field.stringValue == "needle" && ctl.findBar.field.currentEditor()?.selectedRange == NSRange(location: 0, length: 6) && findCount() == "1 of 3" }) else {
+            return finish(false, "Cmd+F after Escape: pill hidden \(ctl.findBar.isHidden), text '\(ctl.findBar.field.stringValue)', selection \(String(describing: ctl.findBar.field.currentEditor()?.selectedRange)), count '\(findCount())', want 'needle' selected and '1 of 3'")
+        }
+        press(.escape)
+        guard await until(5, { ctl.findBar.isHidden }) else { return finish(false, "Escape did not close the remembered pill") }
+        key("g", code: 5)
+        guard await until(10, { !ctl.findBar.isHidden && ctl.findBar.field.stringValue == "needle" && findCount() == "1 of 3" }) else {
+            return finish(false, "Cmd+G with no pill: pill hidden \(ctl.findBar.isHidden), text '\(ctl.findBar.field.stringValue)', count '\(findCount())', want 'needle' and '1 of 3'")
+        }
+        ctl.closeFind()
+
         let counts = BrowserWindowController.actionCounts
-        guard counts["find"] == 2, counts["findNext"] == 2, counts["findPrevious"] == 1 else { return finish(false, "action counts \(counts), want find 2, findNext 2, findPrevious 1") }
-        finish(violations.isEmpty, "Cmd+F opens the pill with the field focused, 'needle' shows 1 of 3, Cmd+G 2 of 3, Shift+Cmd+G 1 of 3, another tab hides the pill (stopFinding once on the tab left) and coming back restores text and 1 of 3, Escape closes it and leaves no page selection, no new window \(violations)")
+        guard counts["find"] == 3, counts["findNext"] == 3, counts["findPrevious"] == 1 else { return finish(false, "action counts \(counts), want find 3, findNext 3, findPrevious 1") }
+        finish(violations.isEmpty, "Cmd+F opens the pill with the field focused, 'needle' shows 1 of 3, Cmd+G 2 of 3, Shift+Cmd+G 1 of 3, another tab hides the pill (stopFinding once on the tab left) and coming back restores text and 1 of 3, Escape closes it and leaves no page selection, the pill shrinks with a narrow card to a 260 pt floor with field and count readable, Cmd+F after Escape and Cmd+G with no pill reopen it with 'needle' (selected, 1 of 3), no new window \(violations)")
     }
 
     /// Edit > Find > Use Selection for Find: the page's selected word becomes the pill's text and is searched.
@@ -170,14 +197,16 @@ extension SelfTest {
         let base = await dpr()
         guard base > 0 else { return finish(false, "no devicePixelRatio from the page") }
 
+        func percentOf(_ t: NCTab) -> Int { ZoomPillView.percent(forLevel: t.zoomLevel) }
         func zoomIn() async -> String? {
             key("=", code: 24, [.command, .shift], chars: "+")
             let strays = await watchWindows(baseline)
             return strays.isEmpty ? nil : "a window appeared on Cmd++: \(strays.sorted())"
         }
         if let s = await zoomIn() { return finish(false, s) }
+        guard await until(5, { percentOf(tab) == 110 }) else { return finish(false, "one Cmd++ left the zoom at \(percentOf(tab)) percent, want 110") }
         if let s = await zoomIn() { return finish(false, s) }
-        guard await until(5, { tab.zoomLevel == 1.0 }) else { return finish(false, "two Cmd++ left the level at \(tab.zoomLevel), want 1.0") }
+        guard await until(5, { percentOf(tab) == 125 }) else { return finish(false, "two Cmd++ left the zoom at \(percentOf(tab)) percent (level \(tab.zoomLevel)), want 125 (Chromium's presets: 110, then 125)") }
         // The renderer applies the zoom a moment after the level changes: wait for its number to leave 100.
         var factor = 1.0
         for _ in 0..<50 {
@@ -198,15 +227,34 @@ extension SelfTest {
         if let s = await zoomIn() { return finish(false, s) }
         if let s = await zoomIn() { return finish(false, s) }
         guard let second = win.addTab(withURL: fixture("find.html"), activate: true) else { return finish(false, "no second tab") }
-        guard await until(10, { win.activeTab === second && second.zoomLevel == 1.0 && shows("\(reported)%") }) else {
-            return finish(false, "second tab on the same host: level \(second.zoomLevel), pill hidden=\(pill.isHidden) '\(pill.accessibilityValue() ?? "nil")', want 1.0 and \(reported)%")
+        guard await until(10, { win.activeTab === second && percentOf(second) == 125 && shows("\(reported)%") }) else {
+            return finish(false, "second tab on the same host: level \(second.zoomLevel), pill hidden=\(pill.isHidden) '\(pill.accessibilityValue() ?? "nil")', want 125 and \(reported)%")
         }
         // A click on the pill resets to 100 percent.
         guard click(pill) else { return finish(false, "the zoom pill is not what a click at its middle hits") }
         guard await until(5, { pill.isHidden && second.zoomLevel == 0 && tab.zoomLevel == 0 }) else { return finish(false, "the pill click left hidden=\(pill.isHidden), level \(second.zoomLevel)") }
+        // Steps follow Chromium's presets from wherever the level is: from an off-preset level (a pinch), from the top and bottom stops and from a level past the range (never pulled the wrong way).
+        func step(_ from: Double, _ zoomKey: String, _ want: Int, _ name: String) async -> String? {
+            tab.zoomLevel = from
+            guard await until(5, { tab.zoomLevel == from }) else { return "\(name): the engine kept level \(tab.zoomLevel), want \(from)" }
+            if zoomKey == "+" { key("=", code: 24, [.command, .shift], chars: "+") } else { key("-", code: 27) }
+            let strays = await watchWindows(baseline, ms: 700)
+            guard strays.isEmpty else { return "\(name): a window appeared \(strays.sorted())" }
+            guard await until(5, { percentOf(tab) == want }) else { return "\(name): \(percentOf(tab)) percent (level \(tab.zoomLevel)), want \(want)" }
+            return nil
+        }
+        func level(_ percent: Double) -> Double { log(percent / 100) / log(1.2) }
+        let cases: [(Double, String, Int, String)] = [
+            (level(120), "+", 125, "Cmd++ from 120 percent"), (level(120), "-", 110, "Cmd+- from 120 percent"), (0, "-", 90, "Cmd+- from 100 percent"),
+            (level(500), "+", 500, "Cmd++ at the 500 percent stop"), (level(500), "-", 400, "Cmd+- at the 500 percent stop"),
+            (level(25), "-", 25, "Cmd+- at the 25 percent stop"), (level(25), "+", 33, "Cmd++ at the 25 percent stop"),
+            (level(560), "+", 560, "Cmd++ past the top (560 percent)"), (level(560), "-", 500, "Cmd+- past the top (560 percent)"),
+        ]
+        for c in cases { if let s = await step(c.0, c.1, c.2, c.3) { return finish(false, s) } }
+        tab.zoomLevel = 0
         let strays = await watchWindows(baseline)
         guard strays.isEmpty else { return finish(false, "windows appeared during zoom: \(strays.sorted())") }
-        finish(violations.isEmpty, "two Cmd++ show the percent Chromium reports (\(reported)%, devicePixelRatio ratio), Cmd+0 hides the pill, a second tab on the same host shows the same zoom, a click resets, no new window appeared \(violations)")
+        finish(violations.isEmpty, "Cmd++ twice shows 110 then 125 percent, the number Chromium reports (\(reported)%, devicePixelRatio ratio); Cmd+0 hides the pill; a second tab on the same host shows the same zoom; a click resets; presets from 120 percent (125 up, 110 down), 100 down (90), the 500 stop (stays, 400 down), the 25 stop (stays, 33 up) and past the top (560 stays, 500 down); no new window appeared \(violations)")
     }
 
     // MARK: find, more
@@ -259,7 +307,7 @@ extension SelfTest {
         guard !ctl.findBar.isHidden, ctl.finds[tab.identifier]?.text == "needle", findCount() == "1 of 3" else {
             return finish(false, "a same-document navigation changed the session: pill hidden \(ctl.findBar.isHidden), count '\(findCount())', want 'needle' and '1 of 3'")
         }
-        // Another document: the session ends, Cmd+G opens an empty pill.
+        // Another document: the session ends; the window remembers the text, so Cmd+G opens the pill with it and searches the new page (no match there).
         var before = loads
         tab.loadURL(fixture(""))
         guard await until(10, { loads > before }) else { return finish(false, "the second document did not load") }
@@ -267,8 +315,8 @@ extension SelfTest {
             return finish(false, "after navigating to another document the pill hidden=\(ctl.findBar.isHidden), state \(String(describing: ctl.finds[tab.identifier]))")
         }
         key("g", code: 5)
-        guard await until(5, { !ctl.findBar.isHidden && ctl.findBar.field.stringValue.isEmpty && findCount().isEmpty }) else {
-            return finish(false, "Cmd+G after the navigation: pill hidden \(ctl.findBar.isHidden), text '\(ctl.findBar.field.stringValue)', count '\(findCount())', want an empty pill")
+        guard await until(5, { !ctl.findBar.isHidden && ctl.findBar.field.stringValue == "needle" && findCount() == "0 of 0" }) else {
+            return finish(false, "Cmd+G after the navigation: pill hidden \(ctl.findBar.isHidden), text '\(ctl.findBar.field.stringValue)', count '\(findCount())', want the remembered 'needle' and '0 of 0' on the new page")
         }
         press(.escape)
         // A reload is a new document too.
@@ -281,7 +329,7 @@ extension SelfTest {
             return finish(false, "after a reload the pill hidden=\(ctl.findBar.isHidden), state \(String(describing: ctl.finds[tab.identifier]))")
         }
         if let m = await stray(baseline, "navigation") { return finish(false, m) }
-        finish(violations.isEmpty, "a same-document navigation keeps the find session, another document and a reload end it (pill closed, state cleared), Cmd+G then opens an empty pill, no new window \(violations)")
+        finish(violations.isEmpty, "a same-document navigation keeps the find session, another document and a reload end it (pill closed, state cleared), Cmd+G then opens the pill with the remembered text (0 of 0 on the new page), no new window \(violations)")
     }
 
     /// The engine's own find accelerators (IDC_FIND, IDC_FIND_NEXT, IDC_FIND_PREVIOUS, IDC_CLOSE_FIND_OR_STOP) reach Noche's pill and never a Chromium find bar.

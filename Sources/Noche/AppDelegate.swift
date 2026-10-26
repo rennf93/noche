@@ -200,9 +200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func refresh(_ s: Any?) { active?.reload() }
     @objc func forceRefresh(_ s: Any?) { active?.forceReload() }
     @objc func toggleSidebar(_ s: Any?) { active?.toggleSidebar() }
-    @objc func zoomActual(_ s: Any?) { active?.zoom(nil) }
-    @objc func zoomIn(_ s: Any?) { active?.zoom(0.5) }
-    @objc func zoomOut(_ s: Any?) { active?.zoom(-0.5) }
+    @objc func zoomActual(_ s: Any?) { active?.zoom(0) }
+    @objc func zoomIn(_ s: Any?) { active?.zoom(1) }
+    @objc func zoomOut(_ s: Any?) { active?.zoom(-1) }
     @objc func find(_ s: Any?) { active?.openFind() }
     @objc func findNext(_ s: Any?) { active?.findStep(forward: true) }
     @objc func findPrevious(_ s: Any?) { active?.findStep(forward: false) }

@@ -38,11 +38,17 @@ final class FindBarView: NSView {
         count.setAccessibilityIdentifier("find.count")
         count.setAccessibilityLabel("Match count")
         for v in [field, count, previous, next, close] as [NSView] { addSubview(v) }
-        field.frame = NSRect(x: 14, y: 8, width: 126, height: 20)
-        count.frame = NSRect(x: 142, y: 9, width: 58, height: 18)
-        for (i, b) in [previous, next, close].enumerated() { b.frame.origin = NSPoint(x: 204 + 34 * CGFloat(i), y: 2) }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The buttons and the count keep their size at the right; the field takes what is left (126 pt at the full 308 pt width).
+    override func layout() {
+        super.layout()
+        let w = bounds.width
+        for (i, b) in [previous, next, close].enumerated() { b.frame.origin = NSPoint(x: w - 104 + 34 * CGFloat(i), y: 2) }
+        count.frame = NSRect(x: w - 166, y: 9, width: 58, height: 18)
+        field.frame = NSRect(x: 14, y: 8, width: max(0, w - 182), height: 20)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: bounds.height / 2, yRadius: bounds.height / 2)

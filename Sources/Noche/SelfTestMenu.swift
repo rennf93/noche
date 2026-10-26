@@ -133,6 +133,11 @@ extension SelfTest {
         }
         walk(bar)
         guard disabled.count >= 20 else { return finish(false, "only \(disabled.count) disabled items with a key, expected at least 20") }
+        func chord(_ i: NSMenuItem) -> String {
+            let m = i.keyEquivalentModifierMask
+            return (m.contains(.control) ? "Ctrl+" : "") + (m.contains(.option) ? "Opt+" : "") + (m.contains(.shift) ? "Shift+" : "") + (m.contains(.command) ? "Cmd+" : "") + i.keyEquivalent.uppercased() + " (\(i.title))"
+        }
+        line("info", "swallowed chords: " + disabled.map(chord).joined(separator: ", "))
         BrowserWindowController.actionCounts = [:]; BrowserWindowController.commandLog = []
         let rows = rowCount, windows = app.controllers.count, tabs = ctl.window.tabs.count
         var handled = 0
@@ -159,13 +164,13 @@ extension SelfTest {
         key("k", code: 40, [.command, .shift], menuOnly: true)
         try? await Task.sleep(for: .milliseconds(300))
         guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "Close All Tabs acted on a blank tab: \(BrowserWindowController.actionCounts)") }
-        // The New Tab surface hides the page: Find has nothing to search there.
+        // The New Tab surface hides the page: Find has nothing to search there and Print would print the hidden blank page.
         guard await until(10, { ctl.newTabShown }) else { return finish(false, "the New Tab surface never showed for the blank tab") }
         _ = menuLines(bar, path: "bar")
-        for t in ["Find...", "Find Next", "Find Previous", "Use Selection for Find"] {
+        for t in ["Find...", "Find Next", "Find Previous", "Use Selection for Find", "Print..."] {
             guard let i = menuItem(t), !i.isEnabled else { return finish(false, "\(t) is enabled on the New Tab surface") }
         }
-        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs and the four Find items are disabled and its key does nothing \(violations)")
+        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs, the four Find items and Print are disabled and its key does nothing \(violations)")
     }
 
     /// The items with no shortcut, plus Appearance. (The keyed ones are in shortcuts-once.)
