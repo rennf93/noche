@@ -4,7 +4,7 @@ import NocheStore
 /// The Cmd+D card (M1.5 builder call, docs/app/README.md "Builder calls and rulings"): a card under the toolbar at the card's top right.
 /// Bookmark mode edits a stored bookmark (title, folder; Done saves, Remove deletes). Folder mode (Bookmark All Tabs) names a new folder and
 /// picks its parent; Save adds it, Cancel adds nothing. It is a view of the window, never a window of its own.
-final class BookmarkEditView: NSView {
+final class BookmarkEditView: NSView, NSTextFieldDelegate {
     override var isFlipped: Bool { true }
     enum Mode: Equatable { case added(String), edit(String), folder }   // the bookmark's id for the first two
     private(set) var mode: Mode = .folder
@@ -29,6 +29,7 @@ final class BookmarkEditView: NSView {
         name.font = ChromeStyle.barRowFont
         name.setAccessibilityIdentifier("bookmark.name")
         name.setAccessibilityLabel("Name")
+        name.delegate = self
         name.target = self
         name.action = #selector(doneClicked)   // Return saves
         (name.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false   // leaving the field (Cancel, another tab) must not save
@@ -81,6 +82,13 @@ final class BookmarkEditView: NSView {
     /// The name is selected for typing over (a new folder's "New Folder" is the point of it).
     func focusName() {
         name.selectText(nil)
+    }
+
+    /// Escape in the name field cancels: the card closes and the bookmark stays as it is.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        onCancel?()
+        return true
     }
 
     @objc private func doneClicked() { onDone?(name.stringValue, selectedFolderID ?? "") }

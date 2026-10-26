@@ -14,7 +14,7 @@ extension BrowserWindowController {
         bookmarksBar.onMenu = { [weak self] b, chip in self?.showBookmarkMenu(b, from: chip) }
         bookmarkEditor.onDone = { [weak self] name, parent in self?.bookmarkEditorDone(name, parent) }
         bookmarkEditor.onRemove = { [weak self] in self?.bookmarkEditorRemove() }
-        bookmarkEditor.onCancel = { [weak self] in self?.bookmarkEditor.hide() }
+        bookmarkEditor.onCancel = { [weak self] in self?.bookmarkEditor.hide(); self?.bookmarkEditorClosed() }
         refreshBookmarks()
     }
 
@@ -28,7 +28,7 @@ extension BrowserWindowController {
     }
 
     private func bookmarkExists(_ id: String) -> Bool {
-        ((try? app.writer?.store.urlBookmarks()) ?? nil)?.contains { $0.id == id } ?? false
+        ((try? app.writer?.store.bookmark(id: id)) ?? nil) != nil
     }
 
     func bookmarksBarModeChanged() {
@@ -86,19 +86,26 @@ extension BrowserWindowController {
                 guard !parent.isEmpty, !BarHook.on("BM_NOSAVE") else { break }
                 try store.addFolder(title: title.isEmpty ? "New Folder" : title, parentId: parent, bookmarks: bookmarkTabs)
             case .added(let id), .edit(let id):
-                guard let b = try store.urlBookmarks().first(where: { $0.id == id }) else { break }
+                guard let b = try store.bookmark(id: id) else { break }
                 if !title.isEmpty, title != b.title { try store.renameBookmark(id: id, title: title) }
                 if !parent.isEmpty, parent != b.parentId { try store.moveBookmark(id: id, toParent: parent, index: nil) }
             }
         } catch { app.logBookmark("save", error) }
         bookmarkEditor.hide()
         app.bookmarksChanged()
+        bookmarkEditorClosed()
     }
 
     private func bookmarkEditorRemove() {
         if case .added(let id) = bookmarkEditor.mode { app.deleteBookmark(id) }
         if case .edit(let id) = bookmarkEditor.mode { app.deleteBookmark(id) }
         bookmarkEditor.hide()
+        bookmarkEditorClosed()
+    }
+
+    /// Done, Remove, Cancel and Escape give the keys back to the page (the name field had them).
+    private func bookmarkEditorClosed() {
+        if !BarHook.on("BM_NOREFOCUS") { window.focusActiveContent() }  // negative control: focus stays nowhere
     }
 
     /// The card belongs to the tab it was opened on: another tab closes it.

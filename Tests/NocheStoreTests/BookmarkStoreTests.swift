@@ -1,5 +1,6 @@
 import XCTest
 import GRDB
+import NocheCore
 @testable import NocheStore
 
 final class BookmarkStoreTests: XCTestCase {
@@ -162,6 +163,26 @@ extension BookmarkStoreTests {
         try dense(s, folder)
         XCTAssertThrowsError(try s.addFolder(title: "x", parentId: "missing", bookmarks: [("a", "https://a.com")]))
         XCTAssertEqual(try titles(s, bar), ["first", "New Folder"])
+    }
+
+    func testOldestBookmarkSurvivesPast500() throws {
+        let t = LockedBox(1_000.0)
+        let s = try Store.inMemory(now: { Date(timeIntervalSince1970: t.next()) })
+        let bar = try s.bookmarkRoots()[0]
+        var ids: [String] = []
+        for i in 0..<501 { ids.append(try s.addBookmark(title: "b\(i)", url: "https://\(i).example.com", parentId: bar.id).id) }
+        let all = try s.urlBookmarks()
+        XCTAssertEqual(all.count, 501)
+        XCTAssertTrue(all.contains { $0.id == ids[0] })
+        XCTAssertEqual(try s.bookmark(id: ids[0])?.title, "b0")
+        XCTAssertNil(try s.bookmark(id: "missing"))
+        XCTAssertNil(try s.bookmark(id: bar.id))  // a folder is not a page bookmark
+        // the command bar's candidates still hold the oldest, and it ranks
+        let candidates = all.map { BookmarkCandidate(url: $0.url ?? "", title: $0.title, addedAt: $0.createdAt) }
+        let rows = SuggestionRanker.rank(query: "b0", pages: [], tabs: [], sites: [], remote: [], activeTabID: nil, bookmarks: candidates)
+        XCTAssertTrue(rows.contains { $0.kind == .page && $0.url == "https://0.example.com" })
+        try s.deleteBookmark(id: ids[0])
+        XCTAssertNil(try s.bookmark(id: ids[0]))
     }
 
     func testBarModeSettingSurvivesReopen() throws {

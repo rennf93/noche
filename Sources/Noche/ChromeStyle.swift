@@ -151,6 +151,8 @@ struct ChromeLayout {
         let s = (cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset)
         return CGRect(x: -ChromeStyle.sidebarWidth + ChromeStyle.sidebarWidth * s, y: 0, width: ChromeStyle.sidebarWidth, height: size.height)
     }
+    /// What the bar takes at the top of the card on every surface it shows on (over the New Tab surface too, where it pushes nothing).
+    private var barOffset: CGFloat { barShown && !BarHook.on("BM_NOBARSHIFT") ? ChromeStyle.bookmarksBarHeight : 0 }  // the hook is a negative control
     /// The bookmarks bar: the row under the toolbar's divider, the card's full width.
     var bookmarksBar: CGRect { CGRect(x: cardX, y: ChromeStyle.webTop, width: card.width, height: ChromeStyle.bookmarksBarHeight) }
     /// The Cmd+D card: top right of the card, below the divider (and below the bar when the bar is shown).
@@ -163,12 +165,12 @@ struct ChromeLayout {
     /// It shrinks with a narrow card (12 pt from each edge) down to `findMinWidth`, then keeps its right edge.
     var findBar: CGRect {
         let w = BarHook.on("FIND_FIXEDWIDTH") ? ChromeStyle.findWidth : min(ChromeStyle.findWidth, max(ChromeStyle.findMinWidth, card.width - 2 * ChromeStyle.findRight))  // negative control: fixed width
-        return CGRect(x: card.maxX - ChromeStyle.findRight - w, y: ChromeStyle.webTop + barHeight + ChromeStyle.findTop, width: w, height: ChromeStyle.findHeight)
+        return CGRect(x: card.maxX - ChromeStyle.findRight - w, y: ChromeStyle.webTop + barOffset + ChromeStyle.findTop, width: w, height: ChromeStyle.findHeight)
     }
     /// The permission prompt: top left of the card, below the divider; it narrows with a narrow card (12 pt from each edge).
     var permissionPrompt: CGRect {
         let w = min(ChromeStyle.permissionWidth, max(0, card.width - 2 * ChromeStyle.permissionLeft))
-        return CGRect(x: card.minX + ChromeStyle.permissionLeft, y: ChromeStyle.webTop + barHeight + ChromeStyle.permissionTop, width: w, height: ChromeStyle.permissionHeight)
+        return CGRect(x: card.minX + ChromeStyle.permissionLeft, y: ChromeStyle.webTop + barOffset + ChromeStyle.permissionTop, width: w, height: ChromeStyle.permissionHeight)
     }
     /// The web view sits 1 pt inside the card border, below the divider.
     var webInsets: NSEdgeInsets {

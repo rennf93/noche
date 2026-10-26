@@ -41,8 +41,9 @@ extension AppDelegate {
 
     /// A bookmark opens a stored address, so its scheme is checked again (as a History row's is).
     func openBookmark(_ b: Bookmark, newTab: Bool) {
-        guard b.kind == .url, let url = b.url, let scheme = URL(string: url)?.scheme?.lowercased(), scheme == "http" || scheme == "https",
-              AddressInput.allowedSchemes.contains(scheme) else { return }
+        guard b.kind == .url, let url = b.url else { return }
+        // negative control: BM_NOSCHEME skips the gate, so a stored javascript: or file: address opens
+        guard BarHook.on("BM_NOSCHEME") || (["http", "https"].contains(URL(string: url)?.scheme?.lowercased() ?? "") && AddressInput.allowedSchemes.contains(URL(string: url)?.scheme?.lowercased() ?? "")) else { return }
         if let a = active { a.openBookmark(url, newTab: newTab) } else if !closing { BrowserWindowController.note("bookmarkOpen"); newWindow(url: url) }
     }
 
@@ -73,6 +74,9 @@ final class BookmarksMenuDelegate: NSObject, NSMenuDelegate {
     unowned let app: AppDelegate
     private static let dynamic = NSUserInterfaceItemIdentifier("noche.menu.bookmarks.dynamic")
     init(app: AppDelegate) { self.app = app }
+
+    /// AppKit asks this while it looks for a key equivalent (every Cmd chord) and rebuilds the menu first when the delegate says nothing: no row here has a key.
+    func menuHasKeyEquivalent(_ menu: NSMenu, for event: NSEvent, target: AutoreleasingUnsafeMutablePointer<AnyObject?>, action: UnsafeMutablePointer<Selector?>) -> Bool { false }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         for i in menu.items.reversed() where i.identifier == Self.dynamic { menu.removeItem(i) }

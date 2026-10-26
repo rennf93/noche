@@ -13,8 +13,11 @@ final class BookmarkNode: NSObject {
 
 final class BookmarksOutlineView: NSOutlineView {
     var onDelete: (() -> Void)?
+    var onRename: (() -> Void)?
     override func keyDown(with event: NSEvent) {
-        if (event.keyCode == 51 || event.keyCode == 117) && !BarHook.on("BM_NOKEY") { onDelete?() } else { super.keyDown(with: event) }  // Delete and Forward Delete
+        if (event.keyCode == 51 || event.keyCode == 117) && !BarHook.on("BM_NOKEY") { onDelete?() }  // Delete and Forward Delete
+        else if event.keyCode == 36 || event.keyCode == 76 { onRename?() }                            // Return and Enter start renaming the selected title
+        else { super.keyDown(with: event) }
     }
 }
 
@@ -22,7 +25,7 @@ final class BookmarksOutlineView: NSOutlineView {
 /// A title edits in place (Return renames), Delete removes the row and everything under it, New Folder adds one under the selected folder,
 /// a double click opens a page in a new tab. Every change goes through the app, so the bar, the menu and the command bar follow at once.
 @MainActor
-final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate {
     unowned let app: AppDelegate
     let window: NSWindow
     let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
@@ -66,6 +69,7 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         outline.target = self
         outline.doubleAction = #selector(openSelected)
         outline.onDelete = { [weak self] in self?.deleteSelected() }
+        outline.onRename = { [weak self] in self?.beginRename() }
         outline.setAccessibilityIdentifier("bookmarks.list")
         let scroll = NSScrollView()
         scroll.documentView = outline
@@ -145,11 +149,21 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         reload()
     }
 
+    /// Under the selected folder, beside the selected page, or (nothing selected) in Bookmarks Bar.
     @objc func newFolder() {
-        guard let n = selected else { return }
-        let parent = n.isFolder ? n : roots.first { $0.children.contains { $0 === n } } ?? roots[0]
-        app.addBookmarkFolder(title: "New Folder", parentId: parent.bookmark.id)
+        guard let first = roots.first else { return }
+        var parentId = first.bookmark.id
+        if let n = selected { parentId = n.isFolder ? n.bookmark.id : (n.bookmark.parentId ?? parentId) }
+        app.addBookmarkFolder(title: "New Folder", parentId: parentId)
         reload()
+    }
+
+    /// A title is only editable once Return asked for it, so a double click opens a row and never starts editing.
+    func beginRename() {
+        let r = outline.selectedRow
+        guard r >= 0, let n = outline.item(atRow: r) as? BookmarkNode, !n.isRoot, let field = outline.view(atColumn: 0, row: r, makeIfNecessary: true) as? NSTextField else { return }
+        field.isEditable = true
+        outline.editColumn(0, row: r, with: nil, select: true)
     }
 
     @objc func titleEdited(_ field: NSTextField) {
@@ -159,6 +173,9 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         if !t.isEmpty, !BarHook.on("BM_NORENAME") { app.renameBookmark(n.bookmark.id, to: t) }
         reload()
     }
+
+    /// Leaving the field (Escape, a click elsewhere) ends the rename: the rows are rebuilt, uneditable again.
+    func controlTextDidEndEditing(_ obj: Notification) { DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.reload() } } }
 
     // MARK: outline
 
@@ -179,11 +196,11 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         let field = NSTextField(string: isTitle ? n.bookmark.title : (n.bookmark.url ?? ""))
         field.isBordered = false
         field.drawsBackground = false
-        field.isEditable = isTitle && !n.isRoot
+        field.isEditable = false
         field.font = ChromeStyle.font
         field.textColor = ChromeStyle.titleColor
         field.lineBreakMode = .byTruncatingTail
-        if isTitle { field.target = self; field.action = #selector(titleEdited(_:)) }
+        if isTitle { field.target = self; field.action = #selector(titleEdited(_:)); field.delegate = self }
         return field
     }
 }

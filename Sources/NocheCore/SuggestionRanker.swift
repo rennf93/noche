@@ -12,9 +12,12 @@ public enum SuggestionRanker {
         let tokens = q.split(whereSeparator: \.isWhitespace).map { typedWithoutSchemeAndWww(String($0)) }
 
         // A bookmark joins the history pages (one that was never visited is a page of its own) and its page's frecency counts bookmarkBonus times.
-        let marked = Set(bookmarks.map(\.url))
-        let known = Set(pages.map(\.url))
-        let bookmarkPages = bookmarks.filter { !known.contains($0.url) }.compactMap { b -> PageCandidate? in
+        // The key is the address as the row shows it (`urlDisplay`: no scheme, no www., no trailing slash), so https://x.com and https://x.com/ are one page.
+        func key(_ url: String) -> String { urlDisplay(url).lowercased() }
+        let marked = Set(bookmarks.map { key($0.url) })
+        let known = Set(pages.map { key($0.url) })
+        var listedMarks = Set<String>()
+        let bookmarkPages = bookmarks.filter { !known.contains(key($0.url)) && listedMarks.insert(key($0.url)).inserted }.compactMap { b -> PageCandidate? in
             guard var host = URLComponents(string: b.url)?.host?.lowercased(), !host.isEmpty else { return nil }
             if host.hasPrefix("www.") { host.removeFirst(4) }
             return PageCandidate(url: b.url, host: host, title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
@@ -22,7 +25,7 @@ public enum SuggestionRanker {
         var seen = Set<String>()
         let matches = (pages + bookmarkPages)
             .filter { pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: $0.host.lowercased(), title: $0.title) }
-            .map { ($0, frecency($0, now: now) * (marked.contains($0.url) ? bookmarkBonus : 1)) }
+            .map { ($0, frecency($0, now: now) * (marked.contains(key($0.url)) ? bookmarkBonus : 1)) }
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 > b.1 }
                 if a.0.lastVisitAt != b.0.lastVisitAt { return a.0.lastVisitAt > b.0.lastVisitAt }

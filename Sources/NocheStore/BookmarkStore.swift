@@ -120,12 +120,16 @@ extension Store {
         }
     }
 
-    /// Every reachable url bookmark, newest first (the command bar ranks them on each keystroke, so a deleted one is gone at once).
-    public func urlBookmarks(limit: Int = 500) throws -> [Bookmark] {
+    /// Every reachable url bookmark, newest first, no cap (the command bar ranks them on each keystroke, so a deleted one is gone at once and an old one still ranks).
+    public func urlBookmarks() throws -> [Bookmark] {
         try db.read { db in
-            try BookmarkRow.fetchAll(db, sql: Self.reachable + " ORDER BY createdAt DESC, rowid DESC LIMIT ?",
-                                     arguments: [Schema.defaultProfileID, limit]).compactMap(\.bookmark)
+            try BookmarkRow.fetchAll(db, sql: Self.reachable + " ORDER BY createdAt DESC, rowid DESC", arguments: [Schema.defaultProfileID]).compactMap(\.bookmark)
         }
+    }
+
+    /// One reachable url bookmark by id (existence and the card's Done), nil when it is gone.
+    public func bookmark(id: String) throws -> Bookmark? {
+        try db.read { db in try BookmarkRow.fetchOne(db, sql: Self.reachable + " AND id = ?", arguments: [Schema.defaultProfileID, id])?.bookmark }
     }
 
     /// A folder holding one url bookmark per entry, in order, in one transaction (Bookmark All Tabs).

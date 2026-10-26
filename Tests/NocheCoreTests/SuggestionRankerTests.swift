@@ -194,6 +194,16 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertFalse(none.contains { $0.kind == .page })
     }
 
+    func testBookmarkAndHistoryPageWithTrailingSlashGiveOneRow() {
+        let p = page("https://x.com/", host: "x.com", title: "X Home", visits: 3)
+        let rows = SuggestionRanker.rank(query: "x", pages: [p], tabs: [], sites: [], remote: [], activeTabID: nil, now: now,
+                                         bookmarks: [BookmarkCandidate(url: "https://x.com", title: "X", addedAt: now), BookmarkCandidate(url: "http://www.x.com/", title: "X again", addedAt: now)])
+        let pages = rows.filter { $0.kind == .page }
+        XCTAssertEqual(pages.count, 1)
+        XCTAssertEqual(pages.first?.url, "https://x.com/")
+        XCTAssertEqual(pages.first?.frecency, 6)
+    }
+
     func testBookmarkedPageGainsDoubleFrecency() {
         let a = page("https://a.example/x", host: "a.example", title: "Note one", visits: 3)
         let b = page("https://b.example/x", host: "b.example", title: "Note two", visits: 4)

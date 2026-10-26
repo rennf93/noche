@@ -69,6 +69,12 @@ extension SelfTest {
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         guard barTitles().isEmpty, !recentRows().header else { return finish(false, "a fresh profile already has bookmarks: \(barTitles()) \(recentRows())") }
         guard bookmarksMenu()?.delegate === app.bookmarksMenuDelegate else { return finish(false, "the Bookmarks menu has no delegate, so its rows are never built") }
+        // A key equivalent search must not rebuild the dynamic rows (menuNeedsUpdate would read the whole tree on every Cmd chord).
+        if let menu = bookmarksMenu(), let del = menu.delegate, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                                                         windowNumber: ctl.nsWindow?.windowNumber ?? 0, context: nil, characters: "d", charactersIgnoringModifiers: "d", isARepeat: false, keyCode: 2) {
+            var t: AnyObject?, a: Selector?
+            guard del.menuHasKeyEquivalent?(menu, for: ev, target: &t, action: &a) == false else { return finish(false, "the Bookmarks menu delegate does not answer false to a key equivalent search, so each Cmd chord rebuilds the tree") }
+        }
         guard cmdD() else { return finish(false, "Cmd+D reached no menu item (\(keyLog.last ?? ""))") }
         guard await until(5, { (try? store.bookmark(forURL: tab.url)) != nil }), let first = try? store.bookmark(forURL: tab.url) else {
             return finish(false, "Cmd+D did not add \(tab.url) to the bookmarks (bar: \(barTitles()))")
@@ -92,11 +98,21 @@ extension SelfTest {
         guard ed.mode == .edit(first.id), ed.heading.stringValue == "Edit bookmark", ed.remove.title == "Remove", !ed.remove.isHidden, (try? store.urlBookmarks().count) == 1 else {
             return finish(false, "the second Cmd+D: mode \(ed.mode), heading \(ed.heading.stringValue), Remove \(ed.remove.title), bookmarks \((try? store.urlBookmarks().count) ?? -1)")
         }
+        // Escape cancels the card (the bookmark stays) and the page takes the keys back.
+        ed.hide()
+        guard cmdD(), await until(5, { !ed.isHidden }), (ed.name.currentEditor() as? NSTextView) != nil else { return finish(false, "no card with the name field being edited for Escape") }
+        press(.escape)
+        guard await until(3, { ed.isHidden && inPage() }), (try? store.bookmark(forURL: tab.url)) != nil else {
+            return finish(false, "Escape: card hidden \(ed.isHidden), page has focus \(inPage()), bookmark kept \((try? store.bookmark(forURL: tab.url)) != nil)")
+        }
         // Remove deletes it and the menu forgets it.
+        ed.hide()
+        guard cmdD(), await until(5, { !ed.isHidden }) else { return finish(false, "no card before Remove") }
         ed.remove.performClick(nil)
         guard await until(3, { (try? store.bookmark(forURL: tab.url)) == nil && ed.isHidden && !recentRows().header }) else {
             return finish(false, "Remove left the bookmark \(String(describing: try? store.bookmark(forURL: tab.url))), card hidden \(ed.isHidden), recent \(recentRows())")
         }
+        guard await until(3, { inPage() }) else { return finish(false, "after Remove the page did not take the keys back") }
         // Add again, rename and Done: the title and the folder choice are saved.
         guard cmdD(), await until(5, { !ed.isHidden && ed.mode != .folder }) else { return finish(false, "Cmd+D after Remove showed no card") }
         ed.name.stringValue = "Fixture Home"
@@ -105,6 +121,7 @@ extension SelfTest {
         guard await until(3, { (try? store.bookmark(forURL: tab.url))?.title == "Fixture Home" && ed.isHidden }), let saved = try? store.bookmark(forURL: tab.url), saved.parentId == otherRoot()?.id else {
             return finish(false, "Done saved \(String(describing: try? store.bookmark(forURL: tab.url))), want Fixture Home in Other Bookmarks")
         }
+        guard await until(3, { inPage() }) else { return finish(false, "after Done the page did not take the keys back") }
         guard recentRows().rows == ["Fixture Home"], barTitles().isEmpty, treeTitles("Other Bookmarks") == ["Fixture Home"] else {
             return finish(false, "after Done: recent \(recentRows()), bar \(barTitles()), Other Bookmarks \(treeTitles("Other Bookmarks"))")
         }
@@ -133,6 +150,12 @@ extension SelfTest {
         guard bar.isHidden, win.webInsets.top == ChromeStyle.webTop else { return finish(false, "On New Tab Only on a page: \(barState(ctl))") }
         guard await onNewTab() else { return finish(false, "no New Tab surface") }
         guard !bar.isHidden, win.webInsets.top == ChromeStyle.webTop else { return finish(false, "On New Tab Only on the New Tab surface: \(barState(ctl))") }
+        // The find pill and the permission card sit below the bar on every surface the bar shows on.
+        func clears() -> String? {
+            let below = (ctl.frame(ofIdentifier: "bookmarks.bar")?.maxY ?? 0) - 0.5
+            return ctl.findBar.frame.minY >= below && ctl.permissionPrompt.frame.minY >= below ? nil : "find pill at y \(ctl.findBar.frame.minY), permission card at y \(ctl.permissionPrompt.frame.minY), bar bottom \(below + 0.5)"
+        }
+        if let bad = clears() { return finish(false, "over the New Tab surface the bar is overlapped: \(bad)") }
         // Geometry (live-ui.md section 2): the bar is the card's row under the divider, 42 high; the first chip is at x 12 of the card, y 54, 30 high.
         let layout = ChromeLayout(size: ctl.overlay.bounds.size, cardX: ctl.cardX)
         let barFrame = ctl.frame(ofIdentifier: "bookmarks.bar")
@@ -150,6 +173,7 @@ extension SelfTest {
         guard fire("Always"), await onPage() else { return finish(false, "Always did not run") }
         guard await until(3, { !bar.isHidden && win.webInsets.top == ChromeStyle.webTop + 42 }) else { return finish(false, "Always on a page: \(barState(ctl))") }
         let pageBar = ctl.frame(ofIdentifier: "bookmarks.bar")
+        if let bad = clears() { return finish(false, "on a page with Always the bar is overlapped: \(bad)") }
         guard near(pageBar, layout.card.minX, 48, layout.card.width, 42), checks() == ["on", "off", "off"], (try? store.setting(BookmarksBarMode.settingKey)) == "always" else {
             return finish(false, "Always: bar \(String(describing: pageBar)), marks \(checks()), stored \(String(describing: try? store.setting(BookmarksBarMode.settingKey)))")
         }
@@ -179,10 +203,11 @@ extension SelfTest {
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         addMark("Alpha", fixture("b.html"))
         addMark("Beta", fixture("link.html"))
+        addMark("Script", "javascript:window.__bmGate = 1")
         addMark("Hosts", "file:///etc/hosts")
         if let mine = try? store.addFolder(title: "Mine", parentId: barRoot()!.id) { addMark("Child", fixture("b.html?child"), in: mine) }
         app.setBarMode(.always)
-        guard await until(3, { chipTitles() == ["Alpha", "Beta", "Hosts", "Mine"] }), let alpha = chip("Alpha"), let beta = chip("Beta"), let hosts = chip("Hosts"), let mine = chip("Mine") else {
+        guard await until(3, { chipTitles() == ["Alpha", "Beta", "Script", "Hosts", "Mine"] }), let alpha = chip("Alpha"), let beta = chip("Beta"), let script = chip("Script"), let hosts = chip("Hosts"), let mine = chip("Mine") else {
             return finish(false, "the bar shows \(chipTitles())")
         }
         // A click on a page's chip loads it in this tab: no new tab.
@@ -200,7 +225,12 @@ extension SelfTest {
         guard click(alpha, middle: true), await until(15, { win.tabs.count == 3 }) else { return finish(false, "a middle click on Alpha left \(win.tabs.count) tabs") }
         try? await Task.sleep(for: .milliseconds(500))
         guard win.activeTab === tab else { return finish(false, "a middle click on Alpha took the selection") }
-        // An address off the allowlist is stored but never opened.
+        // An address off the allowlist is stored but never opened: a javascript: bookmark never runs in the page (a page-side marker stays 0; the page is the fixture), a file: one never loads.
+        guard await evaluate(tab, "window.__bmGate = 0") == "0" else { return finish(false, "no marker in the page") }
+        mouseUp(script)
+        try? await Task.sleep(for: .milliseconds(800))
+        let marker = await evaluate(tab, "window.__bmGate")
+        guard marker == "0" else { return finish(false, "the javascript: bookmark ran in the page (marker \(marker ?? "nil"))") }
         let tabsNow = win.tabs.count, urlNow = tab.url
         mouseUp(hosts)
         try? await Task.sleep(for: .milliseconds(800))
@@ -249,15 +279,27 @@ extension SelfTest {
         m.select(alphaNode)
         _ = m.outline.sendAction(m.outline.doubleAction, to: m.outline.target)
         guard await until(15, { win.tabs.count == tabsBefore + 1 && win.tabs.contains { $0.url.hasSuffix("/b.html") } }) else { return finish(false, "a double click on Alpha opened \(win.tabs.map(\.url))") }
+        // A double click never starts editing the title (the hidden window ignores the mouse, so what is asserted is that no title cell is editable until Return asks for it).
+        let alphaRow = m.outline.row(forItem: alphaNode)
+        guard let alphaCell = m.outline.view(atColumn: 0, row: alphaRow, makeIfNecessary: true) as? NSTextField, !alphaCell.isEditable, (m.window.firstResponder as? NSTextView)?.delegate !== alphaCell else {
+            return finish(false, "after the double click the Alpha title cell is editable or being edited")
+        }
         // Rename Alpha in the window: the bar, the menu and the store follow.
         func rename(_ old: String, to new: String) -> Bool {
             guard let n = m.node(titled: old) else { return false }
+            m.select(n)
             let r = m.outline.row(forItem: n)
-            guard r >= 0, let field = m.outline.view(atColumn: 0, row: r, makeIfNecessary: true) as? NSTextField, field.isEditable, let action = field.action else { return false }
+            guard r >= 0, let ret = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: m.window.windowNumber,
+                                                     context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) else { return false }
+            m.outline.keyDown(with: ret)  // Return asks for the rename
+            guard let field = m.outline.view(atColumn: 0, row: r, makeIfNecessary: true) as? NSTextField, field.isEditable, let action = field.action else { return false }
             field.stringValue = new
             return field.sendAction(action, to: field.target)
         }
-        guard rename("Alpha", to: "Alpha Renamed") else { return finish(false, "the Alpha title cell cannot be edited") }
+        guard rename("Alpha", to: "Alpha Renamed") else {
+            let r = m.outline.selectedRow, f = m.outline.view(atColumn: 0, row: max(r, 0), makeIfNecessary: true) as? NSTextField
+            return finish(false, "the Alpha title cell cannot be edited by Return (selected row \(r), cell \(String(describing: f.map { "editable \($0.isEditable) action \(String(describing: $0.action))" })))")
+        }
         guard await until(3, { chipTitles().contains("Alpha Renamed") && !chipTitles().contains("Alpha") }), treeTitles("Bookmarks Bar").contains("Alpha Renamed"), recentRows().rows.contains("Alpha Renamed"),
               (try? store.bookmark(forURL: fixture("b.html")))?.title == "Alpha Renamed", m.visibleTitles.contains("  Alpha Renamed") else {
             return finish(false, "after the rename: chips \(chipTitles()), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows), window \(m.visibleTitles)")
@@ -288,6 +330,10 @@ extension SelfTest {
         m.select(mine)
         m.deleteButton.performClick(nil)
         guard await until(3, { !chipTitles().contains("Mine") }), m.node(titled: "Mine") == nil, chipTitles() == ["Alpha Renamed"] else { return finish(false, "after deleting Mine the bar shows \(chipTitles())") }
+        // New Folder with nothing selected adds the folder to Bookmarks Bar.
+        m.outline.deselectAll(nil)
+        m.folderButton.performClick(nil)
+        guard await until(3, { chipTitles() == ["Alpha Renamed", "New Folder"] }), barTitles() == ["Alpha Renamed", "New Folder"] else { return finish(false, "New Folder with no selection left the bar as \(barTitles())") }
         _ = ctl
         m.window.close()
         finish(violations.isEmpty, "the window is hidden (\(terms.text)), lists both roots and their rows, a double click opened a tab, a rename and a delete (button and Delete key) reached the bar, the Bookmarks menu and the store, roots stayed, New Folder added a folder \(violations)")
@@ -314,20 +360,22 @@ extension SelfTest {
         // Equal pages: the bookmarked one ranks first.
         seed("http://one.example/note", "Note One", ago: 3600)
         seed("http://two.example/note", "Note Two", ago: 60)
-        func firstNote() async -> String? {
+        func noteRows() async -> [String]? {
             guard await openBar() else { return nil }
             barType("note")
             _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
-            let first = bar?.state.rows.first { $0.kind == .page }?.url
+            let rows = bar?.state.rows.filter { $0.kind == .page }.compactMap(\.url) ?? []
             press(.escape); press(.escape)
             _ = await until(2, { !barOpen() })
-            return first
+            return rows
         }
-        let plain = await firstNote()
-        guard plain == "http://two.example/note" else { return finish(false, "without a bookmark the newer page should lead, got \(plain ?? "nil")") }
-        addMark("Note One", "http://one.example/note")
-        let marked = await firstNote()
-        guard marked == "http://one.example/note" else { return finish(false, "the bookmarked page should lead, got \(marked ?? "nil")") }
+        let plain = await noteRows()
+        guard plain?.first == "http://two.example/note" else { return finish(false, "without a bookmark the newer page should lead, got \(plain ?? [])") }
+        // The bookmark's address differs by a trailing slash: still the same page, one row, and it leads.
+        addMark("Note One", "http://one.example/note/")
+        let marked = await noteRows()
+        guard marked?.first == "http://one.example/note" else { return finish(false, "the bookmarked page should lead, got \(marked ?? [])") }
+        guard marked?.filter({ $0.contains("one.example") }).count == 1 else { return finish(false, "a page both bookmarked and visited gave \(marked?.filter { $0.contains("one.example") } ?? []), want one row") }
         _ = ctl
         finish(violations.isEmpty, "a bookmarked page that was never visited is a command bar row, a deleted bookmark is gone at the next keystroke, a bookmarked page outranks an equal one \(violations)")
     }
@@ -363,6 +411,7 @@ extension SelfTest {
         // Cancel adds nothing.
         ed.remove.performClick(nil)
         try? await Task.sleep(for: .milliseconds(300))
+        guard await until(3, { inPage() }) else { return finish(false, "after Cancel the page did not take the keys back") }
         guard ed.isHidden, folders().isEmpty, (try? store.urlBookmarks().count) == 0 else { return finish(false, "Cancel left the card \(!ed.isHidden) or saved \(folders().map(\.title)) \(String(describing: try? store.urlBookmarks().count))") }
         // Save with a new name.
         guard let b = await openMenu() else { return finish(false, "no tab list menu the second time") }
