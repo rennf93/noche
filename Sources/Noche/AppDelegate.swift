@@ -357,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !closing else { return }
         closing = true
         finished = true
+        controllers.forEach { $0.flushTitles() }  // titles held back by the throttle are stored before the quit
         writer?.quit()
         // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled. The engine applies
         // the pause on its own turn and the shutdown below would end the process first, so the windows close once every pause landed (3 s at most).

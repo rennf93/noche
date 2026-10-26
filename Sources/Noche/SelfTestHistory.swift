@@ -51,6 +51,39 @@ extension SelfTest {
 
     var hist: HistoryWindowController { app.history }
 
+    /// A title held back by the throttle belongs to the address it was seen at: a navigation writes it to that address (never to the new page), and a tab
+    /// that closes with a title pending still stores it.
+    func titleFlush() async {
+        guard await ready(), let win, let tab = win.activeTab, let store = app.writer?.store, let port = URL(string: url)?.port else { return }
+        let host = "127.0.0.1:\(port)"
+        guard await until(10, { page(store, host: host, path: "/")?.title == "Noche App Fixture" }) else { return finish(false, "the startup title was not stored") }
+        try? await Task.sleep(for: .milliseconds(2300))  // the interval since the last write is over: the next title writes at once, the one after it waits
+        _ = await evaluate(tab, "document.title = 'X1'")
+        guard await until(3, { page(store, host: host, path: "/")?.title == "X1" }) else { return finish(false, "X1 was not written at once") }
+        _ = await evaluate(tab, "document.title = 'X2'")
+        try? await Task.sleep(for: .milliseconds(150))
+        guard page(store, host: host, path: "/")?.title == "X1" else { return finish(false, "X2 was not held back (stored \(page(store, host: host, path: "/")?.title ?? "nil"))") }
+        tab.loadURL(fixture("b.html"))
+        guard await until(15, { page(store, host: host, path: "/b.html")?.title == "B Page" }) else { return finish(false, "b.html was not stored with its title") }
+        guard await until(1, { page(store, host: host, path: "/")?.title == "X2" }) else {
+            return finish(false, "after the navigation the old page's held title was not written to the old address (stored \(page(store, host: host, path: "/")?.title ?? "nil"))")
+        }
+        try? await Task.sleep(for: .milliseconds(2500))  // past the timer that was armed for X2
+        let b = page(store, host: host, path: "/b.html")?.title
+        guard b == "B Page" else { return finish(false, "the new page b.html carries the title \(b ?? "nil")") }
+        // A tab that closes with a title held back.
+        guard let second = win.addTab(withURL: fixture("link.html"), activate: false) else { return finish(false, "no second tab") }
+        guard await until(15, { page(store, host: host, path: "/link.html")?.title == "Link Page" }) else { return finish(false, "link.html was not stored with its title") }
+        _ = await evaluate(second, "document.title = 'Y1'")
+        _ = await evaluate(second, "document.title = 'Y2'")
+        second.close()
+        guard await until(10, { win.tabs.count == 1 }) else { return finish(false, "the second tab did not close") }
+        guard await until(1, { page(store, host: host, path: "/link.html")?.title == "Y2" }) else {
+            return finish(false, "the tab closed with Y2 held and the store has \(page(store, host: host, path: "/link.html")?.title ?? "nil")")
+        }
+        finish(violations.isEmpty, "X2 was held, a navigation wrote it to its own address (b.html kept 'B Page'), a closed tab's held title Y2 was stored \(violations)")
+    }
+
     /// M1.5 Task 5: the History window. Three fixture pages are visited; the window (opened through the menu action, hidden like every test window) lists them
     /// under Today newest first, the search filters by title and by address, a double click opens a row in a new tab, and Delete removes the row and
     /// the command bar stops suggesting the page.
@@ -114,8 +147,17 @@ extension SelfTest {
         guard left == ["Link Page", "Noche App Fixture"] else { return finish(false, "after Delete the rows are \(left), want Link Page and Noche App Fixture") }
         let stored = ((try? store.pageCandidates(prefix: host)) ?? []).filter { $0.url.hasSuffix("/b.html") }
         guard stored.isEmpty, !(await suggestsB()) else { return finish(false, "after Delete the store still has \(stored.map(\.url)) or the command bar still suggests b.html") }
+        // The Delete key goes through the table's keyDown (a key event handed to it).
+        guard select("Link Page"), let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                              windowNumber: hist.window.windowNumber, context: nil, characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51) else {
+            return finish(false, "no Link Page row or no key event")
+        }
+        hist.table.keyDown(with: key)
+        guard visits() == ["Noche App Fixture"], ((try? store.pageCandidates(prefix: host)) ?? []).allSatisfy({ !$0.url.hasSuffix("/link.html") }) else {
+            return finish(false, "the Delete key left the rows \(visits()), want Noche App Fixture only")
+        }
         hist.window.close()
-        finish(violations.isEmpty, "the window is hidden (\(hiddenTerms)), three visits listed under Today newest first, search by title and by address, a double click opened a new tab at b.html, Delete removed B Page (both visits) from the list and the command bar \(violations)")
+        finish(violations.isEmpty, "the window is hidden (\(hiddenTerms)), three visits listed under Today newest first, search by title and by address, a double click opened a new tab at b.html, Delete removed B Page (both visits) from the list and the command bar, the Delete key removed Link Page \(violations)")
         _ = ctl
     }
 

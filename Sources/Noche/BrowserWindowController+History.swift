@@ -11,6 +11,7 @@ extension BrowserWindowController {
     }
 
     func recordVisit(_ tab: NCTab, status: Int) {
+        flushTitle(tab.identifier)  // a navigation ended: the title held for the page before it goes to that page
         let typed = typedLoads.removeValue(forKey: tab.identifier) != nil
         guard (200..<400).contains(status), isWeb(tab.url), let store = app.writer?.store else { return }
 #if NOCHE_TESTHOOKS
@@ -29,33 +30,43 @@ extension BrowserWindowController {
     static let titleInterval: TimeInterval = 2
 
     /// The page's title often arrives after its load ends; each (address, title) pair is written once, and a tab writes at most once per `titleInterval`:
-    /// a title that changes sooner waits for the interval to end and then writes the tab's title as it is then.
+    /// a title that changes sooner is held with its address (the newest replaces it) and written when the interval ends. The held pair is also written
+    /// when the tab navigates, closes, or the app quits, and a write never reads the tab: it cannot put a title on another page's address.
     func recordTitle(_ tab: NCTab) {
+        if let held = titleThrottle.peek(tab.identifier), held.url != tab.url { flushTitle(tab.identifier) }  // the tab navigated: the old page's last title is the old page's
         guard !tab.title.isEmpty, isWeb(tab.url), recordedTitle[tab.identifier] != "\(tab.url)\n\(tab.title)" else { return }
-        switch titleThrottle.offer(tab.identifier, now: Date()) {
-        case .writeNow: writeTitle(tab)
+        recordedTitle[tab.identifier] = "\(tab.url)\n\(tab.title)"
+        let id = tab.identifier
+        switch titleThrottle.offer(id, url: tab.url, title: tab.title, now: Date()) {
+        case .writeNow: writeTitle(url: tab.url, title: tab.title)
         case .pending: break
         case .later(let at):
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at.timeIntervalSinceNow)) { [weak self, weak tab] in
-                MainActor.assumeIsolated {
-                    guard let self, let tab, self.ids[tab.identifier] != nil else { return }  // the tab closed meanwhile
-                    self.titleThrottle.flushed(tab.identifier, now: Date())
-                    self.writeTitle(tab)
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at.timeIntervalSinceNow)) { [weak self] in
+                MainActor.assumeIsolated { self?.flushTitle(id, onlyIfDue: true) }
             }
         }
     }
 
-    private func writeTitle(_ tab: NCTab) {
-        guard !tab.title.isEmpty, isWeb(tab.url), let store = app.writer?.store else { return }
-        let key = "\(tab.url)\n\(tab.title)"
-        guard recordedTitle[tab.identifier] != key else { return }
-        recordedTitle[tab.identifier] = key
+    /// Writes the pair held for the tab (the timer passes |onlyIfDue|: a timer that an earlier flush made stale writes nothing).
+    func flushTitle(_ id: Int, onlyIfDue: Bool = false) {
+#if NOCHE_TESTHOOKS
+        if !onlyIfDue && BarHook.on("NO_TITLE_FLUSH") { return }  // negative control: a navigation or a close drops the held title
+#endif
+        if let p = titleThrottle.take(id, now: Date(), onlyIfDue: onlyIfDue) { writeTitle(url: p.url, title: p.title) }
+    }
+
+    /// The quit: every held title of this window is written.
+    func flushTitles() {
+        for e in titleThrottle.drain(now: Date()) { writeTitle(url: e.pending.url, title: e.pending.title) }
+    }
+
+    private func writeTitle(url: String, title: String) {
+        guard !title.isEmpty, isWeb(url), let store = app.writer?.store else { return }
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_RECORD"] == "1" { return }
         Self.titleWrites += 1
 #endif
-        do { try store.updateTitle(url: tab.url, title: tab.title) } catch {
+        do { try store.updateTitle(url: url, title: title) } catch {
             FileHandle.standardError.write(Data("NOCHE store update title failed: \(error)\n".utf8))
         }
     }

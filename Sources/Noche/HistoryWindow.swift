@@ -11,7 +11,7 @@ enum HistoryEntry: Equatable {
 final class HistoryTableView: NSTableView {
     var onDelete: (() -> Void)?
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 51 || event.keyCode == 117 { onDelete?() } else { super.keyDown(with: event) }  // Delete and Forward Delete
+        if (event.keyCode == 51 || event.keyCode == 117) && !BarHook.on("HIST_NOKEY") { onDelete?() } else { super.keyDown(with: event) }  // Delete and Forward Delete
     }
 }
 
@@ -45,6 +45,7 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         search.action = #selector(reload)
         search.setAccessibilityIdentifier("history.search")
         deleteButton.bezelStyle = .rounded
+        deleteButton.toolTip = "Delete the selected page and all its visits, on every day"
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected)
         deleteButton.setAccessibilityIdentifier("history.delete")
@@ -118,7 +119,9 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
     }
 
     @objc func openSelected() {
-        guard let v = selectedVisit, !BarHook.on("HIST_NOOPEN") else { return }
+        // The row that was double clicked (a day header or blank space opens nothing); the selection when the action is not from a click.
+        let r = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
+        guard r >= 0, r < entries.count, case .visit(let v) = entries[r], !BarHook.on("HIST_NOOPEN") else { return }
         app.openHistoryURL(v.url)
     }
 

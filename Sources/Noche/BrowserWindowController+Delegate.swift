@@ -74,6 +74,7 @@ extension BrowserWindowController {
         ids[tab.identifier] = nil
         typedLoads[tab.identifier] = nil
         recordedTitle[tab.identifier] = nil
+        flushTitle(tab.identifier)  // a title held back is stored before the tab goes
         titleThrottle.forget(tab.identifier)
         failed[tab.identifier] = nil
         finds[tab.identifier] = nil
