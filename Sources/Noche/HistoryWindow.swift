@@ -6,6 +6,8 @@ import NocheStore
 enum HistoryEntry: Equatable {
     case day(String)
     case visit(HistoryVisit)
+    /// The last line of a list that stopped at the cap.
+    case note(String)
 }
 
 final class HistoryTableView: NSTableView {
@@ -25,8 +27,12 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
     let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
     let table = HistoryTableView()
     private(set) var entries: [HistoryEntry] = []
-    /// Visits loaded at most (newest first).
+    private let scroll = NSScrollView()
+    /// Visits loaded at most (newest first); the store's search is capped the same way (`historyDays` applies its limit to the matches).
     static let limit = 500
+    /// Posted when a visit is recorded or a title is written: an open window reloads (coalesced).
+    static let changed = Notification.Name("NocheHistoryChanged")
+    private var refreshQueued = false
 
     init(app: AppDelegate) {
         self.app = app
@@ -63,7 +69,6 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         table.doubleAction = #selector(openSelected)
         table.onDelete = { [weak self] in self?.deleteSelected() }
         table.setAccessibilityIdentifier("history.list")
-        let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -84,6 +89,16 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         ])
         window.center()
         reload()
+        NotificationCenter.default.addObserver(self, selector: #selector(historyChanged), name: Self.changed, object: nil)
+    }
+
+    /// A visit or a title was written behind the window: one reload after a short quiet, keeping the selection and the scroll position.
+    @objc private func historyChanged() {
+        guard window.isVisible, !refreshQueued, !BarHook.on("HIST_NOLIVE") else { return }
+        refreshQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshQueued = false; self?.reload() }
+        }
     }
 
     func show() {
@@ -92,24 +107,31 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         window.makeKeyAndOrderFront(nil)
     }
 
-    private static func dayTitle(_ day: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(day) { return "Today" }
-        if cal.isDateInYesterday(day) { return "Yesterday" }
-        let f = DateFormatter()
-        f.dateStyle = .full
-        f.timeStyle = .none
-        return f.string(from: day)
-    }
-
     @objc func reload() {
+        let searching = !(BarHook.on("HIST_NOSEARCH") ? "" : search.stringValue.trimmingCharacters(in: .whitespaces)).isEmpty
         let q = BarHook.on("HIST_NOSEARCH") ? "" : search.stringValue.trimmingCharacters(in: .whitespaces)
-        let days = (try? app.writer?.store.historyDays(calendar: .current, search: q, limit: Self.limit)) ?? []
-        entries = days.flatMap { d in
-            let visits = BarHook.on("HIST_OLDEST") ? d.visits.reversed() : d.visits  // negative control: oldest first
-            return [HistoryEntry.day(Self.dayTitle(d.day))] + visits.map(HistoryEntry.visit)
+        let keep = selectedVisit, top = scroll.contentView.bounds.origin.y
+        // One visit over the cap is asked for: that is how a list that stopped at the cap is told from one that ended there.
+        let days = (try? app.writer?.store.historyDays(calendar: .current, search: q, limit: Self.limit + 1)) ?? []
+        let capped = days.reduce(0) { $0 + $1.visits.count } > Self.limit
+        var budget = Self.limit
+        let now = Date()
+        entries = []
+        for d in days where budget > 0 {
+            let visits = Array((BarHook.on("HIST_OLDEST") ? d.visits.reversed() : d.visits).prefix(budget))  // HIST_OLDEST: negative control, oldest first
+            budget -= visits.count
+            entries.append(.day(HistoryDayLabel.title(for: d.day, calendar: .current, now: now)))
+            entries += visits.map(HistoryEntry.visit)
+        }
+        if capped && !BarHook.on("HIST_NOFOOTER") {
+            entries.append(.note(searching ? "Showing the \(Self.limit) most recent matches. Narrow the search to find older ones." : "Showing the \(Self.limit) most recent visits. Search to find older ones."))
         }
         table.reloadData()
+        if !BarHook.on("HIST_NOKEEP") {
+            if let keep, let r = entries.firstIndex(where: { if case .visit(let v) = $0 { v.url == keep.url && v.visitedAt == keep.visitedAt } else { false } }) { table.selectRowIndexes(IndexSet(integer: r), byExtendingSelection: false) }
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: top))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
 
     private var selectedVisit: HistoryVisit? {
@@ -140,13 +162,18 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         return false
     }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { !self.tableView(tableView, isGroupRow: row) }
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if case .visit = entries[row] { return true }
+        return false
+    }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let text: String
         switch entries[row] {
         case .day(let t):
             text = t
+        case .note(let t):
+            text = tableColumn?.identifier.rawValue == "title" ? t : ""
         case .visit(let v):
             switch tableColumn?.identifier.rawValue {
             case "time": text = v.visitedAt.formatted(date: .omitted, time: .shortened)

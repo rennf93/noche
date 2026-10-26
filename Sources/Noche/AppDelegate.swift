@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if hidden { NCWindow.installHiddenGuards() }
+        NotificationCenter.default.addObserver(self, selector: #selector(windowBecameKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
         // Pinch and Cmd+scroll zoom the page inside the engine: the zoom pill reads the level again after each such event.
         zoomMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify, .scrollWheel]) { [weak self] e in
             if e.type == .magnify || e.modifierFlags.contains(.command) { DispatchQueue.main.async { MainActor.assumeIsolated { self?.active?.syncZoomSoon() } } }
@@ -152,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         w.windowIDs = { [weak self] in self?.controllers.map(\.id) ?? [] }
         writer = w
+        downloads.store = store
         restored = (try? store.loadWindows()) ?? []
     }
 
@@ -207,8 +209,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     var zoomMonitor: Any?
 
-    /// The window menu actions apply to: the key window's, else the newest (hidden windows are never key).
-    var active: BrowserWindowController? { controllers.first { $0.nsWindow?.isKeyWindow == true } ?? controllers.last }
+    /// Which browser window was key most recently (fed by `didBecomeKey`, so it also covers a History, Bookmarks or Downloads window being key).
+    private var keyRecency = KeyRecency<UUID>()
+    @objc private func windowBecameKey(_ n: Notification) {
+        guard let w = n.object as? NSWindow, let c = controllers.first(where: { $0.nsWindow === w }) else { return }
+        keyRecency.becameKey(c.id)
+    }
+
+    /// The window menu actions apply to: the key window's, else the one that was key most recently, else the newest (hidden windows are never key).
+    var active: BrowserWindowController? {
+        if let key = controllers.first(where: { $0.nsWindow?.isKeyWindow == true }) { return key }
+        if !BarHook.on("WIN_NOREC"), let id = keyRecency.mostRecent(among: controllers.map(\.id)), let c = controllers.first(where: { $0.id == id }) { return c }
+        return controllers.last
+    }
 
     /// A Dock click with no window open makes one. The app never quits when its last window closes, so this is the way back.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -323,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func controllerClosed(_ controller: BrowserWindowController) {
         controllers.removeAll { $0 === controller }
+        keyRecency.remove(controller.id)
         if !closing { writer?.windowClosed(controller.id) }
         closeProgressed()
 #if NOCHE_TESTHOOKS

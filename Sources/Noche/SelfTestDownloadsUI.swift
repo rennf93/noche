@@ -84,7 +84,7 @@ extension SelfTest {
         let names = rows.map(\.nameField.stringValue), details = rows.map(\.detailField.stringValue)
         // The second copy of the same file takes Chromium's " (1)" suffix (the bridge leaves the name to the target determiner), newest first.
         guard names == ["download (1).bin", "download.bin"] else { return finish(false, "row names \(names), want newest first with the (1) suffix") }
-        guard details.allSatisfy({ $0 == "Complete - 524 KB" }), rows.allSatisfy({ $0.visibleButtons == ["Open", "Show in Finder"] && $0.progress.isHidden }) else {
+        guard details.allSatisfy({ $0 == "Complete - 524 KB" }), rows.allSatisfy({ $0.visibleButtons == ["Open", "Show in Finder", "Remove"] && $0.progress.isHidden }) else {
             return finish(false, "complete rows: details \(details), buttons \(rows.map(\.visibleButtons))")
         }
         let paths = dc.items.map(\.fullPath)  // newest first, like the rows
@@ -138,8 +138,8 @@ extension SelfTest {
         guard await until(10, { state() == .canceled }) else { return finish(false, "Cancel left the download \(state()?.rawValue ?? -1)") }
         guard await until(10, { folderFiles().isEmpty }) else { return finish(false, "Cancel left \(folderFiles()) in the folder") }
         let buttons = dc.windowController.rows[0].visibleButtons
-        finish(buttons.isEmpty && app.controllers.isEmpty && violations.isEmpty,
-               "with every tab closed: Pause froze the download at \(frozen) bytes, Resume continued it, Cancel removed the partial \(partial[0]) (folder empty), canceled row buttons \(buttons) \(violations)")
+        finish(buttons == ["Remove"] && app.controllers.isEmpty && violations.isEmpty,
+               "with every tab closed: Pause froze the download at \(frozen) bytes, Resume continued it, Cancel removed the partial \(partial[0]) (folder empty), canceled row buttons (only Remove) \(buttons) \(violations)")
     }
 
     func dlTabClose() async {

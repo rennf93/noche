@@ -2,14 +2,14 @@ import AppKit
 import CefBridge
 
 /// One download row: name, a size and progress line, a progress bar while it runs, and the buttons that fit its state
-/// (Pause or Resume and Cancel while unfinished, Open and Show in Finder when complete).
+/// (Pause or Resume and Cancel while unfinished, Open and Show in Finder when complete, and Remove once it ended).
 final class DownloadRowView: NSView {
     static let height: CGFloat = 68
     override var isFlipped: Bool { true }
     let nameField = NSTextField(labelWithString: "")
     let detailField = NSTextField(labelWithString: "")
     let progress = NSProgressIndicator()
-    private let buttons: [NSButton] = ["Pause", "Resume", "Cancel", "Open", "Show in Finder"].map {
+    private let buttons: [NSButton] = ["Pause", "Resume", "Cancel", "Open", "Show in Finder", "Remove"].map {
         let b = NSButton(title: $0, target: nil, action: nil)
         b.bezelStyle = .rounded
         b.controlSize = .small
@@ -58,8 +58,8 @@ final class DownloadRowView: NSView {
         let shown: Set<String> = switch item.state {
         case .inProgress: ["Pause", "Cancel"]
         case .paused, .interrupted: ["Resume", "Cancel"]
-        case .complete: ["Open", "Show in Finder"]
-        case .canceled: []
+        case .complete: ["Open", "Show in Finder", "Remove"]
+        case .canceled: ["Remove"]
         @unknown default: []
         }
         for b in buttons { b.isHidden = !shown.contains(b.title) }
@@ -110,6 +110,8 @@ final class DownloadsWindowController: NSObject {
     private let scroll = NSScrollView()
     private let document = FlippedView()
     private let empty = NSTextField(labelWithString: "No downloads")
+    /// Removes every row that is not in progress or paused.
+    let clearButton = NSButton(title: "Clear", target: nil, action: nil)
     private(set) var rows: [DownloadRowView] = []
     private var observer: NSObjectProtocol?
 
@@ -124,7 +126,18 @@ final class DownloadsWindowController: NSObject {
         window.backgroundColor = ChromeStyle.cardFill
         window.setAccessibilityIdentifier("downloads.window")
         if let app = NSApp.delegate as? AppDelegate, app.hidden { window.level = .floating }
-        scroll.frame = window.contentView!.bounds
+        let content = window.contentView!, strip: CGFloat = 36
+        clearButton.bezelStyle = .rounded
+        clearButton.controlSize = .small
+        clearButton.toolTip = "Remove every download that is not in progress or paused from the list (the files stay)"
+        clearButton.target = self
+        clearButton.action = #selector(clearFinished)
+        clearButton.setAccessibilityIdentifier("downloads.clear")
+        clearButton.sizeToFit()
+        clearButton.frame.origin = NSPoint(x: content.bounds.width - clearButton.frame.width - 12, y: content.bounds.height - strip + (strip - clearButton.frame.height) / 2)
+        clearButton.autoresizingMask = [.minXMargin, .minYMargin]
+        content.addSubview(clearButton)
+        scroll.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - strip)
         scroll.autoresizingMask = [.width, .height]
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -144,6 +157,7 @@ final class DownloadsWindowController: NSObject {
     }
 
     @objc private func resized() { layoutRows() }
+    @objc private func clearFinished() { owner.clearFinished() }
 
     func show() {
         reload()
@@ -164,6 +178,7 @@ final class DownloadsWindowController: NSObject {
             row.setAccessibilityIdentifier("downloads.row.\(i)")
         }
         empty.isHidden = !items.isEmpty
+        clearButton.isEnabled = items.contains(where: DownloadsController.isFinished)
         layoutRows()
     }
 
@@ -182,6 +197,7 @@ final class DownloadsWindowController: NSObject {
         case "Cancel": if !BarHook.on("DL_NOCANCEL") { owner.cancel(item) }
         case "Open": owner.open(item)
         case "Show in Finder": owner.reveal(item)
+        case "Remove": owner.remove(item)
         default: break
         }
     }

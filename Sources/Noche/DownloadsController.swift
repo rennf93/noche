@@ -1,5 +1,6 @@
 import AppKit
 import CefBridge
+import NocheStore
 
 /// The profile's downloads as the UI sees them: the observer of `NCDownloads` (installed once at startup, before any window is restored, so
 /// downloads whose tab closed and downloads restored from the last session report here too). Newest first. Every change posts `changed`;
@@ -16,7 +17,23 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     static var workspaceLog: [(call: String, path: String)] = []
 #endif
 
+    /// The profile's store, set once it is open (before the engine announces its restored downloads).
+    var store: Store? { didSet { removed = Set(removedOrder) } }
+    private static let removedKey = "downloadsRemoved"
+    /// Finished downloads the person removed from the list, as "engine id|address", oldest first. The engine has no call that forgets a download: it
+    /// announces every download of the profile's history again at each launch (ids and names are the same as before), so the removal is kept here, in the
+    /// store's `setting` table, and those announcements are dropped. The address is part of the key so that an id reused after the engine's history was
+    /// cleared does not hide a new download. Only the newest `removedLimit` are kept.
+    private var removedOrder: [String] {
+        get { ((try? store?.setting(Self.removedKey)) ?? nil).map { $0.split(separator: "\n").map(String.init) } ?? [] }
+        set { try? store?.setSetting(Self.removedKey, newValue.suffix(Self.removedLimit).joined(separator: "\n")) }
+    }
+    private static let removedLimit = 2000
+    private var removed = Set<String>()
+    private static func key(_ item: NCDownloadItem) -> String { "\(item.identifier)|\(item.url)" }
+
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) {
+        if removed.contains(Self.key(item)), item.state == .complete || item.state == .canceled { return }
         items.removeAll { $0.identifier == item.identifier }
         items.append(item)
         items.sort { $0.identifier > $1.identifier }  // the engine's ids grow with time
@@ -47,6 +64,23 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
         let c = DownloadsWindowController(owner: self)
         made = c
         return c
+    }
+
+    /// Whether a row can be removed: the download ended (complete or canceled). A running or paused one is canceled first, an interrupted one can still resume.
+    static func isFinished(_ item: NCDownloadItem) -> Bool { item.state == .complete || item.state == .canceled }
+
+    /// Removes the row of a finished download from the list, for good (the file stays where it is, and the removal outlives a relaunch: see `removed`).
+    func remove(_ item: NCDownloadItem) {
+        guard Self.isFinished(item), !BarHook.on("DL_NOREMOVE") else { return }
+        if removed.insert(Self.key(item)).inserted && !BarHook.on("DL_NOKEEP") { removedOrder += [Self.key(item)] }
+        items.removeAll { $0.identifier == item.identifier }
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
+
+    /// Removes every row that is not in progress or paused (what the window's Clear does). An interrupted download is not finished: it can resume.
+    func clearFinished() {
+        if BarHook.on("DL_CLEARALL") { items.removeAll(); NotificationCenter.default.post(name: Self.changed, object: self); return }  // negative control: running rows go too
+        for item in items.filter(Self.isFinished) { remove(item) }
     }
 
     func pause(_ item: NCDownloadItem) { NCDownloads.shared.pause(item.identifier) }

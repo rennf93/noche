@@ -20,11 +20,14 @@ extension BrowserWindowController {
         do { try store.recordVisit(url: tab.url, title: tab.title, typed: typed, at: Date()) } catch {
             FileHandle.standardError.write(Data("NOCHE store record visit failed: \(error)\n".utf8))
         }
+        NotificationCenter.default.post(name: HistoryWindowController.changed, object: nil)
         recordedTitle[tab.identifier] = "\(tab.url)\n\(tab.title)"
     }
 
 #if NOCHE_TESTHOOKS
     static var titleWrites = 0
+    /// Every title write (address, title), in order: the record `title-flush` reads to see that no write ever put the old page's title on the new address.
+    static var titleLog: [(url: String, title: String)] = []
 #endif
     /// Minimum seconds between title writes of one tab (ruling M38).
     static let titleInterval: TimeInterval = 2
@@ -52,7 +55,9 @@ extension BrowserWindowController {
 #if NOCHE_TESTHOOKS
         if !onlyIfDue && BarHook.on("NO_TITLE_FLUSH") { return }  // negative control: a navigation or a close drops the held title
 #endif
-        if let p = titleThrottle.take(id, now: Date(), onlyIfDue: onlyIfDue) { writeTitle(url: p.url, title: p.title) }
+        if let p = titleThrottle.take(id, now: Date(), onlyIfDue: onlyIfDue) {
+            writeTitle(url: BarHook.on("TITLE_WRONGPAGE") ? (tabs[id]?.url ?? p.url) : p.url, title: p.title)  // negative control: the tab's address now, not the held pair's
+        }
     }
 
     /// The quit: every held title of this window is written.
@@ -65,9 +70,11 @@ extension BrowserWindowController {
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_RECORD"] == "1" { return }
         Self.titleWrites += 1
+        Self.titleLog.append((url, title))
 #endif
         do { try store.updateTitle(url: url, title: title) } catch {
             FileHandle.standardError.write(Data("NOCHE store update title failed: \(error)\n".utf8))
         }
+        NotificationCenter.default.post(name: HistoryWindowController.changed, object: nil)
     }
 }

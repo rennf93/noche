@@ -57,23 +57,34 @@ extension SelfTest {
         guard await ready(), let win, let tab = win.activeTab, let store = app.writer?.store, let port = URL(string: url)?.port else { return }
         let host = "127.0.0.1:\(port)"
         guard await until(10, { page(store, host: host, path: "/")?.title == "Noche App Fixture" }) else { return finish(false, "the startup title was not stored") }
+        // link.html is visited first, in a second tab, so that its row exists when the main tab navigates to it: a held title written to the new address would land on it.
+        guard let second = win.addTab(withURL: fixture("link.html"), activate: false) else { return finish(false, "no second tab") }
+        guard await until(15, { page(store, host: host, path: "/link.html")?.title == "Link Page" }) else { return finish(false, "link.html was not stored with its title") }
         try? await Task.sleep(for: .milliseconds(2300))  // the interval since the last write is over: the next title writes at once, the one after it waits
         _ = await evaluate(tab, "document.title = 'X1'")
         guard await until(3, { page(store, host: host, path: "/")?.title == "X1" }) else { return finish(false, "X1 was not written at once") }
         _ = await evaluate(tab, "document.title = 'X2'")
         try? await Task.sleep(for: .milliseconds(150))
         guard page(store, host: host, path: "/")?.title == "X1" else { return finish(false, "X2 was not held back (stored \(page(store, host: host, path: "/")?.title ?? "nil"))") }
-        tab.loadURL(fixture("b.html"))
-        guard await until(15, { page(store, host: host, path: "/b.html")?.title == "B Page" }) else { return finish(false, "b.html was not stored with its title") }
-        guard await until(1, { page(store, host: host, path: "/")?.title == "X2" }) else {
+        let navigated = loads
+        tab.loadURL(fixture("link.html"))
+        guard await until(15, { loads > navigated }) else { return finish(false, "the main tab did not load link.html") }
+        // Past the timer that was armed for X2, the new address is watched: it must never carry a title of the old page.
+        var seenOnNew = Set<String>(), seenOnOld = Set<String>()
+        let end = Date().addingTimeInterval(3)
+        while Date() < end {
+            seenOnNew.insert(page(store, host: host, path: "/link.html")?.title ?? "nil")
+            seenOnOld.insert(page(store, host: host, path: "/")?.title ?? "nil")
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        let wrote = BrowserWindowController.titleLog.filter { $0.url.hasSuffix("/link.html") && ["X1", "X2"].contains($0.title) }
+        guard seenOnNew.isDisjoint(with: ["X1", "X2"]), wrote.isEmpty else { return finish(false, "the new address link.html carried the old page's title: stored titles seen \(seenOnNew.sorted()), writes \(wrote)") }
+        guard seenOnOld.contains("X2"), page(store, host: host, path: "/")?.title == "X2" else {
             return finish(false, "after the navigation the old page's held title was not written to the old address (stored \(page(store, host: host, path: "/")?.title ?? "nil"))")
         }
-        try? await Task.sleep(for: .milliseconds(2500))  // past the timer that was armed for X2
-        let b = page(store, host: host, path: "/b.html")?.title
-        guard b == "B Page" else { return finish(false, "the new page b.html carries the title \(b ?? "nil")") }
+        let b = page(store, host: host, path: "/link.html")?.title
+        guard b == "Link Page" else { return finish(false, "the new page link.html carries the title \(b ?? "nil")") }
         // A tab that closes with a title held back.
-        guard let second = win.addTab(withURL: fixture("link.html"), activate: false) else { return finish(false, "no second tab") }
-        guard await until(15, { page(store, host: host, path: "/link.html")?.title == "Link Page" }) else { return finish(false, "link.html was not stored with its title") }
         _ = await evaluate(second, "document.title = 'Y1'")
         _ = await evaluate(second, "document.title = 'Y2'")
         second.close()
@@ -81,7 +92,7 @@ extension SelfTest {
         guard await until(1, { page(store, host: host, path: "/link.html")?.title == "Y2" }) else {
             return finish(false, "the tab closed with Y2 held and the store has \(page(store, host: host, path: "/link.html")?.title ?? "nil")")
         }
-        finish(violations.isEmpty, "X2 was held, a navigation wrote it to its own address (b.html kept 'B Page'), a closed tab's held title Y2 was stored \(violations)")
+        finish(violations.isEmpty, "X2 was held, a navigation wrote it to its own address (the new address link.html never carried X1 or X2, titles seen there \(seenOnNew.sorted())), a closed tab's held title Y2 was stored \(violations)")
     }
 
     /// M1.5 Task 5: the History window. Three fixture pages are visited; the window (opened through the menu action, hidden like every test window) lists them
@@ -156,8 +167,18 @@ extension SelfTest {
         guard visits() == ["Noche App Fixture"], ((try? store.pageCandidates(prefix: host)) ?? []).allSatisfy({ !$0.url.hasSuffix("/link.html") }) else {
             return finish(false, "the Delete key left the rows \(visits()), want Noche App Fixture only")
         }
+        // Live: a page loads behind the open window and its row appears without reopening the window; the selection stays on its row.
+        guard select("Noche App Fixture") else { return finish(false, "no Noche App Fixture row to keep selected") }
+        tab.loadURL(fixture("link.html"))
+        guard await until(8, { visits() == ["Link Page", "Noche App Fixture"] }) else {
+            return finish(false, "a page loaded behind the open History window and its row did not appear (rows \(visits()))")
+        }
+        let r = hist.table.selectedRow
+        guard r >= 0, r < hist.entries.count, case .visit(let kept) = hist.entries[r], kept.title == "Noche App Fixture" else {
+            return finish(false, "the live refresh lost the selection (selected row \(r) of \(hist.entries.count))")
+        }
         hist.window.close()
-        finish(violations.isEmpty, "the window is hidden (\(hiddenTerms)), three visits listed under Today newest first, search by title and by address, a double click opened a new tab at b.html, Delete removed B Page (both visits) from the list and the command bar, the Delete key removed Link Page \(violations)")
+        finish(violations.isEmpty, "the window is hidden (\(hiddenTerms)), three visits listed under Today newest first, search by title and by address, a double click opened a new tab at b.html, Delete removed B Page (both visits) from the list and the command bar, the Delete key removed Link Page, a page loaded behind the open window showed its row without reopening it (selection kept) \(violations)")
         _ = ctl
     }
 
