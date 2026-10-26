@@ -1,5 +1,6 @@
 import AppKit
 import CefBridge
+import NocheCore
 import NocheStore
 
 /// A site permission request the engine waits for. |kinds| are the stored kinds (camera, microphone, geolocation, notifications) it names.
@@ -13,6 +14,7 @@ struct PermissionRequest {
 
 /// Site permissions (M1.5 Task 4): a stored Block or Allow answers a request without a card, anything else asks through the prompt card.
 extension BrowserWindowController {
+    static let namedMask: NCPermissionMask = [.camera, .microphone, .geolocation, .notifications]
     static let namedKinds: [(NCPermissionMask, String)] = [(.camera, "camera"), (.microphone, "microphone"), (.geolocation, "geolocation"), (.notifications, "notifications")]
 
     func window(_ window: NCWindow, tab: NCTab, requestsPermissions mask: NCPermissionMask, origin: String, decide: @escaping (Bool, Bool) -> Void) {
@@ -28,17 +30,10 @@ extension BrowserWindowController {
         if let store = app.writer?.store, !kinds.isEmpty, !BarHook.on("PERM_NOLOOKUP") {  // negative control: the store is never asked
             let stored = kinds.map { try? store.permission(origin: origin, kind: $0) }
             if stored.contains(.block) { return decide(false, true) }
-            if stored.allSatisfy({ $0 == .allow }) { return decide(true, false) }
+            // A bit Noche cannot name (Other, Screen) is never covered by a stored Allow: the card asks.
+            if stored.allSatisfy({ $0 == .allow }), mask.subtracting(Self.namedMask).isEmpty { return decide(true, false) }
         }
-        var answer = decide
-#if NOCHE_TESTHOOKS
-        // The card never allows a named kind in a test run (a macOS camera, microphone, location or notification dialog could follow).
-        answer = { [weak self] allow, remember in
-            if allow, !kinds.isEmpty { self?.app.selfTest?.violations.append("allowed \(kinds) in a test run"); return decide(false, false) }
-            decide(allow, remember)
-        }
-#endif
-        permissionQueue.append(PermissionRequest(tab: tab, origin: origin, mask: mask, kinds: kinds, decide: answer))
+        permissionQueue.append(PermissionRequest(tab: tab, origin: origin, mask: mask, kinds: kinds, decide: decide))
         syncPermissionPrompt()
     }
 
@@ -59,7 +54,12 @@ extension BrowserWindowController {
     func permissionAnswer(allow: Bool, remember: Bool) {
         guard let i = permissionQueue.firstIndex(where: { $0.tab === activeTab }) else { return }
         let r = permissionQueue.remove(at: i)
-        let remember = remember || (!allow && BarHook.on("PERM_DISMISSSTORES"))  // negative control: a dismiss stores a Block
+        var allow = allow, remember = remember
+#if NOCHE_TESTHOOKS
+        // The card never allows a named kind in a test run (a macOS camera, microphone, location or notification dialog could follow); this runs before the store write.
+        if allow, !r.kinds.isEmpty { app.selfTest?.violations.append("allowed \(r.kinds) in a test run"); allow = false; remember = false }
+#endif
+        remember = remember || (!allow && BarHook.on("PERM_DISMISSSTORES"))  // negative control: a dismiss stores a Block
         if remember, !BarHook.on("PERM_NOSTORE"), let store = app.writer?.store {
             for k in r.kinds { try? store.setPermission(origin: r.origin, kind: k, decision: allow ? .allow : .block) }
         }
@@ -84,8 +84,23 @@ extension BrowserWindowController {
     }
 
     static func requestText(_ mask: NCPermissionMask) -> String {
-        let parts = [(NCPermissionMask.camera, "your camera"), (.microphone, "your microphone"), (.geolocation, "your location")].filter { mask.contains($0.0) }.map(\.1)
-        if !parts.isEmpty { return "wants to use " + parts.joined(separator: " and ") }
-        return mask.contains(.notifications) ? "wants to show notifications" : "wants to use a browser feature"
+        PermissionRequestText.text(camera: mask.contains(.camera), microphone: mask.contains(.microphone), geolocation: mask.contains(.geolocation),
+                                   notifications: mask.contains(.notifications), screen: mask.contains(.screen))
+    }
+
+    /// The engine dismissed the |index|th request of |tab| that the host holds.
+    func permissionRequestDismissed(tab: NCTab, at index: Int) {
+        let mine = permissionQueue.indices.filter { permissionQueue[$0].tab === tab }
+        guard mine.indices.contains(index) else { return }
+        permissionQueue.remove(at: mine[index])
+        syncPermissionPrompt()
+    }
+
+    func window(_ window: NCWindow, tab: NCTab, dismissedPermissionRequestNumber index: Int) { permissionRequestDismissed(tab: tab, at: index) }
+
+    /// Forgets a stored decision: the Noche row and the engine's own copy (M1.8's settings page calls this; nothing in the UI does yet).
+    func forgetPermission(origin: String, kind: String) {
+        try? app.writer?.store.removePermission(origin: origin, kind: kind)
+        NCEngine.resetContentSetting(forOrigin: origin, kind: kind)
     }
 }

@@ -38,6 +38,13 @@ extension SelfTest {
         return answers == ["false,true"] && card?.shownCount == shownBefore && ctl.permissionQueue.isEmpty ? "ok" : "answers \(answers) card shown \((card?.shownCount ?? 0) - shownBefore) times, queue \(ctl.permissionQueue.count)"
     }
 
+    /// Loads |to| (the fixture by default) in |tab| and waits for the load.
+    func reloadFixture(_ tab: NCTab, to target: String? = nil) async -> Bool {
+        let before = loads
+        tab.loadURL(target ?? fixture(""))
+        return await until(15, { loads > before })
+    }
+
     func permPrompt() async {
         guard await ready(), let ctl, let tab = win?.activeTab else { return }
         await askGeolocation(tab)
@@ -98,6 +105,18 @@ extension SelfTest {
         guard geo == "\"error 1\"", state == "\"denied\"", card?.shownCount == shown else {
             return finish(false, "after the reload the page got \(geo ?? "nil"), state \(state ?? "nil"), the card showed \((card?.shownCount ?? 0) - shown) times")
         }
+        // Noche's store is the one source of truth: the engine keeps its own copy of the decision, so it is cleared while the Noche row stays.
+        let engineAfterBlock = NCEngine.contentSetting(forOrigin: origin, kind: "geolocation")
+        NCEngine.resetContentSetting(forOrigin: origin, kind: "geolocation")
+        let engineAfterReset = NCEngine.contentSetting(forOrigin: origin, kind: "geolocation")
+        guard engineAfterBlock == "block", ["default", "ask"].contains(engineAfterReset) else { return finish(false, "the engine's setting was \(engineAfterBlock) after Block and \(engineAfterReset) after the reset, want block, then default or ask (geolocation's default is ask)") }
+        guard await reloadFixture(tab) else { return finish(false, "no reload after the engine reset") }
+        let asked = permissionRequests.count, cards = card?.shownCount ?? 0
+        await askGeolocation(tab)
+        let viaStore = await pageValue(tab, "window.__geo")
+        guard permissionRequests.count == asked + 1, card?.shownCount == cards, viaStore == "\"error 1\"" else {
+            return finish(false, "with the engine reset and the Noche row kept, the request reached the host \(permissionRequests.count - asked) times, the card showed \((card?.shownCount ?? 0) - cards) times, the page got \(viaStore ?? "nil")")
+        }
         // A second origin (another host name for the same server) still asks.
         let beforeLoads = loads
         tab.loadURL("http://localhost:\(port)/")
@@ -106,12 +125,26 @@ extension SelfTest {
         guard await waitCard(), let card else { return finish(false, "the second origin \(otherOrigin) showed no card (requests \(permissionRequests.map(\.origin)))") }
         let second = card.site.stringValue
         card.close.onClick?()  // a one-time dismiss: nothing stored for it
-        let ok = second == "localhost:\(port)" && storedPermissions() == ["\(origin) geolocation block"] && violations.isEmpty
-        finish(ok, "\(relaunch ? "after the relaunch" : "Block stored and kept over a reload"): no card, the page sees denied, the store answered a direct request; the second origin showed the card for \(second); stored \(storedPermissions()) \(violations)")
+        guard second == "localhost:\(port)", storedPermissions() == ["\(origin) geolocation block"] else { return finish(false, "second origin card \(second), stored \(storedPermissions())") }
+        // Phase 1 leaves the Block for the relaunch; every other run ends by forgetting it.
+        if phase == 1 { return finish(violations.isEmpty, "Block stored, the engine said \(engineAfterBlock) after it and \(engineAfterReset) after the reset, the Noche row alone kept the request denied with no card, the second origin showed the card; the Block is left for the relaunch \(violations)") }
+        // Forgetting the decision (the M1.8 settings call) removes the Noche row and the engine's copy: the card shows again.
+        guard await reloadFixture(tab, to: fixture("")) else { return finish(false, "no load back on the first origin") }
+        ctl?.forgetPermission(origin: origin, kind: "geolocation")
+        guard storedPermissions().isEmpty, ["default", "ask"].contains(NCEngine.contentSetting(forOrigin: origin, kind: "geolocation")) else {
+            return finish(false, "after forgetPermission the store holds \(storedPermissions()) and the engine says \(NCEngine.contentSetting(forOrigin: origin, kind: "geolocation"))")
+        }
+        _ = await reloadFixture(tab)
+        await askGeolocation(tab)
+        let forgotten = await waitCard()
+        card.close.onClick?()
+        let ok = forgotten && violations.isEmpty
+        finish(ok, "\(relaunch ? "after the relaunch" : "Block stored and kept over a reload"): no card, the page sees denied, the store answered a direct request; the engine said \(engineAfterBlock) after Block and \(engineAfterReset) after the reset, and with the Noche row alone the request still got no card (denied); the second origin showed the card for \(second); after forgetPermission the card showed again: \(forgotten) \(violations)")
     }
 
     /// A window of this process that is not in |known| (window numbers, any layer), apart from macOS's own text-input window.
     func ownWindowNumbers() -> Set<Int> {
+        if BarHook.on("PERM_BLIND") { return [] }  // negative control: the detector sees nothing
         let pid = ProcessInfo.processInfo.processIdentifier
         let textInput = Set(NSApp.windows.filter { NSStringFromClass(type(of: $0)).hasPrefix("TUI") }.map { Int($0.windowNumber) })
         let all = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -120,6 +153,15 @@ extension SelfTest {
 
     func permNoBubble() async {
         guard await ready(), let tab = win?.activeTab else { return }
+        // Positive control: the detector sees a plain window, so "no new window" can fail.
+        let before = ownWindowNumbers()
+        let plain = NSWindow(contentRect: NSRect(x: 400, y: 400, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        plain.isReleasedWhenClosed = false
+        plain.orderBack(nil)
+        let seenPlain = ownWindowNumbers().subtracting(before)
+        plain.close()
+        guard !seenPlain.isEmpty else { return finish(false, "the window detector did not see a plain window (before \(before.count), after \(ownWindowNumbers().count))") }
+        _ = await until(5, { ownWindowNumbers() == before })
         let known = ownWindowNumbers()
         let appWindows = Set(NSApp.windows.map { ObjectIdentifier($0) })
         await askGeolocation(tab)
@@ -160,7 +202,7 @@ extension SelfTest {
         guard await ready(), let win, let tab = win.activeTab, let ctl else { return }
         func mask(_ bits: UInt) -> UInt { NCWindow.mask(forMediaRequest: bits).rawValue }
         let masks = [0, 1, 2, 3, 4, 8, 0x100].map { mask(UInt($0)) }
-        let wantMasks = [NCPermissionMask.other, .microphone, .camera, [.camera, .microphone], .other, .other, .other].map(\.rawValue)
+        let wantMasks = [NCPermissionMask.other, .microphone, .camera, [.camera, .microphone], .screen, .screen, .other].map(\.rawValue)
         guard masks == wantMasks else { return finish(false, "media bits 0,1,2,3,4,8,0x100 gave masks \(masks), want \(wantMasks) (never 0)") }
         // The engine dismisses the request between its callback and the main-queue hop (the bridge's test switch does it at that point).
         let seen = permissionRequests.count
@@ -182,8 +224,43 @@ extension SelfTest {
         guard await until(10, { NCWindow.permissionPromptsOpen() == 0 && !cardShown && ctl.permissionQueue.isEmpty }) else {
             return finish(false, "closing the tab left \(NCWindow.permissionPromptsOpen()) requests open, queue \(ctl.permissionQueue.count), card \(cardShown)")
         }
-        let ok = NCWindow.permissionPromptsClosedWithTab() == closedBefore + 1 && storedPermissions().isEmpty && violations.isEmpty
-        finish(ok, "media masks \(masks) (0 and unknown bits give Other), a request dismissed before the hop never reached the host, a request open at its tab's close was answered once (closed with tab \(NCWindow.permissionPromptsClosedWithTab())), stored \(storedPermissions()) \(violations)")
+        guard NCWindow.permissionPromptsClosedWithTab() == closedBefore + 1, storedPermissions().isEmpty else { return finish(false, "closed with tab \(NCWindow.permissionPromptsClosedWithTab()), stored \(storedPermissions())") }
+        // The engine dismisses a request after the host has it: the card goes away and nothing is stored (a fresh page, so no earlier request is pending).
+        let loadsThird = loads
+        guard let third = win.addTab(withURL: fixture(""), activate: true), await until(15, { loads > loadsThird && win.activeTab === third }) else { return finish(false, "no third tab") }
+        let seenLate = permissionRequests.count
+        setenv("NOCHE_TEST_PERM_LATE", "1", 1)
+        await askGeolocation(third)
+        _ = await until(10, { permissionRequests.count > seenLate })
+        try? await Task.sleep(for: .seconds(1))
+        unsetenv("NOCHE_TEST_PERM_LATE")
+        guard permissionRequests.count == seenLate + 1, ctl.permissionQueue.isEmpty, !cardShown, NCWindow.permissionPromptsOpen() == 0, storedPermissions().isEmpty else {
+            return finish(false, "after the engine dismissed a delivered request: reached the host \(permissionRequests.count - seenLate) times, queue \(ctl.permissionQueue.count), card \(cardShown), open \(NCWindow.permissionPromptsOpen()), stored \(storedPermissions())")
+        }
+        // The M36 guard runs before the store write: a forced Allow on a named kind is a deny, stores nothing and is recorded. The engine is never asked:
+        // the requests below are direct calls with a recorder in place of the engine's callback.
+        guard let store = app.writer?.store else { return finish(false, "no store") }
+        let forced = "http://perm-test-forced.invalid", fake = "http://perm-test.invalid"
+        var forcedAnswers: [String] = []
+        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: forced) { forcedAnswers.append("\($0),\($1)") }
+        guard await waitCard(5), let card else { return finish(false, "no card for the direct request") }
+        press(card.allow)
+        let violated = violations.count == 1
+        violations.removeAll()
+        guard forcedAnswers == ["false,false"], violated, storedPermissions().isEmpty else { return finish(false, "a forced Allow on geolocation answered \(forcedAnswers) (violation recorded \(violated)), stored \(storedPermissions())") }
+        // A stored Allow answers a named kind alone, but never a request whose mask has a bit Noche cannot name.
+        try? store.setPermission(origin: fake, kind: "geolocation", decision: .allow)
+        var alone: [String] = [], mixed: [String] = []
+        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: fake) { alone.append("\($0),\($1)") }
+        ctl.window(win, tab: third, requestsPermissions: [.geolocation, .other], origin: fake) { mixed.append("\($0),\($1)") }
+        let queuedMixed = ctl.permissionQueue.count
+        ctl.dropPermissionRequests(of: third)
+        try? store.removePermission(origin: fake, kind: "geolocation")
+        guard alone == ["true,false"], mixed == ["false,false"], queuedMixed == 1 else {
+            return finish(false, "with a stored Allow: the named request answered \(alone), the one with the Other bit answered \(mixed) after being queued \(queuedMixed) (want queued, then the drop's deny)")
+        }
+        let ok = violations.isEmpty
+        finish(ok, "media masks \(masks) (0 and unknown bits give Other, desktop capture gives Screen), a request dismissed before the hop never reached the host, a request open at its tab's close was answered once (closed with tab \(NCWindow.permissionPromptsClosedWithTab())), stored \(storedPermissions()) \(violations)")
     }
 }
 #endif

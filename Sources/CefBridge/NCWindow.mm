@@ -63,6 +63,7 @@
 @interface NCPromptRecord : NSObject
 @property(nonatomic) NSInteger browserId;
 @property(nonatomic) uint64_t promptId;   // 0: a media request
+@property(nonatomic) BOOL delivered;      // the delegate has the request
 @property(nonatomic, copy) void (^engineDecide)(BOOL allow, BOOL remember);
 @end
 @implementation NCPromptRecord
@@ -412,7 +413,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (NC_TEST_FLAG("NOCHE_TEST_PERM_RACE")) [self promptDismissed:promptId];  // test: the engine dismisses between its callback and the hop below
   dispatch_async(dispatch_get_main_queue(), ^{
     if (![self->_prompts containsObject:rec] && !NC_TEST_FLAG("NOCHE_TEST_PERM_NOGUARD")) return;
+    rec.delivered = YES;
     [d window:self tab:tab requestsPermissions:mask origin:origin decide:^(BOOL allow, BOOL remember) { [self answer:rec allow:allow remember:remember]; }];
+    if (NC_TEST_FLAG("NOCHE_TEST_PERM_LATE")) [self promptDismissed:promptId];  // test: the engine dismisses right after the host got the request
   });
   return YES;
 }
@@ -427,7 +430,19 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 
 - (void)promptDismissed:(uint64_t)promptId {
   if (!promptId) return;
-  for (NCPromptRecord* r in [_prompts copy]) if (r.promptId == promptId) { [_prompts removeObject:r]; g_prompts_open--; }
+  for (NCPromptRecord* r in [_prompts copy]) {
+    if (r.promptId != promptId) continue;
+    // A request the host already holds is told to drop it: its position among the tab's delivered requests, in delivery order.
+    NSInteger index = 0;
+    for (NCPromptRecord* o in _prompts) { if (o == r) break; if (o.browserId == r.browserId && o.delivered) index++; }
+    NCTab* tab = r.delivered ? _table[@(r.browserId)] : nil;
+    [_prompts removeObject:r];
+    g_prompts_open--;
+    id<NCWindowDelegate> d = _delegate;
+    if (tab && !NC_TEST_FLAG("NOCHE_TEST_PERM_NODISMISSCB") && [d respondsToSelector:@selector(window:tab:dismissedPermissionRequestNumber:)]) {
+      dispatch_async(dispatch_get_main_queue(), ^{ [d window:self tab:tab dismissedPermissionRequestNumber:index]; });
+    }
+  }
 }
 
 // A tab (browserId) or, with 0, the whole window goes: its open requests are answered deny, not remembered.
@@ -1098,7 +1113,7 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
   NCPermissionMask mask = 0;
   if (bits & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) mask |= NCPermissionMaskMicrophone;
   if (bits & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) mask |= NCPermissionMaskCamera;
-  if (bits & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) mask |= NCPermissionMaskOther;
+  if (bits & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) mask |= NCPermissionMaskScreen;
   if (!mask && !NC_TEST_FLAG("NOCHE_TEST_PERM_MEDIA0")) mask = NCPermissionMaskOther;  // bits this bridge does not know: never an empty mask
   return mask;
 }

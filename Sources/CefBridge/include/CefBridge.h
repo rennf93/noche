@@ -26,6 +26,11 @@ NC_EXPORT
 /// Sets the profile preference `download.default_directory` (the folder Chromium puts new downloads in, with no save dialog). Call after the engine started.
 /// Returns NO with |error| when the engine refused the value. Noche's default is ~/Downloads; Settings (M1.8) will store a user choice.
 + (BOOL)setDownloadDirectory:(NSString *)path error:(NSError *_Nullable *_Nullable)error;
+/// The engine's own stored site setting for |origin| and |kind| (camera, microphone, geolocation, notifications): "default" (none), "allow", "block", "ask",
+/// "other", or "unknown kind". Chromium keeps every decision it is told, so a Block Noche stores also lives here. Main thread, after the engine started.
++ (NSString *)contentSettingForOrigin:(NSString *)origin kind:(NSString *)kind;
+/// Resets the engine's setting for |origin| and |kind| to its default (Noche's own table keeps the decision). No-op for an unknown kind.
++ (void)resetContentSettingForOrigin:(NSString *)origin kind:(NSString *)kind;
 @end
 
 NC_EXPORT

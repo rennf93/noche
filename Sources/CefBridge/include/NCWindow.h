@@ -29,6 +29,7 @@ typedef NS_OPTIONS(NSUInteger, NCPermissionMask) {
   NCPermissionMaskGeolocation = 1 << 2,
   NCPermissionMaskNotifications = 1 << 3,
   NCPermissionMaskOther = 1 << 4,
+  NCPermissionMaskScreen = 1 << 5,   // screen or window capture (getDisplayMedia)
 };
 
 typedef NS_ENUM(NSInteger, NCWindowMode) { NCWindowModeNormal, NCWindowModeHidden };
@@ -67,6 +68,9 @@ NS_SWIFT_UI_ACTOR
 /// again); |allow| YES grants it (|remember| is for the host's own store, Chromium keeps its own decision either way). Not calling it
 /// leaves the request open until the tab navigates or closes, which dismisses it.
 - (void)window:(NCWindow *)window tab:(NCTab *)tab requestsPermissions:(NCPermissionMask)mask origin:(NSString *)origin decide:(void (^)(BOOL allow, BOOL remember))decide;
+/// The engine dismissed a request the host already received (a page cancel, a replacement): |index| is its position among the tab's requests the host
+/// holds, in the order they were delivered. The host drops it; calling its |decide| afterwards is ignored.
+- (void)window:(NCWindow *)window tab:(NCTab *)tab dismissedPermissionRequestNumber:(NSInteger)index;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR

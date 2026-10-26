@@ -72,6 +72,34 @@ static BOOL Fail(NSError** error, NSString* step) {
   return YES;
 }
 
+static bool NCContentType(NSString* kind, cef_content_setting_types_t* out) {
+  if ([kind isEqualToString:@"camera"]) *out = CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA;
+  else if ([kind isEqualToString:@"microphone"]) *out = CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC;
+  else if ([kind isEqualToString:@"geolocation"]) *out = CEF_CONTENT_SETTING_TYPE_GEOLOCATION;
+  else if ([kind isEqualToString:@"notifications"]) *out = CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS;
+  else return false;
+  return true;
+}
+
++ (NSString*)contentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
+  cef_content_setting_types_t type;
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (!context || !NCContentType(kind, &type)) return @"unknown kind";
+  switch (context->GetContentSetting(origin.UTF8String, origin.UTF8String, type)) {
+    case CEF_CONTENT_SETTING_VALUE_ALLOW: return @"allow";
+    case CEF_CONTENT_SETTING_VALUE_BLOCK: return @"block";
+    case CEF_CONTENT_SETTING_VALUE_ASK: return @"ask";
+    case CEF_CONTENT_SETTING_VALUE_DEFAULT: return @"default";
+    default: return @"other";
+  }
+}
+
++ (void)resetContentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
+  cef_content_setting_types_t type;
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (context && NCContentType(kind, &type)) context->SetContentSetting(origin.UTF8String, origin.UTF8String, type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
+}
+
 + (void)shutdown {
   if (!g_loader) return;
   NCPumpStop();
