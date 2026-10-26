@@ -112,6 +112,8 @@ enum ChromeStyle {
     static let findWidth: CGFloat = 308, findMinWidth: CGFloat = 260, findHeight: CGFloat = 36
     static let findTop: CGFloat = 8, findRight: CGFloat = 12     // inside the card, below the divider, from the card's right edge
     static let zoomWidth: CGFloat = 56, zoomHeight: CGFloat = 26
+    static let permissionWidth: CGFloat = 340, permissionHeight: CGFloat = 96
+    static let permissionTop: CGFloat = 8, permissionLeft: CGFloat = 12   // inside the card, below the divider, from the card's left edge
     static let zoomRight: CGFloat = 12                           // from the toolbar's right edge (the extension area will sit right of it)
 }
 
@@ -135,6 +137,11 @@ struct ChromeLayout {
     var findBar: CGRect {
         let w = BarHook.on("FIND_FIXEDWIDTH") ? ChromeStyle.findWidth : min(ChromeStyle.findWidth, max(ChromeStyle.findMinWidth, card.width - 2 * ChromeStyle.findRight))  // negative control: fixed width
         return CGRect(x: card.maxX - ChromeStyle.findRight - w, y: ChromeStyle.webTop + ChromeStyle.findTop, width: w, height: ChromeStyle.findHeight)
+    }
+    /// The permission prompt: top left of the card, below the divider; it narrows with a narrow card (12 pt from each edge).
+    var permissionPrompt: CGRect {
+        let w = min(ChromeStyle.permissionWidth, max(0, card.width - 2 * ChromeStyle.permissionLeft))
+        return CGRect(x: card.minX + ChromeStyle.permissionLeft, y: ChromeStyle.webTop + ChromeStyle.permissionTop, width: w, height: ChromeStyle.permissionHeight)
     }
     /// The web view sits 1 pt inside the card border, below the divider.
     var webInsets: NSEdgeInsets {

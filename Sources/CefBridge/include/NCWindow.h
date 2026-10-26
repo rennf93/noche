@@ -98,6 +98,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// Hidden-mode guards (process wide, call once before CefInitialize): window alpha is clamped to 0 and mouse events
 /// ignored whoever orders a window in, and every NSApplication/NSRunningApplication activation call becomes a counted no-op.
 + (void)installHiddenGuards;
+/// The mask of a getUserMedia or screen capture request (CefMediaAccessPermissionTypes bits); bits it does not know give |NCPermissionMaskOther|, never 0.
++ (NCPermissionMask)maskForMediaRequest:(NSUInteger)bits;
 + (NSInteger)activationsBlocked;
 #ifdef NOCHE_TESTHOOKS
 /// Test support (builds with NOCHE_TESTHOOKS only): YES while a CEF handler of the bridge is on the stack.
@@ -106,6 +108,9 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 + (NSInteger)devToolsCreated;
 + (NSInteger)devToolsLoaded;
 + (NSInteger)devToolsClosed;
+/// Test support: permission requests the engine still waits for, and how many were answered because their tab or window closed.
++ (NSInteger)permissionPromptsOpen;
++ (NSInteger)permissionPromptsClosedWithTab;
 /// Test support: keys the bridge claimed before the engine's accelerators (`preemptKey:`), all windows.
 + (NSInteger)testPreemptedKeys;
 /// Test support: `stopFinding:` calls on any tab.

@@ -127,6 +127,7 @@ extension BrowserWindowController: NSTextFieldDelegate {
     /// selection and clears the results). A same-document navigation never reaches here. Not taken over: its branch for a bar opened after the navigation started
     /// (find_bar_controller.cc:293-309) needs the start of the navigation, which the bridge does not report; the session ends in both cases.
     func window(_ window: NCWindow, tabDidCommitNewDocument tab: NCTab) {
+        dropPermissionRequests(of: tab)
         guard finds[tab.identifier] != nil, !BarHook.on("FIND_NONAV") else { return }  // negative control: the session survives a navigation
         tab.stopFinding(false)
         finds[tab.identifier] = nil

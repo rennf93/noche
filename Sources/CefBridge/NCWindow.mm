@@ -44,6 +44,7 @@
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
          decide:(void (^)(BOOL allow, BOOL remember))decide;
 - (void)promptDismissed:(uint64_t)promptId;
+- (void)closePrompts:(NSInteger)browserId;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
@@ -59,6 +60,14 @@
 @property(nonatomic, readwrite, nullable) NSArray<NCMenuItem*>* submenu;
 @end
 
+@interface NCPromptRecord : NSObject
+@property(nonatomic) NSInteger browserId;
+@property(nonatomic) uint64_t promptId;   // 0: a media request
+@property(nonatomic, copy) void (^engineDecide)(BOOL allow, BOOL remember);
+@end
+@implementation NCPromptRecord
+@end
+
 @implementation NCMenuItem
 - (instancetype)initPrivate { return [super init]; }
 @end
@@ -66,6 +75,7 @@
 namespace {
 
 NSInteger g_devtools_created = 0, g_devtools_closed = 0;
+NSInteger g_prompts_open = 0, g_prompts_closed = 0;  // permission requests the engine waits for; those answered because their tab or window closed
 #ifdef NOCHE_TESTHOOKS
 NSInteger g_ctx_continues = 0, g_ctx_cancels = 0;
 #endif
@@ -156,10 +166,7 @@ class NCClient : public CefClient,
   bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>, const CefString& origin, uint32_t requested,
                                       CefRefPtr<CefMediaAccessCallback> callback) override {
     NC_CEF_CALLBACK;
-    NCPermissionMask mask = 0;
-    if (requested & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) mask |= NCPermissionMaskMicrophone;
-    if (requested & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) mask |= NCPermissionMaskCamera;
-    if (requested & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) mask |= NCPermissionMaskOther;
+    NCPermissionMask mask = [NCWindow maskForMediaRequest:requested];
     return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) promptId:0
                 decide:^(BOOL allow, BOOL) {
                   if (allow) callback->Continue(requested); else callback->Cancel();
@@ -170,6 +177,7 @@ class NCClient : public CefClient,
   bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> b, uint64_t prompt_id, const CefString& origin, uint32_t requested,
                               CefRefPtr<CefPermissionPromptCallback> callback) override {
     NC_CEF_CALLBACK;
+    if (NC_TEST_FLAG("NOCHE_TEST_PERM_BUBBLE")) return false;  // negative control: Chromium shows its own prompt
     NCPermissionMask mask = 0;
     if (requested & (CEF_PERMISSION_TYPE_CAMERA_STREAM | CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM)) mask |= NCPermissionMaskCamera;
     if (requested & CEF_PERMISSION_TYPE_MIC_STREAM) mask |= NCPermissionMaskMicrophone;
@@ -328,7 +336,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CefRefPtr<CefBrowserView> _view;
   CefRefPtr<CefWindow> _window;
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
-  NSMutableSet<NSNumber*>* _prompts;  // permission prompts handed to the delegate and not dismissed yet
+  NSMutableArray<NCPromptRecord*>* _prompts;  // permission requests the engine still waits for (answered, dismissed or closed ones leave)
   NSMutableSet<NSNumber*>* _closed;  // identifiers whose OnBeforeClose ran: a late callback must not bring them back
   BOOL _destroyed, _windowClosing, _waitingForDevTools;
   int _devtoolsPending;  // OnBeforeDevToolsPopup seen, its browser not created yet (tells DevTools from window.open popups)
@@ -364,7 +372,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     _table = [NSMutableDictionary dictionary];
     _devtools = [NSMutableSet set];
     _closed = [NSMutableSet set];
-    _prompts = [NSMutableSet set];
+    _prompts = [NSMutableArray array];
     [NCWindow registerForKeyClaims:self];
     _client = new NCClient(self);
     _view = CefBrowserView::CreateBrowserView(_client, url.UTF8String, TabSettings(), nullptr, nullptr,
@@ -388,26 +396,49 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 // Hands a permission request to the delegate on a later main-queue turn; NO (Chromium shows its own prompt) when the delegate cannot decide.
-// |promptId| 0 is a media request (no dismiss callback). |decide| runs at most once, and not at all after the engine dismissed the prompt.
+// |promptId| 0 is a media request (no dismiss callback). The request is open until it is answered, dismissed by the engine (never delivered
+// when that happens before the hop below) or its tab or window closes (answered once, deny and not remembered, so the engine's callback is never held).
 - (BOOL)browser:(CefRefPtr<CefBrowser>)b requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
          decide:(void (^)(BOOL allow, BOOL remember))decide {
   NCTab* tab = [self tabFor:b create:NO];
   id<NCWindowDelegate> d = _delegate;
   if (!tab || ![d respondsToSelector:@selector(window:tab:requestsPermissions:origin:decide:)]) return NO;
-  if (promptId) [_prompts addObject:@(promptId)];
-  __block BOOL answered = NO;
+  NCPromptRecord* rec = [NCPromptRecord new];
+  rec.browserId = b->GetIdentifier();
+  rec.promptId = promptId;
+  rec.engineDecide = decide;
+  [_prompts addObject:rec];
+  g_prompts_open++;
+  if (NC_TEST_FLAG("NOCHE_TEST_PERM_RACE")) [self promptDismissed:promptId];  // test: the engine dismisses between its callback and the hop below
   dispatch_async(dispatch_get_main_queue(), ^{
-    [d window:self tab:tab requestsPermissions:mask origin:origin decide:^(BOOL allow, BOOL remember) {
-      if (answered || (promptId && ![self->_prompts containsObject:@(promptId)])) return;
-      answered = YES;
-      [self->_prompts removeObject:@(promptId)];
-      decide(allow, remember);
-    }];
+    if (![self->_prompts containsObject:rec] && !NC_TEST_FLAG("NOCHE_TEST_PERM_NOGUARD")) return;
+    [d window:self tab:tab requestsPermissions:mask origin:origin decide:^(BOOL allow, BOOL remember) { [self answer:rec allow:allow remember:remember]; }];
   });
   return YES;
 }
 
-- (void)promptDismissed:(uint64_t)promptId { [_prompts removeObject:@(promptId)]; }
+// Answers the engine once: a request that already left (answered, dismissed, closed) is ignored.
+- (void)answer:(NCPromptRecord*)rec allow:(BOOL)allow remember:(BOOL)remember {
+  if (![_prompts containsObject:rec]) return;
+  [_prompts removeObject:rec];
+  g_prompts_open--;
+  rec.engineDecide(allow, remember);
+}
+
+- (void)promptDismissed:(uint64_t)promptId {
+  if (!promptId) return;
+  for (NCPromptRecord* r in [_prompts copy]) if (r.promptId == promptId) { [_prompts removeObject:r]; g_prompts_open--; }
+}
+
+// A tab (browserId) or, with 0, the whole window goes: its open requests are answered deny, not remembered.
+- (void)closePrompts:(NSInteger)browserId {
+  if (NC_TEST_FLAG("NOCHE_TEST_PERM_NOCLOSE")) return;  // negative control: the engine's callback stays held
+  for (NCPromptRecord* r in [_prompts copy]) {
+    if (browserId && r.browserId != browserId) continue;
+    g_prompts_closed++;
+    [self answer:r allow:NO remember:NO];
+  }
+}
 
 // Runs |block| on the main thread after the CEF callback that caused it, in order.
 - (void)post:(void (^)(id<NCWindowDelegate>))block {
@@ -752,6 +783,7 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
 
 - (void)cefWindowDestroyed {
   _destroyed = YES;
+  [self closePrompts:0];
   _window = nullptr;
   _view = nullptr;
   _nsWindow = nil;
@@ -818,12 +850,14 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
 
 // OnBeforeClose reaches every tab, the last one included (OnTabClosed is skipped once the view is gone).
 - (void)browserClosing:(CefRefPtr<CefBrowser>)browser {
-  NSNumber* key = @(browser->GetIdentifier());
+  NSInteger browserId = browser->GetIdentifier();
+  NSNumber* key = @(browserId);
   [_closed addObject:key];
   if ([_devtools containsObject:key]) {
     [self devToolsGone:browser];
     return;
   }
+  [self closePrompts:browserId];
   NCTab* tab = _table[key];
   if (!tab) return;
   [_table removeObjectForKey:key];
@@ -1060,8 +1094,19 @@ static void Swizzle(SEL sel, F** orig, F* repl) {
   [NSRunLoop.mainRunLoop addTimer:t forMode:NSRunLoopCommonModes];
 }
 
++ (NCPermissionMask)maskForMediaRequest:(NSUInteger)bits {
+  NCPermissionMask mask = 0;
+  if (bits & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) mask |= NCPermissionMaskMicrophone;
+  if (bits & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) mask |= NCPermissionMaskCamera;
+  if (bits & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) mask |= NCPermissionMaskOther;
+  if (!mask && !NC_TEST_FLAG("NOCHE_TEST_PERM_MEDIA0")) mask = NCPermissionMaskOther;  // bits this bridge does not know: never an empty mask
+  return mask;
+}
+
 #ifdef NOCHE_TESTHOOKS
 + (NSInteger)devToolsCreated { return g_devtools_created; }
++ (NSInteger)permissionPromptsOpen { return g_prompts_open; }
++ (NSInteger)permissionPromptsClosedWithTab { return g_prompts_closed; }
 + (NSInteger)devToolsLoaded {
   for (auto& [id, b] : g_devtools_browsers)
     if (!b->IsLoading() && b->HasDocument()) g_devtools_loaded_ids.insert(id);

@@ -36,6 +36,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let findBar = FindBarView(frame: .zero)
     /// Find state per tab (engine id): the pill's text and the last count and active match the engine reported. A tab with no entry is not searching.
     var finds: [Int: FindState] = [:]
+    let permissionPrompt = PermissionPromptView(frame: .zero)
+    /// Site permission requests the engine waits for, oldest first; the card shows the first one of the active tab.
+    var permissionQueue: [PermissionRequest] = []
     var lastFindText = ""   // the window's last search text: Cmd+F and Cmd+G open the pill with it after Escape, as Chrome does
     var findShownFor: Int?   // the tab whose state the pill shows now; nil with the pill hidden
     /// Built on first use, so a window that never used the bar never builds its view (and its teardown skips it).
@@ -174,6 +177,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         overlay.addSubview(toolbar)
         findBar.isHidden = true
         overlay.addSubview(findBar)
+        overlay.addSubview(permissionPrompt)
+        setUpPermissionPrompt()
         overlay.addSubview(border)
         setUpFind()
         toolbar.zoom.onClick = { [weak self] in self?.zoom(0) }
@@ -210,6 +215,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         backdrop.card.frame = layout.card
         toolbar.frame = layout.toolbar
         findBar.frame = layout.findBar
+        permissionPrompt.frame = layout.permissionPrompt
         sidebar.frame = layout.sidebar
         window.webInsets = layout.webInsets
         updateNewTabFrame()
@@ -232,6 +238,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         toolbar.address.isHidden = commandBar.isOpen && commandBar.placement == .overlay
         syncFind()
         syncZoom()
+        syncPermissionPrompt()
     }
 
     // MARK: sidebar motion (live-ui.md section 8)

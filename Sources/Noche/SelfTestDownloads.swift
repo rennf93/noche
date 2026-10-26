@@ -9,16 +9,6 @@ final class DownloadSink: NSObject, NCDownloadsObserver {
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) { updates.append(item) }
 }
 
-extension BrowserWindowController {
-    /// Self-test builds answer permission requests through the running check; the production controller gets its own implementation with the prompt card (M1.5 Task 4).
-    func window(_ window: NCWindow, tab: NCTab, requestsPermissions mask: NCPermissionMask, origin: String, decide: @escaping (Bool, Bool) -> Void) {
-        guard let test = app.selfTest else { return }
-        test.permissionRequests.append((mask, origin))
-        let answer = test.permissionAnswer(mask)
-        decide(answer.allow, answer.remember)
-    }
-}
-
 /// A local server that trickles a file of |size| bytes (16 KB every 20 ms, so 800 KB/s) and honors `Range: bytes=N-` with a strong validator, so
 /// Chromium can resume a download from it. Byte i of the file is i % 251, so a wrong resume changes the SHA-256, which the server computes itself
 /// (python's hashlib, independent of the app) and prints with its port. Each request's range start is appended to |log|. The one process it

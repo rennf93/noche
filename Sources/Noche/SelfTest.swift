@@ -192,6 +192,11 @@ final class SelfTest {
             case "dl-tab-close": await dlTabClose()
             case "dl-quit-relaunch": await dlQuitRelaunch()
             case "dl-ring": await dlRing()
+            case "perm-prompt": await permPrompt()
+            case "perm-remember", "perm-remember-relaunch": await permRemember()
+            case "perm-no-bubble": await permNoBubble()
+            case "perm-dismiss": await permDismiss()
+            case "perm-guards": await permGuards()
             default: finish(false, "unknown check")
             }
         }

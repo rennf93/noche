@@ -11,6 +11,9 @@
   <key>CFBundleShortVersionString</key><string>0.0.1</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSCameraUsageDescription</key><string>Noche asks for the camera only when a site you allow wants to use it.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Noche asks for your location only when a site you allow wants to know where you are.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Noche asks for the microphone only when a site you allow wants to use it.</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NCApplication</string>
 </dict>

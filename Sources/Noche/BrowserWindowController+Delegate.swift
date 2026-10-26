@@ -77,6 +77,7 @@ extension BrowserWindowController {
         failed[tab.identifier] = nil
         finds[tab.identifier] = nil
         closing[tab.identifier] = nil
+        dropPermissionRequests(of: tab)
         if intendedActive === tab { intendedActive = nil }
         // The close is confirmed: the selection moves to the tab chosen when it was asked for.
         if let next = survivor(from: successor) { intendedActive = next; window.activateTab(next) }
