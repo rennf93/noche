@@ -251,7 +251,7 @@ enum MenuTable {
             std("Minimize All", #selector(NSApplication.miniaturizeAll(_:)), "app.minimizeAll"),
             app("Arrange in Front", nil, #selector(AppDelegate.arrangeWindowsInFront(_:)), enabled: always),  // not NSApp's own selector: AppKit retitles that one "Bring All to Front"
             sep,
-            app("Downloads", "window.downloads", #selector(AppDelegate.showDownloads(_:)), enabled: always),  // chrome://downloads until M1.5
+            app("Downloads", "window.downloads", #selector(AppDelegate.showDownloads(_:)), enabled: always),  // Noche's own Downloads window (M1.5)
             app("Task Manager", nil, #selector(AppDelegate.taskManager(_:)), enabled: { $0.window?.activeTab?.canExecuteChromeCommandNamed("IDC_TASK_MANAGER") ?? false }),
             later("Merge All Windows", "window.mergeAllWindows", "M1.6"),
         ], role: .windows),

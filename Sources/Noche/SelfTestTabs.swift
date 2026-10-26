@@ -384,13 +384,15 @@ extension SelfTest {
         reset(); key("g", code: 5, [.command, .shift], chars: "G"); await settle(); verify("Shift+Cmd+G", "findPrevious")
         ctl.closeFind()
         reset(); key("j", code: 38, [.command, .option]); await settle(); verify("Opt+Cmd+J", "javaScriptConsole")
-        for (name, ch, code, mods, chars, scheme, action) in [("Cmd+Y", "y", UInt16(16), NSEvent.ModifierFlags.command, "y", "chrome://history", "showHistory"),
-                                                             ("Shift+Cmd+J", "j", UInt16(38), [.command, .shift], "J", "chrome://downloads", "showDownloads")] as [(String, String, UInt16, NSEvent.ModifierFlags, String, String, String)] {
-            reset(); key(ch, code: code, mods, chars: chars)
-            guard await until(10, { rowCount == 2 && win.activeTab?.url.hasPrefix(scheme) == true }) else { return finish(false, "\(name) opened rows=\(rowCount) active \(win.activeTab?.url ?? "nil"), want a new tab at \(scheme)") }
-            await settle(); verify(name, action)
-            cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W did not close the \(scheme) tab") }
-        }
+        reset(); key("y", code: 16)
+        guard await until(10, { rowCount == 2 && win.activeTab?.url.hasPrefix("chrome://history") == true }) else { return finish(false, "Cmd+Y opened rows=\(rowCount) active \(win.activeTab?.url ?? "nil"), want a new tab at chrome://history") }
+        await settle(); verify("Cmd+Y", "showHistory")
+        cmdW(); guard await until(5, { rowCount == 1 }) else { return finish(false, "Cmd+W did not close the chrome://history tab") }
+        // Shift+Cmd+J: Noche's own Downloads window (M1.5), no new tab.
+        reset(); key("j", code: 38, [.command, .shift], chars: "J")
+        guard await until(10, { app.downloads.windowController.window.isVisible }), rowCount == 1 else { return finish(false, "Shift+Cmd+J opened no Downloads window (visible \(app.downloads.windowController.window.isVisible), rows \(rowCount))") }
+        await settle(); verify("Shift+Cmd+J", "showDownloads")
+        app.downloads.windowController.window.close()
         guard await openTabs(3) else { return finish(false, "no 3 tabs for Close All Tabs (rows=\(rowCount))") }
         reset(); key("k", code: 40, [.command, .shift], chars: "K")
         guard await until(10, { rowCount == 1 && win.tabs.count == 1 && ctl.list.items.first?.url == "about:blank" }) else {

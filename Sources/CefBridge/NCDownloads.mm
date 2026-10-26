@@ -86,17 +86,26 @@ CefRefPtr<CefDownloadHandler> NCDownloadHandlerInstance() {
   d.fullPath = Str(item->GetFullPath());
   // The engine's own suggested name is the intermediate file's ("Unconfirmed 123.crdownload") while the download runs: the name Chromium suggested
   // before it began is the display name, and the final file's name (a " (1)" suffix included) once it is complete.
-  d.suggestedName = _names[@(d.identifier)] ?: Str(item->GetSuggestedFileName());
+  // A canceled item keeps the name its earlier updates had (the engine's own is the intermediate file's).
+  NSUInteger known = [_items indexOfObjectPassingTest:^BOOL(NCDownloadItem* i, NSUInteger, BOOL*) { return i.identifier == item->GetId(); }];
+  d.suggestedName = _names[@(d.identifier)] ?: (known != NSNotFound ? _items[known].suggestedName : Str(item->GetSuggestedFileName()));
   if (item->IsComplete() || !d.suggestedName.length) d.suggestedName = d.fullPath.lastPathComponent;
+  // A download restored from the last session has no name of Chromium's suggesting, only the intermediate file's: the address's last component
+  // stands in for the target name (shortcut: the real target name is not in the CEF API, a Content-Disposition name is lost until it completes).
+  if (!_names[@(d.identifier)] && !item->IsComplete() && [d.suggestedName hasSuffix:@".crdownload"]) {
+    NSString* fromURL = [d.url hasPrefix:@"http"] ? [[NSURL URLWithString:d.url].lastPathComponent stringByRemovingPercentEncoding] : nil;
+    if (fromURL.length) d.suggestedName = fromURL;
+  }
   d.receivedBytes = item->GetReceivedBytes();
   d.totalBytes = item->GetTotalBytes();
   d.percent = item->GetPercentComplete();
   d.speed = item->GetCurrentSpeed();
+  // A download restored after a quit is interrupted and paused (resumable): it reads as paused, the state a Resume button belongs to.
   d.state = item->IsComplete() ? NCDownloadStateComplete : item->IsCanceled() ? NCDownloadStateCanceled
-          : item->IsInterrupted() ? NCDownloadStateInterrupted : item->IsPaused() ? NCDownloadStatePaused : NCDownloadStateInProgress;
+          : item->IsPaused() ? NCDownloadStatePaused : item->IsInterrupted() ? NCDownloadStateInterrupted : NCDownloadStateInProgress;
   if (d.state == NCDownloadStateComplete && NC_TEST_FLAG("NOCHE_TEST_DL_DROP")) return;  // negative control: the completion never reaches the observer
   // A finished or canceled download takes no more commands; an interrupted one can still be resumed.
-  if (d.state == NCDownloadStateComplete || d.state == NCDownloadStateCanceled) _callbacks.erase(d.identifier);
+  if (d.state == NCDownloadStateComplete || d.state == NCDownloadStateCanceled) { _callbacks.erase(d.identifier); [_names removeObjectForKey:@(d.identifier)]; }
   else _callbacks[d.identifier] = callback;
   NSUInteger at = [_items indexOfObjectPassingTest:^BOOL(NCDownloadItem* i, NSUInteger, BOOL*) { return i.identifier == d.identifier; }];
   if (at == NSNotFound) [_items addObject:d]; else _items[at] = d;

@@ -182,6 +182,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.lights[1].onClick = { [weak self] in self?.nsWindow?.miniaturize(nil) }
         sidebar.lights[2].onClick = { [weak self] in self?.nsWindow?.zoom(nil) }
         sidebar.newTabRow.onClick = { [weak self] in self?.newTab() }
+        sidebar.downloadButton.onClick = { [weak self] in self?.app.downloads.show() }
+        observers.append(center.addObserver(forName: DownloadsController.changed, object: app.downloads, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sidebar.downloadButton.progress = self?.app.downloads.ring }
+        })
+        sidebar.downloadButton.progress = app.downloads.ring
         sidebar.onSelect = { [weak self] i in self?.selectRow(i) }
         sidebar.onClose = { [weak self] i in self?.closeRow(i) }
         sidebar.onTabMenu = { [weak self] i, p in self?.showTabMenu(row: i, at: p) }

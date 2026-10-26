@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var exitCodeOverride: Int32?
 #endif
     private(set) var controllers: [BrowserWindowController] = []
+    let downloads = DownloadsController()
     var writer: StoreWriter?
     private(set) var restored: [WindowSnapshot] = []
     private(set) var storeURL: URL?
@@ -78,9 +79,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
 
         // Downloads go to ~/Downloads with no save dialog (Chrome's default); M1.8 Settings will store a user choice and call this again.
-        do { try NCEngine.setDownloadDirectory(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads").path) } catch {
+        var downloadFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+#if NOCHE_TESTHOOKS
+        // A test run never writes to the owner's Downloads: its files go to a folder of the wiped test profile.
+        if selfTestOptions != nil {
+            downloadFolder = SelfTest.downloadFolder
+            try? FileManager.default.createDirectory(at: downloadFolder, withIntermediateDirectories: true)
+        }
+#endif
+        do { try NCEngine.setDownloadDirectory(downloadFolder.path) } catch {
             FileHandle.standardError.write(Data("NOCHE download folder: \(error.localizedDescription)\n".utf8))
         }
+        // The profile's download handler goes in before any window or session is restored: downloads whose tab closed, and downloads restored
+        // from the last session, report to the Downloads window, and the quit can pause them.
+        if !BarHook.on("DL_NOSTART") { NCDownloads.shared.start(observer: downloads) }
         ChromeCommand.resolve()
         restoreWindows(startupURL: url, startupFrame: frame)
 
@@ -222,9 +234,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func inspectElements(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_INSPECT", note: "inspectElements") }
     @objc func javaScriptConsole(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_CONSOLE", note: "javaScriptConsole") }
     @objc func duplicateTab(_ s: Any?) { active?.duplicateTab() }
-    /// History and Downloads are Chromium's own pages in a new tab until M1.5 has Noche's.
+    /// History is Chromium's own page in a new tab until M1.5 has Noche's; Downloads is Noche's own window.
     @objc func showHistory(_ s: Any?) { openPage("chrome://history", note: "showHistory") }
-    @objc func showDownloads(_ s: Any?) { openPage("chrome://downloads", note: "showDownloads") }
+    @objc func showDownloads(_ s: Any?) { if !closing { downloads.show() } }
     private func openPage(_ url: String, note: String) {
         if let a = active { a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
     }
@@ -340,8 +352,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         closing = true
         finished = true
         writer?.quit()
-        // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled.
-        NCDownloads.shared.pauseAllForQuit()
+        // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled. The engine applies
+        // the pause on its own turn and the shutdown below would end the process first, so the windows close once every pause landed (3 s at most).
+        downloads.pauseAllForQuit(timeout: 3) { [self] in closeWindowsForQuit() }
+    }
+
+    private func closeWindowsForQuit() {
         shutdownTabs = windows.reduce(0) { $0 + $1.tabs.count }
         shutdownCap = ProcessInfo.processInfo.systemUptime + Self.capBase + Self.capPerTab * Double(shutdownTabs)
         armWatchdog()

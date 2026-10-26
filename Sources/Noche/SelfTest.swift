@@ -42,6 +42,9 @@ final class SelfTest {
     var lastExtensionReply = ""
     var tabsAtQuit = 0
     var permissionRequests: [(mask: NCPermissionMask, origin: String)] = []
+    /// dl-quit-relaunch: the server that must outlive the check until the quit's pause has landed, and the download it serves.
+    var slowServer: SlowServer?
+    var relaunchID: UInt32?
 
     init(_ options: Options, app: AppDelegate) {
         check = options.check
@@ -90,6 +93,7 @@ final class SelfTest {
             line(ok ? "pass" : "fail", "DevTools open (front end loaded), quit menu action, every DevTools browser ended before shutdown (created=\(created) loaded=\(NCWindow.devToolsLoaded()) ended=\(ended) opened=\(devToolsOpened) windowDidClose=\(windowsClosed) devtools left=\(devTools) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
+        dlQuitVerdict()
         line("info", "activate-blocked=\(NCWindow.activationsBlocked())")
     }
 
@@ -183,6 +187,11 @@ final class SelfTest {
             case "pw-on": await pwOn()
             case "bridge-dl": await bridgeDl()
             case "bridge-perm": await bridgePerm()
+            case "dl-list": await dlList()
+            case "dl-controls": await dlControls()
+            case "dl-tab-close": await dlTabClose()
+            case "dl-quit-relaunch": await dlQuitRelaunch()
+            case "dl-ring": await dlRing()
             default: finish(false, "unknown check")
             }
         }

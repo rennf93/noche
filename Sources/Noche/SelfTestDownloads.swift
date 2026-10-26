@@ -19,40 +19,62 @@ extension BrowserWindowController {
     }
 }
 
-/// A local server that trickles a 40 MB file (16 KB every 20 ms), so a download stays in progress long enough to pause. The one process it starts is stopped by its PID.
+/// A local server that trickles a file of |size| bytes (16 KB every 20 ms, so 800 KB/s) and honors `Range: bytes=N-` with a strong validator, so
+/// Chromium can resume a download from it. Byte i of the file is i % 251, so a wrong resume changes the SHA-256, which the server computes itself
+/// (python's hashlib, independent of the app) and prints with its port. Each request's range start is appended to |log|. The one process it
+/// starts is stopped by its PID.
 final class SlowServer: @unchecked Sendable {
     let process = Process()
     private(set) var port = 0
+    private(set) var sha = ""
 
-    static func start() async -> SlowServer? {
+    static func start(size: Int = 40_000_000, port: Int = 0, log: String = "") async -> SlowServer? {
         let server = SlowServer()
         let out = Pipe()
         server.process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         server.process.arguments = ["-I", "-c", """
-        import http.server, time
+        import http.server, time, hashlib, sys
+        SIZE, PORT, LOG = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+        PAT = bytes(range(251)) * 70
+        def chunk(off, n): return PAT[off % 251:off % 251 + n]
+        h = hashlib.sha256()
+        for o in range(0, SIZE, 16384): h.update(chunk(o, min(16384, SIZE - o)))
         class H(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'  # Chromium keeps no strong validator (ETag, Last-Modified) from an HTTP/1.0 response, so it would not resume
             def do_GET(self):
-                self.send_response(200)
+                r = self.headers.get('Range')
+                start = int(r[6:].split('-')[0]) if r and r.startswith('bytes=') else 0
+                if LOG:
+                    with open(LOG, 'a') as f: f.write('GET range=%d\\n' % start)
+                if start >= SIZE:
+                    self.send_response(416); self.send_header('Content-Range', 'bytes */%d' % SIZE); self.end_headers(); return
+                self.send_response(206 if r else 200)
                 self.send_header('Content-Type', 'application/octet-stream')
-                self.send_header('Content-Length', '40000000')
+                self.send_header('Accept-Ranges', 'bytes')
+                self.send_header('ETag', '"noche-slow"')
+                self.send_header('Last-Modified', 'Mon, 01 Jan 2024 00:00:00 GMT')
+                self.send_header('Content-Length', str(SIZE - start))
+                if r: self.send_header('Content-Range', 'bytes %d-%d/%d' % (start, SIZE - 1, SIZE))
                 self.end_headers()
                 try:
-                    for _ in range(2500):
-                        self.wfile.write(b'x' * 16384); self.wfile.flush(); time.sleep(0.02)
+                    for o in range(start, SIZE, 16384):
+                        self.wfile.write(chunk(o, min(16384, SIZE - o))); self.wfile.flush(); time.sleep(0.02)
                 except Exception:
                     pass
             def log_message(self, *a): pass
-        s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
-        print(s.server_address[1], flush=True)
+        s = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), H)
+        print(s.server_address[1], h.hexdigest(), flush=True)
         s.serve_forever()
-        """]
+        """, String(size), String(port), log]
         server.process.standardOutput = out
         guard (try? server.process.run()) != nil else { return nil }
         let first = await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
             DispatchQueue.global().async { c.resume(returning: String(data: out.fileHandleForReading.availableData, encoding: .utf8) ?? "") }
         }
-        guard let port = Int(first.trimmingCharacters(in: .whitespacesAndNewlines)) else { server.stop(); return nil }
+        let parts = first.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        guard parts.count == 2, let port = Int(parts[0]) else { server.stop(); return nil }
         server.port = port
+        server.sha = String(parts[1])
         return server
     }
 

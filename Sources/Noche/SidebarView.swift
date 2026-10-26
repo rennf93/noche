@@ -27,6 +27,7 @@ final class SidebarView: DragView {
     let scroll = NSScrollView()
     let document = DragView()
     let newTabRow = NewTabRowView(frame: .zero)
+    let downloadButton = DownloadButtonView(frame: .zero)
     private(set) var rows: [TabRowView] = []
     private var lastSelected: Int?
     var onSelect: ((Int) -> Void)?
@@ -57,6 +58,7 @@ final class SidebarView: DragView {
         newTabRow.setAccessibilityIdentifier("sidebar.newTab")
         document.addSubview(newTabRow)
         addSubview(scroll)
+        addSubview(downloadButton)
         updateScroll()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -67,7 +69,9 @@ final class SidebarView: DragView {
     }
 
     private func updateScroll() {
-        scroll.frame = NSRect(x: 0, y: Self.strip, width: bounds.width, height: max(0, bounds.height - Self.strip))
+        scroll.frame = NSRect(x: 0, y: Self.strip, width: bounds.width, height: max(0, bounds.height - Self.strip - ChromeStyle.sidebarBottom))
+        // The reference's 18 pt box starts at x 14 and 42 pt above the bottom; the 36 pt button is centered on the same icon.
+        downloadButton.frame.origin = NSPoint(x: 14 + 9 - DownloadButtonView.size.width / 2, y: bounds.height - ChromeStyle.sidebarBottom)
         let content = rows.last.map { $0.frame.maxY + Self.bottomPad } ?? newTabRow.frame.maxY + Self.bottomPad
         document.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(content, scroll.bounds.height))
     }

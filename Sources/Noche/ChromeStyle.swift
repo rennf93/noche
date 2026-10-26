@@ -60,6 +60,13 @@ enum ChromeStyle {
     static let rowSelectedBorder = NSColor(hex: 0x2A2A2A)
     static let rowHover = NSColor.white.withAlphaComponent(0.14)
     static let rowRadius: CGFloat = 10
+    // Section 3: bottom row (downloads button, icon 14 #666) and its progress ring (M1.5 builder call: no capture of the ring exists)
+    static let sidebarIcon = NSColor(hex: 0x666666)
+    static let downloadRingRadius: CGFloat = 11.5
+    static let downloadRingWidth: CGFloat = 2
+    static let downloadRingTrack = NSColor.white.withAlphaComponent(0.15)
+    static let downloadRing = NSColor(hex: 0xE0E0E0)
+    static let sidebarBottom: CGFloat = 42               // the bottom row: the scrolling list ends above it
     // Section 8: motion
     static let showDuration: TimeInterval = 0.110
     static let hideDuration: TimeInterval = 0.125
