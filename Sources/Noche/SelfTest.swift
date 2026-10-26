@@ -200,6 +200,8 @@ final class SelfTest {
             case "perm-no-bubble": await permNoBubble()
             case "perm-dismiss": await permDismiss()
             case "perm-guards": await permGuards()
+            case "perm-forget": await permForget()
+            case "perm-iframe": await permIframe()
             default: finish(false, "unknown check")
             }
         }

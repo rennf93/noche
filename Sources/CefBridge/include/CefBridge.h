@@ -29,8 +29,14 @@ NC_EXPORT
 /// The engine's own stored site setting for |origin| and |kind| (camera, microphone, geolocation, notifications): "default" (none), "allow", "block", "ask",
 /// "other", or "unknown kind". Chromium keeps every decision it is told, so a Block Noche stores also lives here. Main thread, after the engine started.
 + (NSString *)contentSettingForOrigin:(NSString *)origin kind:(NSString *)kind;
-/// Resets the engine's setting for |origin| and |kind| to its default (Noche's own table keeps the decision). No-op for an unknown kind.
++ (NSString *)contentSettingForOrigin:(NSString *)origin kind:(NSString *)kind topLevelOrigin:(NSString *)top;
+/// Resets the engine's setting for |origin| and |kind| to its default and clears the origin's embargo count for the kind (Chromium blocks an origin after
+/// three dismissals; Noche's own table keeps the decision). The camera kind covers pan-tilt-zoom too. No-op for an unknown kind.
 + (void)resetContentSettingForOrigin:(NSString *)origin kind:(NSString *)kind;
+#ifdef NOCHE_TESTHOOKS
+/// Test support: sets the engine's setting for |kind| at |origin| to block (never allow) without any page request; the camera kind sets pan-tilt-zoom too.
++ (void)testBlockContentSettingForOrigin:(NSString *)origin kind:(NSString *)kind;
+#endif
 @end
 
 NC_EXPORT

@@ -262,5 +262,53 @@ extension SelfTest {
         let ok = violations.isEmpty
         finish(ok, "media masks \(masks) (0 and unknown bits give Other, desktop capture gives Screen), a request dismissed before the hop never reached the host, a request open at its tab's close was answered once (closed with tab \(NCWindow.permissionPromptsClosedWithTab())), stored \(storedPermissions()) \(violations)")
     }
+
+    /// forgetPermission clears everything the engine holds: the camera's pan-tilt-zoom setting too, and Chromium's embargo (three dismissals block an origin).
+    func permForget() async {
+        guard await ready(), let ctl, let tab = win?.activeTab else { return }
+        // The camera kind covers both engine types (no page request: the settings are set to block directly, an Allow is never given).
+        let ptz = "http://perm-test-ptz.invalid"
+        NCEngine.testBlockContentSetting(forOrigin: ptz, kind: "camera")
+        let before = ["camera", "camera-pan-tilt-zoom"].map { NCEngine.contentSetting(forOrigin: ptz, kind: $0) }
+        ctl.forgetPermission(origin: ptz, kind: "camera")
+        let after = ["camera", "camera-pan-tilt-zoom"].map { NCEngine.contentSetting(forOrigin: ptz, kind: $0) }
+        guard before == ["block", "block"], !after.contains("block") else { return finish(false, "camera and pan-tilt-zoom engine settings were \(before) before forgetPermission and \(after) after (want both reset)") }
+        // Three dismissals embargo the origin: the fourth request gets no card and the page sees denied.
+        for n in 1...3 {
+            await askGeolocation(tab)
+            guard await waitCard(), let card else { return finish(false, "no card for dismissal \(n)") }
+            card.close.onClick?()
+            guard await until(5, { !cardShown && NCWindow.permissionPromptsOpen() == 0 }) else { return finish(false, "dismissal \(n) left the request open") }
+        }
+        let seen = permissionRequests.count, shown = card?.shownCount ?? 0
+        await askGeolocation(tab)
+        let embargoed = await pageValue(tab, "window.__geo")
+        guard embargoed == "\"error 1\"", permissionRequests.count == seen, card?.shownCount == shown else {
+            return finish(false, "after three dismissals the fourth request reached the host \(permissionRequests.count - seen) times, the card showed \((card?.shownCount ?? 0) - shown) times, the page got \(embargoed ?? "nil") (want an embargo: no card, error 1)")
+        }
+        ctl.forgetPermission(origin: origin, kind: "geolocation")
+        await askGeolocation(tab)
+        let back = await waitCard()
+        card?.close.onClick?()
+        finish(back && violations.isEmpty, "camera and pan-tilt-zoom \(before) became \(after) after forgetPermission; three dismissals embargoed the origin (fourth request: no card, page got \(embargoed ?? "nil")); after forgetPermission the card showed again: \(back) \(violations)")
+    }
+
+    /// An iframe from the second origin asks for geolocation. Chromium files the request under the TOP-level origin (the card names it, Noche stores it, the engine
+    /// holds the Block at (top, top)); the iframe's own origin holds nothing in either form, so forgetPermission on the stored origin clears everything.
+    func permIframe() async {
+        guard await ready(), let ctl, let tab = win?.activeTab else { return }
+        _ = await evaluate(tab, "window.__msg = undefined; window.addEventListener('message', e => { window.__msg = e.data }); var f = document.createElement('iframe'); f.allow = 'geolocation'; f.src = '\(otherOrigin)/geo-frame.html'; document.body.appendChild(f); 1")
+        guard await waitCard(), let card else { return finish(false, "the iframe's request showed no card (requests \(permissionRequests.map(\.origin)))") }
+        let site = card.site.stringValue, host = origin.replacingOccurrences(of: "http://", with: "")
+        press(card.block)  // never Allow
+        let msg = await pageValue(tab, "window.__msg")
+        func engine() -> String { "(iframe,iframe) \(NCEngine.contentSetting(forOrigin: otherOrigin, kind: "geolocation")), (iframe,top) \(NCEngine.contentSetting(forOrigin: otherOrigin, kind: "geolocation", topLevelOrigin: origin)), (top,top) \(NCEngine.contentSetting(forOrigin: origin, kind: "geolocation"))" }
+        let held = engine(), stored = storedPermissions()
+        ctl.forgetPermission(origin: origin, kind: "geolocation")
+        let after = engine()
+        let ok = site == host && msg == "\"error 1\"" && stored == ["\(origin) geolocation block"] && held.hasSuffix("(top,top) block") && !held.contains("(iframe,iframe) block") && !held.contains("(iframe,top) block")
+            && !after.contains("block") && violations.isEmpty
+        finish(ok, "the iframe's request: card site \(site) (the top page's origin), page message \(msg ?? "nil"), stored \(stored), engine after Block \(held), after forgetPermission \(after) \(violations)")
+    }
 }
 #endif

@@ -1,6 +1,8 @@
+#include <vector>
 #import "CefBridge.h"
 #include <crt_externs.h>
 #include "NCInternal.h"
+#include "NCTabInternal.h"
 #include "include/cef_id_mappers.h"
 #include "include/cef_request_context.h"
 #include "include/cef_values.h"
@@ -72,20 +74,36 @@ static BOOL Fail(NSError** error, NSString* step) {
   return YES;
 }
 
-static bool NCContentType(NSString* kind, cef_content_setting_types_t* out) {
-  if ([kind isEqualToString:@"camera"]) *out = CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA;
-  else if ([kind isEqualToString:@"microphone"]) *out = CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC;
-  else if ([kind isEqualToString:@"geolocation"]) *out = CEF_CONTENT_SETTING_TYPE_GEOLOCATION;
-  else if ([kind isEqualToString:@"notifications"]) *out = CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS;
-  else return false;
-  return true;
+// The engine content setting types a kind covers, each with the key Chromium's embargo record (PERMISSION_AUTOBLOCKER_DATA) files its counts under
+// (PermissionUtil::GetPermissionString). The camera mask also covers pan-tilt-zoom (NCWindow.mm), so forgetting the camera clears both.
+struct NCKindType { cef_content_setting_types_t type; const char* embargoKey; };
+static std::vector<NCKindType> NCKindTypes(NSString* kind) {
+  if ([kind isEqualToString:@"camera"]) {
+    std::vector<NCKindType> t = {{CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA, "VideoCapture"}};
+    if (!NC_TEST_FLAG("NOCHE_TEST_PERM_NOPTZ")) t.push_back({CEF_CONTENT_SETTING_TYPE_CAMERA_PAN_TILT_ZOOM, "CameraPanTiltZoom"});  // negative control
+    return t;
+  }
+  if ([kind isEqualToString:@"camera-pan-tilt-zoom"]) return {{CEF_CONTENT_SETTING_TYPE_CAMERA_PAN_TILT_ZOOM, "CameraPanTiltZoom"}};
+  if ([kind isEqualToString:@"microphone"]) return {{CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC, "AudioCapture"}};
+  if ([kind isEqualToString:@"geolocation"]) return {{CEF_CONTENT_SETTING_TYPE_GEOLOCATION, "Geolocation"}};
+  if ([kind isEqualToString:@"notifications"]) return {{CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS, "Notifications"}};
+  return {};
 }
 
-+ (NSString*)contentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
-  cef_content_setting_types_t type;
-  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
-  if (!context || !NCContentType(kind, &type)) return @"unknown kind";
-  switch (context->GetContentSetting(origin.UTF8String, origin.UTF8String, type)) {
+// Mirrors PermissionDecisionAutoBlocker::RemoveEmbargoAndResetCounts: read the origin's record, drop only this kind's entry, write it back.
+static void NCClearEmbargo(CefRefPtr<CefRequestContext> context, NSString* origin, const char* key) {
+  if (NC_TEST_FLAG("NOCHE_TEST_PERM_KEEPEMBARGO")) return;  // negative control: dismissals stay counted
+  CefRefPtr<CefValue> value = context->GetWebsiteSetting(origin.UTF8String, "", CEF_CONTENT_SETTING_TYPE_PERMISSION_AUTOBLOCKER_DATA);
+  if (!value || value->GetType() != VTYPE_DICTIONARY) return;
+  CefRefPtr<CefDictionaryValue> dict = value->GetDictionary()->Copy(false);
+  if (!dict->Remove(key)) return;
+  CefRefPtr<CefValue> updated = CefValue::Create();
+  updated->SetDictionary(dict);
+  context->SetWebsiteSetting(origin.UTF8String, "", CEF_CONTENT_SETTING_TYPE_PERMISSION_AUTOBLOCKER_DATA, updated);
+}
+
+static NSString* NCSettingName(cef_content_setting_values_t v) {
+  switch (v) {
     case CEF_CONTENT_SETTING_VALUE_ALLOW: return @"allow";
     case CEF_CONTENT_SETTING_VALUE_BLOCK: return @"block";
     case CEF_CONTENT_SETTING_VALUE_ASK: return @"ask";
@@ -94,11 +112,31 @@ static bool NCContentType(NSString* kind, cef_content_setting_types_t* out) {
   }
 }
 
-+ (void)resetContentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
-  cef_content_setting_types_t type;
++ (NSString*)contentSettingForOrigin:(NSString*)origin kind:(NSString*)kind { return [self contentSettingForOrigin:origin kind:kind topLevelOrigin:origin]; }
+
++ (NSString*)contentSettingForOrigin:(NSString*)origin kind:(NSString*)kind topLevelOrigin:(NSString*)top {
   CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
-  if (context && NCContentType(kind, &type)) context->SetContentSetting(origin.UTF8String, origin.UTF8String, type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
+  auto types = NCKindTypes(kind);
+  if (!context || types.empty()) return @"unknown kind";
+  return NCSettingName(context->GetContentSetting(origin.UTF8String, top.UTF8String, types[0].type));
 }
+
++ (void)resetContentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (!context) return;
+  for (const NCKindType& t : NCKindTypes(kind)) {
+    context->SetContentSetting(origin.UTF8String, origin.UTF8String, t.type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
+    NCClearEmbargo(context, origin, t.embargoKey);
+  }
+}
+
+#ifdef NOCHE_TESTHOOKS
++ (void)testBlockContentSettingForOrigin:(NSString*)origin kind:(NSString*)kind {
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (!context) return;
+  for (const NCKindType& t : NCKindTypes(kind)) context->SetContentSetting(origin.UTF8String, origin.UTF8String, t.type, CEF_CONTENT_SETTING_VALUE_BLOCK);
+}
+#endif
 
 + (void)shutdown {
   if (!g_loader) return;

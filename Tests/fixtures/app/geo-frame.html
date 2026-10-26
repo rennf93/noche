@@ -1,0 +1,4 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Geo frame</title>
+<script>navigator.geolocation.getCurrentPosition(() => parent.postMessage('allowed', '*'), e => parent.postMessage('error ' + e.code, '*'));</script>
+</head><body>frame</body></html>
