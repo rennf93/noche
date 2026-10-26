@@ -41,6 +41,7 @@ final class SelfTest {
     var keyLog: [String] = []
     var lastExtensionReply = ""
     var tabsAtQuit = 0
+    var permissionRequests: [(mask: NCPermissionMask, origin: String)] = []
 
     init(_ options: Options, app: AppDelegate) {
         check = options.check
@@ -179,6 +180,9 @@ final class SelfTest {
             case "find-escape-page": await findEscapePage()
             case "find-escape-guards": await findEscapeGuards()
             case "zoom-engine": await zoomEngine()
+            case "pw-on": await pwOn()
+            case "bridge-dl": await bridgeDl()
+            case "bridge-perm": await bridgePerm()
             default: finish(false, "unknown check")
             }
         }

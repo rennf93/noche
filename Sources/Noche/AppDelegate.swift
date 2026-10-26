@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let smoke = SmokeOptions.parse(CommandLine.arguments)
 #if NOCHE_TESTHOOKS
     private let selfTestOptions = SelfTest.parse(CommandLine.arguments)
-    private var selfTest: SelfTest?
+    private(set) var selfTest: SelfTest?
     /// Set by the self-test when its verdict is only known at exit.
     var exitCodeOverride: Int32?
 #endif
@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             exit(4)
         }
 
+        // Downloads go to ~/Downloads with no save dialog (Chrome's default); M1.8 Settings will store a user choice and call this again.
+        do { try NCEngine.setDownloadDirectory(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads").path) } catch {
+            FileHandle.standardError.write(Data("NOCHE download folder: \(error.localizedDescription)\n".utf8))
+        }
         ChromeCommand.resolve()
         restoreWindows(startupURL: url, startupFrame: frame)
 
@@ -336,6 +340,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         closing = true
         finished = true
         writer?.quit()
+        // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled.
+        NCDownloads.shared.pauseAllForQuit()
         shutdownTabs = windows.reduce(0) { $0 + $1.tabs.count }
         shutdownCap = ProcessInfo.processInfo.systemUptime + Self.capBase + Self.capPerTab * Double(shutdownTabs)
         armWatchdog()

@@ -2,6 +2,8 @@
 #include <crt_externs.h>
 #include "NCInternal.h"
 #include "include/cef_id_mappers.h"
+#include "include/cef_request_context.h"
+#include "include/cef_values.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -57,6 +59,17 @@ static BOOL Fail(NSError** error, NSString* step) {
 
 + (NSString*)cefVersion {
   return @CEF_VERSION;
+}
+
++ (BOOL)setDownloadDirectory:(NSString*)path error:(NSError**)error {
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  CefRefPtr<CefValue> value = CefValue::Create();
+  value->SetString(path.fileSystemRepresentation);
+  CefString reason;
+  if (!context || !context->SetPreference("download.default_directory", value, reason)) {
+    return Fail(error, [NSString stringWithFormat:@"download.default_directory: %s", reason.ToString().c_str()]);
+  }
+  return YES;
 }
 
 + (void)shutdown {

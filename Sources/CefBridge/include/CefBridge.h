@@ -6,6 +6,7 @@
 #endif
 
 #import "NCWindow.h"
+#import "NCDownloads.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -22,6 +23,9 @@ NC_EXPORT
 + (NSInteger)chromeCommandIdNamed:(NSString *)name;
 /// The CEF version string this app was compiled against (cef_version.h CEF_VERSION).
 + (NSString *)cefVersion;
+/// Sets the profile preference `download.default_directory` (the folder Chromium puts new downloads in, with no save dialog). Call after the engine started.
+/// Returns NO with |error| when the engine refused the value. Noche's default is ~/Downloads; Settings (M1.8) will store a user choice.
++ (BOOL)setDownloadDirectory:(NSString *)path error:(NSError *_Nullable *_Nullable)error;
 @end
 
 NC_EXPORT

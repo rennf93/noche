@@ -22,6 +22,15 @@ NC_EXPORT
 @property(nonatomic, readonly, nullable) NSArray<NCMenuItem *> *submenu;   // type Submenu only
 @end
 
+/// What a page asks for, one bit per kind. Requests for anything else set `Other` (and nothing for the kinds above), so the host can still ask.
+typedef NS_OPTIONS(NSUInteger, NCPermissionMask) {
+  NCPermissionMaskCamera = 1 << 0,
+  NCPermissionMaskMicrophone = 1 << 1,
+  NCPermissionMaskGeolocation = 1 << 2,
+  NCPermissionMaskNotifications = 1 << 3,
+  NCPermissionMaskOther = 1 << 4,
+};
+
 typedef NS_ENUM(NSInteger, NCWindowMode) { NCWindowModeNormal, NCWindowModeHidden };
 
 /// Every callback arrives on the main thread, from a task posted after the CEF callback that caused it.
@@ -51,6 +60,13 @@ NS_SWIFT_UI_ACTOR
 /// A main-frame load committed in |tab|: a new document (a reload is one; a same-document navigation is not), which ends a find session.
 - (void)window:(NCWindow *)window tabDidCommitNewDocument:(NCTab *)tab;
 - (void)window:(NCWindow *)window tab:(NCTab *)tab didFindMatches:(NSInteger)count active:(NSInteger)ordinal final:(BOOL)final identifier:(NSInteger)identifier;
+@optional
+/// A page asks for |mask| (camera and microphone requests of getUserMedia, and Chromium's permission prompts for the rest). |origin| is the
+/// requesting origin. Not sent while the delegate does not implement it: Chromium then shows its own prompt. The host calls |decide| at most
+/// once, on the main queue: |allow| NO with |remember| YES blocks the permission for good, NO and NO is a one-time dismiss (the page may ask
+/// again); |allow| YES grants it (|remember| is for the host's own store, Chromium keeps its own decision either way). Not calling it
+/// leaves the request open until the tab navigates or closes, which dismisses it.
+- (void)window:(NCWindow *)window tab:(NCTab *)tab requestsPermissions:(NCPermissionMask)mask origin:(NSString *)origin decide:(void (^)(BOOL allow, BOOL remember))decide;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR

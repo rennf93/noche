@@ -1,5 +1,6 @@
 #import "CefBridge.h"
 #import "NCTabInternal.h"
+#import "NCInternal.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #include <map>
@@ -10,6 +11,7 @@
 #include "include/cef_context_menu_handler.h"
 #include "include/cef_menu_model.h"
 #include "include/cef_jsdialog_handler.h"
+#include "include/cef_permission_handler.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -39,6 +41,9 @@
 - (BOOL)chromeCommand:(int)commandId;
 - (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
+- (BOOL)browser:(CefRefPtr<CefBrowser>)browser requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
+         decide:(void (^)(BOOL allow, BOOL remember))decide;
+- (void)promptDismissed:(uint64_t)promptId;
 - (BOOL)preemptKey:(NSEvent*)event;
 + (void)registerForKeyClaims:(NCWindow*)w;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
@@ -109,6 +114,12 @@ NSArray<NCMenuItem*>* NCCopyMenu(CefRefPtr<CefMenuModel> m) {
   return out;
 }
 
+// Chromium reports the origin as a URL ("http://host:port/"); the host gets the origin without the trailing slash.
+NSString* NCOriginString(const CefString& origin) {
+  NSString* s = @(origin.ToString().c_str());
+  return [s hasSuffix:@"/"] ? [s substringToIndex:s.length - 1] : s;
+}
+
 // New tabs start on the card fill (live-ui.md section 2) so a tab never flashes white.
 CefBrowserSettings TabSettings() {
   CefBrowserSettings s;
@@ -125,7 +136,8 @@ class NCClient : public CefClient,
                  public CefCommandHandler,
                  public CefContextMenuHandler,
                  public CefFindHandler,
-                 public CefJSDialogHandler {
+                 public CefJSDialogHandler,
+                 public CefPermissionHandler {
  public:
   explicit NCClient(NCWindow* w) : w_(w) {}
 
@@ -136,6 +148,47 @@ class NCClient : public CefClient,
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+  // Downloads with a tab report here, the ones without through the profile's handler: both end in NCDownloads.
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return NCDownloadHandlerInstance(); }
+
+  // getUserMedia: the delegate decides; without one (or for a tab it does not know) Chromium shows its own prompt.
+  bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>, const CefString& origin, uint32_t requested,
+                                      CefRefPtr<CefMediaAccessCallback> callback) override {
+    NC_CEF_CALLBACK;
+    NCPermissionMask mask = 0;
+    if (requested & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) mask |= NCPermissionMaskMicrophone;
+    if (requested & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) mask |= NCPermissionMaskCamera;
+    if (requested & (CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) mask |= NCPermissionMaskOther;
+    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) promptId:0
+                decide:^(BOOL allow, BOOL) {
+                  if (allow) callback->Continue(requested); else callback->Cancel();
+                }];
+  }
+
+  // Every other permission (geolocation, notifications, clipboard, ...).
+  bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> b, uint64_t prompt_id, const CefString& origin, uint32_t requested,
+                              CefRefPtr<CefPermissionPromptCallback> callback) override {
+    NC_CEF_CALLBACK;
+    NCPermissionMask mask = 0;
+    if (requested & (CEF_PERMISSION_TYPE_CAMERA_STREAM | CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM)) mask |= NCPermissionMaskCamera;
+    if (requested & CEF_PERMISSION_TYPE_MIC_STREAM) mask |= NCPermissionMaskMicrophone;
+    if (requested & CEF_PERMISSION_TYPE_GEOLOCATION) mask |= NCPermissionMaskGeolocation;
+    if (requested & CEF_PERMISSION_TYPE_NOTIFICATIONS) mask |= NCPermissionMaskNotifications;
+    constexpr uint32_t kNamed = CEF_PERMISSION_TYPE_CAMERA_STREAM | CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM | CEF_PERMISSION_TYPE_MIC_STREAM |
+                                CEF_PERMISSION_TYPE_GEOLOCATION | CEF_PERMISSION_TYPE_NOTIFICATIONS;
+    if ((requested & ~kNamed) || !mask) mask |= NCPermissionMaskOther;
+    if (NC_TEST_FLAG("NOCHE_TEST_PERM_MASK")) mask = NCPermissionMaskOther;  // negative control: the mask names nothing
+    const bool dismissOnly = NC_TEST_FLAG("NOCHE_TEST_PERM_DISMISS");        // negative control: a deny is told to the page as a dismiss
+    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) promptId:prompt_id
+                decide:^(BOOL allow, BOOL remember) {
+                  callback->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : (remember && !dismissOnly) ? CEF_PERMISSION_RESULT_DENY : CEF_PERMISSION_RESULT_DISMISS);
+                }];
+  }
+  void OnDismissPermissionPrompt(CefRefPtr<CefBrowser>, uint64_t prompt_id, cef_permission_request_result_t) override {
+    NC_CEF_CALLBACK;
+    [w_ promptDismissed:prompt_id];
+  }
 
   void OnFindResult(CefRefPtr<CefBrowser> b, int identifier, int count, const CefRect&, int ordinal, bool final) override {
     NC_CEF_CALLBACK;
@@ -275,6 +328,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CefRefPtr<CefBrowserView> _view;
   CefRefPtr<CefWindow> _window;
   NSMutableDictionary<NSNumber*, NCTab*>* _table;
+  NSMutableSet<NSNumber*>* _prompts;  // permission prompts handed to the delegate and not dismissed yet
   NSMutableSet<NSNumber*>* _closed;  // identifiers whose OnBeforeClose ran: a late callback must not bring them back
   BOOL _destroyed, _windowClosing, _waitingForDevTools;
   int _devtoolsPending;  // OnBeforeDevToolsPopup seen, its browser not created yet (tells DevTools from window.open popups)
@@ -310,6 +364,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
     _table = [NSMutableDictionary dictionary];
     _devtools = [NSMutableSet set];
     _closed = [NSMutableSet set];
+    _prompts = [NSMutableSet set];
     [NCWindow registerForKeyClaims:self];
     _client = new NCClient(self);
     _view = CefBrowserView::CreateBrowserView(_client, url.UTF8String, TabSettings(), nullptr, nullptr,
@@ -331,6 +386,28 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   const CGFloat top = primary ? primary.frame.size.height - NSMaxY(_frame) : _frame.origin.y;
   return CefRect((int)lround(_frame.origin.x), (int)lround(top), (int)lround(_frame.size.width), (int)lround(_frame.size.height));
 }
+
+// Hands a permission request to the delegate on a later main-queue turn; NO (Chromium shows its own prompt) when the delegate cannot decide.
+// |promptId| 0 is a media request (no dismiss callback). |decide| runs at most once, and not at all after the engine dismissed the prompt.
+- (BOOL)browser:(CefRefPtr<CefBrowser>)b requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
+         decide:(void (^)(BOOL allow, BOOL remember))decide {
+  NCTab* tab = [self tabFor:b create:NO];
+  id<NCWindowDelegate> d = _delegate;
+  if (!tab || ![d respondsToSelector:@selector(window:tab:requestsPermissions:origin:decide:)]) return NO;
+  if (promptId) [_prompts addObject:@(promptId)];
+  __block BOOL answered = NO;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [d window:self tab:tab requestsPermissions:mask origin:origin decide:^(BOOL allow, BOOL remember) {
+      if (answered || (promptId && ![self->_prompts containsObject:@(promptId)])) return;
+      answered = YES;
+      [self->_prompts removeObject:@(promptId)];
+      decide(allow, remember);
+    }];
+  });
+  return YES;
+}
+
+- (void)promptDismissed:(uint64_t)promptId { [_prompts removeObject:@(promptId)]; }
 
 // Runs |block| on the main thread after the CEF callback that caused it, in order.
 - (void)post:(void (^)(id<NCWindowDelegate>))block {
