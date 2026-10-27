@@ -39,6 +39,13 @@ public enum SettingKeys {
         SettingKey(name: "discardAfterMinutes", type: .int(1...525_600), defaultValue: "120"),
     ]
 
+    /// The discard threshold in minutes: the stored value when it is valid for the key's range, else the default (120).
+    public static func discardAfterMinutes(stored: String?) -> Int {
+        let k = key("discardAfterMinutes")!
+        if let stored, k.isValid(stored), let n = Int(stored) { return n }
+        return Int(k.defaultValue)!
+    }
+
     public static func key(_ name: String) -> SettingKey? { all.first { $0.name == name } }
 
     public static func isValid(_ name: String, _ value: String) -> Bool { key(name)?.isValid(value) ?? false }

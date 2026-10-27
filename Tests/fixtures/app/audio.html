@@ -1,13 +1,18 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Audio Page</title></head>
 <body><p>Noche app self-test audio page.</p>
-<audio id="a" loop></audio>
+<div id="h"></div>
 <script>
+// ?shadow puts the element inside an open shadow root of #h.
+const a = document.createElement("audio");
+a.id = "a";
+a.loop = true;
+(location.search.includes("shadow") ? document.getElementById("h").attachShadow({ mode: "open" }) : document.body).appendChild(a);
 // One second of silent 8 kHz mono PCM as a WAV, so an unmuted audio element can play with nothing audible.
 const n = 8000, b = new DataView(new ArrayBuffer(44 + n));
 const s = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
 s(0, 'RIFF'); b.setUint32(4, 36 + n, true); s(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
 b.setUint32(24, 8000, true); b.setUint32(28, 8000, true); b.setUint16(32, 1, true); b.setUint16(34, 8, true); s(36, 'data'); b.setUint32(40, n, true);
 for (let i = 0; i < n; i++) b.setUint8(44 + i, 128);
-document.getElementById('a').src = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+a.src = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
 </script></body></html>

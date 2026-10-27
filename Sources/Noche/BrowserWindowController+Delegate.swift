@@ -139,6 +139,7 @@ extension BrowserWindowController {
             }
         }
         tabs[tab.identifier] = nil
+        if let id = ids[tab.identifier] { leftAt[id] = nil }
         ids[tab.identifier] = nil
         typedLoads[tab.identifier] = nil
         recordedTitle[tab.identifier] = nil

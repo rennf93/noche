@@ -169,6 +169,8 @@ final class SelfTest {
             case "pin-reveal": await pinReveal()
             case "discard-click": await discardClick()
             case "discard-policy": await discardPolicy()
+            case "discard-hang": await discardHang()
+            case "discard-media": await discardMedia()
             case "min-width": await minWidth()
             case "min-width-relaunch": await minWidthRelaunch()
             case "shortcuts-once": await shortcutsOnce()

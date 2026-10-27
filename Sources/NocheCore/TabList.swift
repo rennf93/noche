@@ -9,7 +9,9 @@ public struct TabID: Hashable, Sendable {
 public struct TabItem: Equatable, Sendable {
     public let id: TabID
     /// Nil: no engine tab (a dormant tab). Runtime only, never stored.
-    public var engineID: Int?
+    public var engineID: Int? {
+        didSet { if engineID == nil { isDiscarded = false } }  // no engine tab, nothing discarded: a dormant copy is another state
+    }
     public var url: String
     public var title: String
     public var isLoading: Bool
@@ -279,7 +281,6 @@ public struct TabList: Equatable, Sendable {
     public mutating func setEngineID(_ id: TabID, _ engineID: Int?) {
         guard let i = index(of: id) else { return }
         items[i].engineID = engineID
-        if engineID == nil { items[i].isDiscarded = false }  // no engine tab, nothing discarded: a dormant tab is another state
     }
 
     /// The engine reported the tab's page discarded or restored. An unknown id is a no-op.

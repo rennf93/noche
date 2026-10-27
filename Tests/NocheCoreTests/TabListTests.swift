@@ -34,6 +34,14 @@ final class TabListTests: XCTestCase {
         l.setDiscarded(TabID(), true)  // unknown id: no change
         XCTAssertEqual(l.items.filter(\.isDiscarded).count, 0)
     }
+    func testAnItemWithNoEngineTabIsNeverDiscarded() {
+        var t = tab(1)
+        t.isDiscarded = true
+        t.engineID = nil   // a dormant copy, wherever it is made
+        XCTAssertFalse(t.isDiscarded)
+        t.engineID = 4
+        XCTAssertFalse(t.isDiscarded, "an engine tab given back does not bring the flag back")
+    }
     func testUpdateChangesTitleAndURL() {
         var (l, ts) = list(2)
         l.update(ts[1].id, url: "https://b.example/", title: "B", isLoading: true)

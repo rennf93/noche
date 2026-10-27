@@ -126,6 +126,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// When each tab last stopped being the active one: a tab used for hours is idle from when it was left, not from when it was selected.
     var leftAt: [TabID: Date] = [:]
     var discardTimer: Timer?
+    var sweeping = false   // a discard sweep is running (its media questions are asynchronous)
 #if NOCHE_TESTHOOKS
     /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
     /// every time it moved, and where Copy URL writes.

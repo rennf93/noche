@@ -27,6 +27,11 @@ final class SettingKeysTests: XCTestCase {
         XCTAssertTrue(SettingKeys.isValid("discardAfterMinutes", "1") && SettingKeys.isValid("discardAfterMinutes", "120"))
         XCTAssertFalse(SettingKeys.isValid("discardAfterMinutes", "0") || SettingKeys.isValid("discardAfterMinutes", "x"))
     }
+    func testDiscardAfterMinutesReadsOnlyValidStoredValues() {
+        for (stored, want) in [(nil, 120), ("0", 120), ("-5", 120), ("1", 1), ("525600", 525600), ("525601", 120), ("abc", 120), ("", 120), ("90", 90)] as [(String?, Int)] {
+            XCTAssertEqual(SettingKeys.discardAfterMinutes(stored: stored), want, "stored \(stored ?? "nil")")
+        }
+    }
     func testIntRangeType() {
         let k = SettingKey(name: "n", type: .int(1...5), defaultValue: "3")
         XCTAssertTrue(k.isValid("1") && k.isValid("5"))

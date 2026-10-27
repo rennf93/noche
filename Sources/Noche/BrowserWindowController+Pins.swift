@@ -26,6 +26,7 @@ extension BrowserWindowController {
         note("resetPinned")
         if BarHook.on("PIN_NORESET") { return }  // negative control: Reset to Pinned Page does nothing
         guard let t = item(withID: id), t.isPinned, let pinned = t.pinnedURL else { return }
+        if t.isDiscarded && BarHook.on("DISCARD_NORESET") { return }  // negative control: Reset does nothing on a discarded tab
         guard let tab = engineTab(t) else { return wake(t) }
         _ = list.resetToPinned(id)
         failed[tab.identifier] = nil

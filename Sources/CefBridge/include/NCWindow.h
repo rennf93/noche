@@ -212,6 +212,13 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 #endif
 /// CDP Runtime.evaluate (awaitPromise, returnByValue). |json| is the JSON of the result value, |error| the exception or CDP error.
 - (void)evaluateJavaScript:(NSString *)script completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;
+/// The same with a flat CDP |sessionId| (nil: the tab's own page), whether the evaluation counts as user activation, and a |timeout| in seconds
+/// (0: none). On a timeout the completion runs with a nil |json| and the error "timed out", and a reply that comes later is dropped: the
+/// completion runs exactly once.
+- (void)evaluateJavaScript:(NSString *)script sessionId:(nullable NSString *)sessionId userGesture:(BOOL)userGesture timeout:(NSTimeInterval)timeout completion:(void (^)(NSString *_Nullable json, NSString *_Nullable error))completion;
+/// Attaches (or detaches) the tab's cross-origin iframe targets over the DevTools channel (Target.setAutoAttach, flat sessions). The completion
+/// gets the session ids attached then, usable as |sessionId| above, or an error (and none).
+- (void)attachChildTargets:(BOOL)on timeout:(NSTimeInterval)timeout completion:(void (^)(NSArray<NSString *> *sessionIds, NSString *_Nullable error))completion;
 @end
 
 NS_ASSUME_NONNULL_END

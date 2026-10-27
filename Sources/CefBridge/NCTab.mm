@@ -58,12 +58,14 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 @interface NCTab ()
 - (instancetype)initPrivate;
 - (BOOL)handleDevToolsMessage:(NSData*)data;
+- (void)sendMethod:(NSString*)method params:(NSDictionary*)params sessionId:(NSString* _Nullable)sessionId timeout:(NSTimeInterval)timeout completion:(NCEvalCompletion)completion;
 - (void)closeAfterDevTools:(int)left;
 @end
 
 @implementation NCTab {
   CefRefPtr<CefRegistration> _registration;
   NSMutableDictionary<NSNumber*, NCEvalCompletion>* _pending;
+  NSMutableDictionary<NSString*, NSNumber*>* _childSessions;  // flat sessions of attached iframe targets
   int _nextId;
   NSInteger _faviconGeneration;
   BOOL _waitingForDevTools;  // the 10 s of polling ran out with the DevTools still open
@@ -100,6 +102,7 @@ static BOOL g_force_html_fullscreen = NO;
     _url = @"";
     _title = @"";
     _pending = [NSMutableDictionary dictionary];
+    _childSessions = [NSMutableDictionary dictionary];
   }
   return self;
 }
@@ -220,16 +223,43 @@ static BOOL g_force_html_fullscreen = NO;
 }
 
 - (void)evaluateJavaScript:(NSString*)script completion:(NCEvalCompletion)completion {
+  [self evaluateJavaScript:script sessionId:nil userGesture:YES timeout:0 completion:completion];
+}
+
+- (void)evaluateJavaScript:(NSString*)script
+                 sessionId:(NSString*)sessionId
+               userGesture:(BOOL)userGesture
+                   timeout:(NSTimeInterval)timeout
+                completion:(NCEvalCompletion)completion {
+  [self sendMethod:@"Runtime.evaluate"
+            params:@{@"expression" : script, @"returnByValue" : @YES, @"awaitPromise" : @YES, @"userGesture" : @(userGesture)}
+         sessionId:sessionId
+           timeout:timeout
+        completion:completion];
+}
+
+- (void)attachChildTargets:(BOOL)on timeout:(NSTimeInterval)timeout completion:(void (^)(NSArray<NSString*>*, NSString* _Nullable))completion {
+  [self sendMethod:@"Target.setAutoAttach"
+            params:@{@"autoAttach" : @(on), @"waitForDebuggerOnStart" : @NO, @"flatten" : @YES}
+         sessionId:nil
+           timeout:timeout
+        completion:^(NSString* json, NSString* error) { completion(error ? @[] : [self->_childSessions allKeys], error); }];
+}
+
+// One CDP command, with its completion run exactly once: by the reply, by |timeout| seconds (0: none) with nil and "timed out" (the entry is
+// removed, so a late reply finds none and is dropped), or by the tab closing.
+- (void)sendMethod:(NSString*)method
+            params:(NSDictionary*)params
+         sessionId:(NSString*)sessionId
+           timeout:(NSTimeInterval)timeout
+        completion:(NCEvalCompletion)completion {
   if (!_browser) {
     dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"tab closed"); });
     return;
   }
   const int rid = ++_nextId;
-  NSDictionary* msg = @{
-    @"id" : @(rid),
-    @"method" : @"Runtime.evaluate",
-    @"params" : @{@"expression" : script, @"returnByValue" : @YES, @"awaitPromise" : @YES, @"userGesture" : @YES}
-  };
+  NSMutableDictionary* msg = [@{@"id" : @(rid), @"method" : method, @"params" : params} mutableCopy];
+  if (sessionId) msg[@"sessionId"] = sessionId;
   NSData* data = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
   _pending[@(rid)] = [completion copy];
   // Posted: a send from inside a reply callback is dispatched synchronously and iterates the DevTools observer
@@ -237,11 +267,29 @@ static BOOL g_force_html_fullscreen = NO;
   dispatch_async(dispatch_get_main_queue(), ^{
     if (self->_browser) self->_browser->GetHost()->SendDevToolsMessage(data.bytes, data.length);
   });
+#ifdef NOCHE_TESTHOOKS
+  if (NC_TEST_FLAG("NOCHE_TEST_DISCARD_NOTIMEOUT")) return;  // negative control: no timeout
+#endif
+  if (timeout > 0) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      NCEvalCompletion cb = self->_pending[@(rid)];
+      if (!cb) return;
+      [self->_pending removeObjectForKey:@(rid)];
+      cb(nil, @"timed out");
+    });
+  }
 }
 
 - (BOOL)handleDevToolsMessage:(NSData*)data {
   NSDictionary* j = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-  if (![j isKindOfClass:NSDictionary.class] || !j[@"id"]) return NO;
+  if (![j isKindOfClass:NSDictionary.class]) return NO;
+  if (NSString* event = j[@"method"]) {  // the child targets (cross-origin frames) attached by |attachChildTargets:|
+    NSDictionary* p = j[@"params"];
+    if ([event isEqualToString:@"Target.attachedToTarget"] && p[@"sessionId"] && [p[@"targetInfo"][@"type"] isEqualToString:@"iframe"]) _childSessions[p[@"sessionId"]] = @YES;
+    if ([event isEqualToString:@"Target.detachedFromTarget"] && p[@"sessionId"]) [_childSessions removeObjectForKey:p[@"sessionId"]];
+    return NO;
+  }
+  if (!j[@"id"]) return NO;
   NSNumber* key = @([j[@"id"] intValue]);
   NCEvalCompletion cb = _pending[key];
   if (!cb) return NO;

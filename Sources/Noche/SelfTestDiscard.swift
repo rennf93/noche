@@ -43,6 +43,13 @@ extension SelfTest {
             guard await until(5, { dim() == 1 }) else { return finish(false, "the \(label) stayed dim after the click (alpha \(dim()))") }
             guard await select(c, a.id) else { return finish(false, "A did not activate again") }
         }
+        // Reset to Pinned Page on a discarded pinned tile: the pinned address loads in the same engine tab and the tab is no longer discarded.
+        guard await discardNow(c, b.id) else { return finish(false, "the pinned B was not reported discarded before Reset") }
+        c.resetToPinned(b.id)
+        guard let bTab = c.engineTab(entry(c, b.id)!), await until(15, { self.entry(c, b.id)?.isDiscarded == false && bTab.url == bURL && !bTab.isLoading }) else {
+            return finish(false, "Reset to Pinned Page on a discarded pinned tab left discarded \(String(describing: entry(c, b.id)?.isDiscarded)), url \(c.engineTab(entry(c, b.id)!)?.url ?? "nil")")
+        }
+        guard entry(c, b.id)?.engineID == engine, win.tabs.count == 2 else { return finish(false, "Reset on the discarded pinned tab changed the engine tab: \(String(describing: entry(c, b.id)?.engineID)) want \(engine), \(win.tabs.count) engine tabs") }
         finish(true, "a discarded tab keeps engine id \(engine), draws at alpha 0.45 as a row and as a pinned tile, and a click reloads it in place at \(bURL) with 2 engine tabs and 2 items")
     }
 
@@ -84,5 +91,70 @@ extension SelfTest {
         guard entry(c, active.id)?.isDiscarded == false, win.tabs.count == 4 else { return finish(false, "the active tab or the tab count changed (\(win.tabs.count) engine tabs)") }
         finish(true, "3 hours idle: the idle tab is discarded; the active tab, the loading tab and the tab playing unmuted audio are never offered; a muted element and a page with no media read as not playing")
     }
+
+    /// `discard-hang`: a background page that never answers (a spinning main thread) must not hold the sweep: it returns within a few seconds,
+    /// the spinning tab is not discarded (it cannot say whether it plays media), and the idle tab after it in the list is. A second sweep
+    /// started while one runs does nothing.
+    func discardHang() async {
+        guard await ready(), let c = ctl, let win else { return }
+        let active = c.list.items[0]
+        let spinURL = fixture("b.html").replacingOccurrences(of: "127.0.0.1", with: "localhost")  // another site, so another renderer process
+        let idleURL = fixture("b.html")
+        _ = win.addTab(withURL: spinURL, activate: false)
+        guard await until(20, { win.tabs.count == 2 && c.list.items.count == 2 && c.list.items[1].url == spinURL && !c.list.items[1].isLoading }) else { return finish(false, "the spin tab did not load (\(c.list.items.map(\.url)))") }
+        _ = win.addTab(withURL: idleURL, activate: false)
+        guard await until(20, { win.tabs.count == 3 && c.list.items.count == 3 && c.list.items[2].url == idleURL && !c.list.items[2].isLoading }) else { return finish(false, "the idle tab did not load") }
+        let spin = c.list.items[1], idle = c.list.items[2]
+        // 15 s of a busy main thread, so the page frees itself before the app quits.
+        _ = await evaluate(c.engineTab(spin)!, "setTimeout(() => { const t = Date.now(); while (Date.now() - t < 15000) {} }, 0); 1")
+        BrowserWindowController.discardCalls = []
+        let box = SweepBox()
+        let later = Date().addingTimeInterval(3 * 3600)
+        Task { @MainActor in box.n = await c.discardIdleTabs(now: later); box.done = true }
+        try? await Task.sleep(for: .milliseconds(300))
+        let second = await c.discardIdleTabs(now: later)   // started while the first still waits on the spinning page: does nothing
+        guard second == 0, !box.done else { return finish(false, "a second sweep started while one was running did not return at once (discarded \(second), the first is done \(box.done))") }
+        guard await until(8, { box.done }) else { return finish(false, "the sweep did not return within 8 s with a page that never answers") }
+        let tried = BrowserWindowController.discardCalls
+        guard !tried.contains(spin.id), entry(c, spin.id)?.isDiscarded == false else { return finish(false, "the page that never answered was discarded") }
+        guard box.n == 1, tried == [idle.id], await until(10, { self.entry(c, idle.id)?.isDiscarded == true }) else { return finish(false, "the idle tab after the spinning one was not discarded: \(box.n) discarded, attempts \(tried.count)") }
+        guard entry(c, active.id)?.isDiscarded == false else { return finish(false, "the active tab was discarded") }
+        finish(true, "a background page that never answers: the sweep returned in time, did not discard it, and discarded the idle tab after it")
+    }
+
+    /// `discard-media`: the media question sees a playing, unmuted element inside an open shadow root, in a same-origin frame and in a
+    /// cross-origin (out-of-process) frame, and says no before it plays.
+    func discardMedia() async {
+        guard await ready(), let c = ctl, let win else { return }
+        let cross = fixture("audio.html").replacingOccurrences(of: "127.0.0.1", with: "localhost")
+        let cases: [(String, String, String, Bool)] = [
+            ("an open shadow root", fixture("audio.html?shadow=1"), "document.getElementById('h').shadowRoot.getElementById('a').play().catch(e => 0); 1", false),
+            ("a same-origin frame", fixture("media-host.html?src=audio.html"), "document.getElementById('f').contentDocument.getElementById('a').play().catch(e => 0); 1", false),
+            ("a cross-origin frame", fixture("media-host.html?src=" + cross), "document.getElementById('a').play().catch(e => 0); 1", true),
+        ]
+        for (label, url, play, inChild) in cases {
+            _ = win.addTab(withURL: url, activate: false)
+            let n = c.list.items.count + 1
+            guard await until(20, { win.tabs.count == n && c.list.items.count == n && c.list.items[n - 1].url == url && !c.list.items[n - 1].isLoading }) else { return finish(false, "\(label): the page did not load") }
+            let item = c.list.items[n - 1], tab = c.engineTab(item)!
+            try? await Task.sleep(for: .milliseconds(1500))  // the frame's own load
+            guard await c.isPlayingMedia(tab) == false else { return finish(false, "\(label): reads as playing before anything plays") }
+            if inChild {
+                let ids: [String] = await withCheckedContinuation { k in tab.attachChildTargets(true, timeout: 5) { ids, _ in DispatchQueue.main.async { k.resume(returning: ids) } } }
+                guard let sid = ids.first else { return finish(false, "\(label): the DevTools channel attached no child session") }
+                let started: String? = await withCheckedContinuation { k in tab.evaluateJavaScript(play, sessionId: sid, userGesture: true, timeout: 5) { j, _ in DispatchQueue.main.async { k.resume(returning: j) } } }
+                tab.attachChildTargets(false, timeout: 5) { _, _ in }
+                guard started != nil else { return finish(false, "\(label): the frame's script did not run") }
+            } else {
+                guard await evaluate(tab, play) != nil else { return finish(false, "\(label): the page script did not run") }
+            }
+            var playing = false
+            for _ in 0..<50 where !playing { playing = await c.isPlayingMedia(tab) == true; if !playing { try? await Task.sleep(for: .milliseconds(100)) } }
+            guard playing else { return finish(false, "\(label): a playing unmuted element is not seen as playing") }
+        }
+        finish(true, "a playing unmuted element is seen in an open shadow root, a same-origin frame and a cross-origin frame, and not before it plays")
+    }
 }
+
+final class SweepBox: @unchecked Sendable { var n = 0, done = false }
 #endif
