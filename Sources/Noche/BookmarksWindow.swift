@@ -105,6 +105,8 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
 
     func show() {
         BrowserWindowController.note("showBookmarks")
+        // The same guard as a change from elsewhere: Opt+Cmd+B during a title edit must not rebuild the rows or move the focus under the field editor.
+        if isEditing && !BarHook.on("BM_SHOWRELOAD") { window.makeKeyAndOrderFront(nil); return }
         reload()
         window.makeFirstResponder(outline)  // so Edit > Undo and the Delete key reach the table before the first click
         window.makeKeyAndOrderFront(nil)
@@ -185,8 +187,11 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
     }
 
     func undoDelete() {
-        guard let d = deleted.popLast(), !BarHook.on("BM_NOUNDO") else { return }
-        app.restoreBookmark(d)
+        guard let d = deleted.last, !BarHook.on("BM_NOUNDO") else { return }
+        if BarHook.on("BM_LOSEUNDO") { deleted.removeLast() }  // negative control: the entry goes before the restore is known to work
+        // The entry stays when the restore fails (its parent is gone): the person can undo the delete of the parent first.
+        guard app.restoreBookmark(d) else { return }
+        if !BarHook.on("BM_LOSEUNDO") { deleted.removeLast() }
         reload()
         if let n = node(id: d.id) { select(n) }
     }

@@ -15,6 +15,7 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 #if NOCHE_TESTHOOKS
     /// What Open and Show in Finder asked of NSWorkspace; a test build records the call and never makes it.
     static var workspaceLog: [(call: String, path: String)] = []
+    var holdCancel = false
 #endif
 
     /// The profile's store, set once it is open (before the engine announces its restored downloads).
@@ -33,7 +34,14 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     private static func key(_ item: NCDownloadItem) -> String { "\(item.identifier)|\(item.url)" }
 
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) {
-        if removed.contains(Self.key(item)), item.state != .inProgress { return }
+        if removed.contains(Self.key(item)), item.state != .inProgress {
+            // The row that was listed (an update that came in progress after the give-up) goes too: its end is dropped, so it would freeze at its last progress.
+            if !BarHook.on("DL_KEEPSTALE"), items.contains(where: { $0.identifier == item.identifier }) {
+                items.removeAll { $0.identifier == item.identifier }
+                NotificationCenter.default.post(name: Self.changed, object: self)
+            }
+            return
+        }
         items.removeAll { $0.identifier == item.identifier }
         items.append(item)
         items.sort { $0.identifier > $1.identifier }  // the engine's ids grow with time
@@ -85,20 +93,31 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     func pause(_ item: NCDownloadItem) { NCDownloads.shared.pause(item.identifier) }
     func resume(_ item: NCDownloadItem) { NCDownloads.shared.resume(item.identifier) }
-    /// The engine cancels what it is transferring. A download restored from the last session has nothing live to cancel: the engine then stays silent and
-    /// the row would stay for good (the observed case: Cancel on a restored paused row changes nothing), so after a moment the row is given up like a removed one.
+    /// The engine cancels what it is transferring. A download restored from the last session (paused or interrupted) has nothing live to cancel: the engine
+    /// then stays silent (CEF's DoCancel acts on in-progress items only) and the row would stay for good, so after `cancelGrace` that row is given up like a
+    /// removed one. A row in progress is never given up: a slow cancel is still a live transfer.
     static let cancelGrace = 2.0
     func cancel(_ item: NCDownloadItem) {
+#if NOCHE_TESTHOOKS
+        if !holdCancel { NCDownloads.shared.cancel(item.identifier) }  // a test holds the cancel: the engine has not landed it yet
+#else
         NCDownloads.shared.cancel(item.identifier)
+#endif
         let id = item.identifier
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.cancelGrace) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, !BarHook.on("DL_NOGIVEUP"), let now = self.items.first(where: { $0.identifier == id }), !Self.isFinished(now) else { return }
-                if self.removed.insert(Self.key(now)).inserted { self.removedOrder += [Self.key(now)] }
-                self.items.removeAll { $0.identifier == id }
-                NotificationCenter.default.post(name: Self.changed, object: self)
-            }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.cancelGrace) { [weak self] in MainActor.assumeIsolated { self?.giveUpIfRestored(id) } }
+    }
+
+    private func giveUpIfRestored(_ id: UInt32) {
+        guard let now = items.first(where: { $0.identifier == id }), !BarHook.on("DL_NOGIVEUP") else { return }
+        guard now.state == .paused || now.state == .interrupted || BarHook.on("DL_GIVEUPLIVE") else { return }
+        giveUp(now)
+    }
+
+    /// Hides the row for good (stored like a removal) without the engine's word.
+    func giveUp(_ item: NCDownloadItem) {
+        if removed.insert(Self.key(item)).inserted && !BarHook.on("DL_NOKEEP") { removedOrder += [Self.key(item)] }
+        items.removeAll { $0.identifier == item.identifier }
+        NotificationCenter.default.post(name: Self.changed, object: self)
     }
 
     func open(_ item: NCDownloadItem) {

@@ -363,6 +363,10 @@ extension SelfTest {
         guard m.isEditing, m.window.firstResponder === editor, editor.string == "Alpha Ren" else {
             return finish(false, "a change from another window ended the title edit (editing \(m.isEditing), text \(editor.string))")
         }
+        // Opt+Cmd+B during the edit shows the window again without rebuilding the rows or taking the focus.
+        guard key("b", code: 11, [.option, .command]), m.isEditing, m.window.firstResponder === editor, editor.string == "Alpha Ren" else {
+            return finish(false, "Opt+Cmd+B during a title edit ended it (editing \(m.isEditing), text \(editor.string))")
+        }
         // Return commits the typed title through AppKit; the rows that waited are rebuilt and show the other window's change too.
         editor.string = "Alpha Renamed"
         editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
@@ -425,13 +429,28 @@ extension SelfTest {
         guard back, (try? store.bookmark(forURL: fixture("child-note.html"))) != nil, treeTitles("Bookmarks Bar") == ["Alpha Renamed", "Mine"], recentRows().rows.contains("Child"), await barHasPage("child", ending: "/child-note.html") else {
             return finish(false, "after Undo the folder is not back with Child: chips \(chipTitles()), window \(m.visibleTitles), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows)")
         }
+        // An Undo that cannot restore (the parent folder was deleted elsewhere) keeps its entry; once the parent is back the same Undo works.
+        guard let child = m.node(titled: "Child") else { return finish(false, "no Child row") }
+        m.select(child)
+        m.deleteButton.performClick(nil)
+        guard await until(3, { m.node(titled: "Child") == nil }) else { return finish(false, "Child did not go") }
+        let kept = m.deleted.count
+        guard let mineAgain = m.node(titled: "Mine"), let parentGone = app.deleteBookmark(mineAgain.bookmark.id) else { return finish(false, "the parent folder was not deleted elsewhere") }
+        _ = undo()
+        guard (try? store.bookmark(forURL: fixture("child-note.html"))) == nil, m.deleted.count == kept, m.outline.validateUserInterfaceItem(undoItem) else {
+            return finish(false, "an Undo that could not restore lost its entry (entries \(m.deleted.count), was \(kept)) or brought something back")
+        }
+        app.restoreBookmark(parentGone)
+        guard undo(), await until(3, { m.visibleTitles.contains("    Child") }), (try? store.bookmark(forURL: fixture("child-note.html"))) != nil, m.deleted.count == kept - 1 else {
+            return finish(false, "after the parent came back the kept Undo did not restore Child: window \(m.visibleTitles), entries \(m.deleted.count)")
+        }
         // New Folder with nothing selected adds the folder to Bookmarks Bar.
         m.outline.deselectAll(nil)
         m.folderButton.performClick(nil)
         guard await until(3, { chipTitles() == ["Alpha Renamed", "Mine", "New Folder"] }), barTitles() == ["Alpha Renamed", "Mine", "New Folder"] else { return finish(false, "New Folder with no selection left the bar as \(barTitles())") }
         _ = ctl
         m.window.close()
-        finish(violations.isEmpty, "Opt+Cmd+B shows the window (\(terms.text)), it lists both roots and their rows, a double click opened a tab, a change elsewhere kept the selection by id and the title edit going, a rename ran in a real field editor, a failed edit start left no editable cell, a delete (button and Delete key) reached the bar, the menu, Recent and the store, deleting a folder with a bookmark took both off every surface, Undo brought a bookmark and a folder with its rows back at their positions, roots stayed, New Folder added a folder \(violations)")
+        finish(violations.isEmpty, "Opt+Cmd+B shows the window (\(terms.text)), it lists both roots and their rows, a double click opened a tab, a change elsewhere kept the selection by id and the title edit going, a rename ran in a real field editor, a failed edit start left no editable cell, a failed Undo kept its entry, Opt+Cmd+B left a title edit alone, a delete (button and Delete key) reached the bar, the menu, Recent and the store, deleting a folder with a bookmark took both off every surface, Undo brought a bookmark and a folder with its rows back at their positions, roots stayed, New Folder added a folder \(violations)")
     }
 
     /// A bookmarked page is a command bar row, also one never visited; a deleted bookmark stops appearing at once; a bookmark outranks an equal page without one.

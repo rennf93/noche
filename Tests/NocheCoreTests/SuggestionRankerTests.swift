@@ -227,6 +227,23 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(rows(history: "http://x.com/a", marks: ["http://x.com/a/"]), ["http://x.com/a"])
     }
 
+    /// The https rewrite of a merged page keeps the open tab at the http address: one page row, carrying the tab, and no separate tab row.
+    func testMergedPageStillSwitchesToTheHttpTab() {
+        let t = tab("http://x.com/a", "X page")
+        let rows = SuggestionRanker.rank(query: "x", pages: [page("http://x.com/a", host: "x.com", title: "X page", visits: 3)], tabs: [t], sites: [], remote: [], activeTabID: nil, now: now,
+                                         bookmarks: [BookmarkCandidate(url: "https://x.com/a", title: "X page", addedAt: now)])
+        let pages = rows.filter { $0.kind == .page }
+        XCTAssertEqual(pages.map(\.url), ["https://x.com/a"])
+        XCTAssertEqual(pages.first?.tabID, t.id)
+        XCTAssertFalse(rows.contains { $0.kind == .tab })
+        // Two history pages that differ only by scheme stay two rows (ruled intended, M48).
+        let two = SuggestionRanker.rank(query: "x", pages: [page("http://x.com/a", host: "x.com", title: "A", visits: 1), page("https://x.com/a", host: "x.com", title: "B", visits: 1)],
+                                        tabs: [], sites: [], remote: [], activeTabID: nil, now: now)
+        XCTAssertEqual(two.filter { $0.kind == .page }.count, 2)
+        // A scheme counts only at the start: "://" inside a query is part of the path.
+        XCTAssertEqual(pageKey("x.com/?u=http://y.com/"), "x.com/?u=http://y.com")
+    }
+
     func testBookmarkedPageGainsDoubleFrecency() {
         let a = page("https://a.example/x", host: "a.example", title: "Note one", visits: 3)
         let b = page("https://b.example/x", host: "b.example", title: "Note two", visits: 4)

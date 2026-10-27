@@ -26,7 +26,7 @@ final class SelfTest {
         if let u = args.firstIndex(of: "--selftest-url"), u + 1 < args.count { url = args[u + 1] }
         // Two-phase checks (names ending in -relaunch) run twice on one profile: --selftest-phase 1, then 2. 0 stands for a present but invalid value.
         var phase: Int?
-        if let p = args.firstIndex(of: "--selftest-phase") { phase = (p + 1 < args.count ? Int(args[p + 1]) : nil).flatMap { [1, 2].contains($0) ? $0 : nil } ?? 0 }
+        if let p = args.firstIndex(of: "--selftest-phase") { phase = (p + 1 < args.count ? Int(args[p + 1]) : nil).flatMap { [1, 2, 3].contains($0) ? $0 : nil } ?? 0 }
         return Options(check: args[i + 1], url: url, phase: phase)
     }
 
@@ -109,7 +109,7 @@ final class SelfTest {
             MainActor.assumeIsolated { self?.finish(false, "timeout (\(Int(limit)) s); look at screen lock and CPU load before suspecting the code") }
         }
         Task { @MainActor in
-            if phase == 0 { return finish(false, "bad --selftest-phase (want 1 or 2)") }
+            if phase == 0 { return finish(false, "bad --selftest-phase (want 1, 2 or 3)") }
             if SelfTest.isTwoPhase(check), phase == nil { return finish(false, "bad --selftest-phase: a -relaunch check needs it") }
             switch check {
             case "hidden": await hidden()
@@ -167,6 +167,7 @@ final class SelfTest {
             case "title-window-close": await titleWindowClose()
             case "window-recency": await windowRecency()
             case "dl-remove-relaunch": await dlRemoveRelaunch()
+            case "dl-cancel-slow": await dlCancelSlow()
             case "bm-add": await bmAdd()
             case "bm-bar": await bmBar_()
             case "bm-bar-relaunch": await bmBarRelaunch()

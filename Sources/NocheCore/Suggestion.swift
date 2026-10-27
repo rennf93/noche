@@ -81,7 +81,8 @@ public func urlDisplay(_ url: String) -> String {
 /// Path, query and fragment stay as typed, so /Foo and /foo are two pages.
 public func pageKey(_ url: String) -> String {
     var s = Substring(url)
-    if let r = s.range(of: "://") { s = s[r.upperBound...] }
+    // A scheme only at the start (letters, digits, + - .): "://" inside a path or query is not one.
+    if let r = s.range(of: "://"), s[..<r.lowerBound].allSatisfy({ $0.isLetter || $0.isNumber || "+-.".contains($0) }) { s = s[r.upperBound...] }
     let end = s.firstIndex { "/?#".contains($0) } ?? s.endIndex
     var host = s[..<end].lowercased()
     if host.hasPrefix("www.") { host.removeFirst(4) }

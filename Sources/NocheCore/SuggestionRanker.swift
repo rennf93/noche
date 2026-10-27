@@ -18,8 +18,10 @@ public enum SuggestionRanker {
         var httpsOf: [String: String] = [:]
         for b in bookmarks where isHttps(b.url) && httpsOf[key(b.url)] == nil { httpsOf[key(b.url)] = b.url }
         let marked = Set(bookmarks.map { key($0.url) })
+        var wasURL: [String: String] = [:]  // a page rewritten to its https address: the address an open tab may still be at
         let pages = pages.map { p -> PageCandidate in
             guard !isHttps(p.url), let https = httpsOf[key(p.url)] else { return p }
+            wasURL[https] = p.url
             return PageCandidate(url: https, host: p.host, title: p.title, visitCount: p.visitCount, typedCount: p.typedCount, lastVisitAt: p.lastVisitAt)
         }
         let known = Set(pages.map { key($0.url) })
@@ -44,7 +46,8 @@ public enum SuggestionRanker {
         let others = tabs.filter { $0.id != activeTabID && $0.url != "about:blank" }
         var tabByURL: [String: TabID] = [:]
         for t in others where tabByURL[t.url] == nil { tabByURL[t.url] = t.id }
-        let matchedURLs = Set(matches.map(\.0.url))
+        func tabOf(_ url: String) -> TabID? { tabByURL[url] ?? wasURL[url].flatMap { tabByURL[$0] } }
+        let matchedURLs = Set(matches.flatMap { [$0.0.url] + [wasURL[$0.0.url]].compactMap { $0 } })
         let tabIndex = Dictionary(others.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let tabRows = others.filter { !matchedURLs.contains($0.url)
             && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
@@ -53,7 +56,7 @@ public enum SuggestionRanker {
         var head: [Suggestion] = []
         var topURL: String?
         if tokens.count == 1, let top = matches.first(where: { urlDisplay($0.0.url).lowercased().hasPrefix(tokens[0]) }) {
-            head.append(pageRow(top.0, top.1, tabByURL[top.0.url]))
+            head.append(pageRow(top.0, top.1, tabOf(top.0.url)))
             topURL = top.0.url
         } else if let url = AddressInput.resolve(typed, searchTemplate: probeTemplate), url.scheme != "noche-probe" {
             head.append(Suggestion(kind: .goTo, title: urlDisplay(url.absoluteString), url: url.absoluteString, tabID: nil, frecency: 0))
@@ -80,8 +83,8 @@ public enum SuggestionRanker {
 
         // Pages that stand in for an open tab join the tab group, ordered with the tab rows by tab order.
         let rest = matches.filter { $0.0.url != topURL }
-        let pageRows = rest.filter { tabByURL[$0.0.url] == nil }.map { pageRow($0.0, $0.1, nil) }
-        let tabGroup = (tabRows + rest.filter { tabByURL[$0.0.url] != nil }.map { pageRow($0.0, $0.1, tabByURL[$0.0.url]) })
+        let pageRows = rest.filter { tabOf($0.0.url) == nil }.map { pageRow($0.0, $0.1, nil) }
+        let tabGroup = (tabRows + rest.filter { tabOf($0.0.url) != nil }.map { pageRow($0.0, $0.1, tabOf($0.0.url)) })
             .sorted { (tabIndex[$0.tabID!] ?? 0) < (tabIndex[$1.tabID!] ?? 0) }
 
         // One slot stays for a history page, so sites shrink first, then tabs.

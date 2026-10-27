@@ -66,9 +66,13 @@ extension AppDelegate {
         return done
     }
 
-    func restoreBookmark(_ d: Store.Deleted) {
-        do { try writer?.store.restoreBookmark(d) } catch { logBookmark("restore", error) }
+    /// False when the store refused (the parent folder is gone) or there is no store.
+    @discardableResult
+    func restoreBookmark(_ d: Store.Deleted) -> Bool {
+        var ok = false
+        do { try writer?.store.restoreBookmark(d); ok = writer != nil } catch { logBookmark("restore", error) }
         bookmarksChanged()
+        return ok
     }
 
     func addBookmarkFolder(title: String, parentId: String) {

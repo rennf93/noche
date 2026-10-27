@@ -67,6 +67,44 @@ extension SelfTest {
         finish(again.isEmpty && listed.isEmpty && violations.isEmpty, "after the relaunch the engine announced its restored items (\(back)) and none of the \(removed.count) removed rows came back: came back \(again), the window lists \(listed) \(violations)")
     }
 
+    /// Task 7b fix 1: a row in progress is never given up (a slow cancel is a live transfer), and a row whose end the controller drops never freezes.
+    func dlCancelSlow() async {
+        guard await ready(), let win, let tab = win.activeTab, let server = await startSlowServer(size: Self.slowSize) else { return }
+        defer { server.stop() }
+        guard let running = await startSlow(tab, server: server, minBytes: 100_000) else { return }
+        app.showDownloads(nil)
+        guard await until(5, { dc.windowController.rows.count == 1 }) else { return finish(false, "no row for the running download (\(rowNames()))") }
+        // A Cancel the engine has not landed: after the grace the row is still listed, in progress.
+        dc.holdCancel = true
+        dc.windowController.rows[0].button("Cancel")?.performClick(nil)
+        var vanished = false  // sampled: a row that left and came back with the next update would pass a look at the end
+        let end = Date().addingTimeInterval(DownloadsController.cancelGrace + 1)
+        while Date() < end { if dc.items.isEmpty { vanished = true }; try? await Task.sleep(for: .milliseconds(25)) }
+        guard !vanished, dc.windowController.rows.count == 1, item(running.identifier)?.state == .inProgress, dc.windowController.rows[0].visibleButtons == ["Pause", "Cancel"] else {
+            return finish(false, "a slow cancel hid or changed a live download (hidden at some point: \(vanished)): rows \(rowNames()) \(dc.windowController.rows.map(\.visibleButtons)), state \(item(running.identifier)?.state.rawValue ?? -1)")
+        }
+        dc.holdCancel = false
+        NCDownloads.shared.cancel(running.identifier)
+        guard await until(10, { item(running.identifier)?.state == .canceled }), await until(3, { dc.windowController.rows.first?.visibleButtons == ["Remove"] }) else {
+            return finish(false, "the late cancel did not end the row canceled (state \(item(running.identifier)?.state.rawValue ?? -1), rows \(rowNames()))")
+        }
+        dc.windowController.rows[0].button("Remove")?.performClick(nil)
+        guard dc.windowController.rows.isEmpty else { return finish(false, "Remove left \(rowNames())") }
+        // A row given up while it runs comes back with the next progress update (it passes the rule); when its end is dropped it must go, not freeze.
+        guard let second = await startSlow(tab, server: server, minBytes: 100_000) else { return }
+        guard await until(5, { dc.windowController.rows.count == 1 }), let live = item(second.identifier) else { return finish(false, "no row for the second download") }
+        dc.giveUp(live)
+        guard dc.windowController.rows.isEmpty else { return finish(false, "giveUp left the row \(rowNames())") }
+        guard await until(10, { dc.windowController.rows.count == 1 }) else { return finish(false, "the running download did not show again with its next update") }
+        NCDownloads.shared.cancel(second.identifier)
+        guard await until(10, { NCDownloads.shared.items.first { $0.identifier == second.identifier }?.state == .canceled }) else { return finish(false, "the second cancel did not land in the engine") }
+        try? await Task.sleep(for: .milliseconds(500))
+        guard dc.windowController.rows.isEmpty, dc.items.isEmpty else {
+            return finish(false, "a row frozen at its last progress: rows \(rowNames()) \(dc.windowController.rows.map(\.visibleButtons)), the engine says canceled")
+        }
+        finish(violations.isEmpty, "a Cancel the engine had not landed left the live row listed after the grace, the late cancel ended it canceled with Remove; a row given up while running came back with its next update and its dropped end removed it \(violations)")
+    }
+
     /// Task 5 Minor 3 and Task 6 Minor 10: with no browser window key (a History, Bookmarks or Downloads window is key), links open in the browser window
     /// that was key most recently, not the newest window. Hidden windows are never key, so the window notification is posted by hand.
     func windowRecency() async {
