@@ -226,6 +226,7 @@ final class SelfTest {
             case "dl-tab-close": await dlTabClose()
             case "dl-quit-relaunch": await dlQuitRelaunch()
             case "dl-restored-cancel-relaunch": await dlQuitRelaunch(cancelRestored: true)
+            case "dl-restored-silent-relaunch": await dlQuitRelaunch(cancelRestored: true, silent: true)
             case "dl-ring": await dlRing()
             case "perm-prompt": await permPrompt()
             case "perm-remember", "perm-remember-relaunch": await permRemember()

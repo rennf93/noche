@@ -18,6 +18,11 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     /// What Open and Show in Finder asked of NSWorkspace; a test build records the call and never makes it.
     static var workspaceLog: [(call: String, path: String)] = []
     var holdCancel = false
+    /// Test: Cancel on a paused or interrupted row never reaches the engine, as with an engine whose cancel ignores a restored item (the fallback's seam).
+    var silentRestoredCancel = false
+    /// Test: give-ups that fired from a Cancel's grace, and when the engine's update last delivered each item canceled (a test clears an entry before its Cancel).
+    static var giveUps = 0
+    var canceledAt: [UInt32: Date] = [:]
 #endif
 
     /// The profile's store, set once it is open (before the engine announces its restored downloads).
@@ -79,6 +84,9 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     }
 
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) {
+#if NOCHE_TESTHOOKS
+        if item.state == .canceled { canceledAt[item.identifier] = Date() }
+#endif
         // An update that comes in progress for a removed key is a new download that reuses the id and address (the engine's history was cleared), or a download
         // given up while it still ran: forget the key, so its end lists (a finished or canceled row the person can Remove, never a row frozen at its last progress).
         // A finished update under a removed key is the engine's old announcement of a download the person removed: dropped.
@@ -144,13 +152,14 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     func pause(_ item: NCDownloadItem) { NCDownloads.shared.pause(item.identifier) }
     func resume(_ item: NCDownloadItem) { NCDownloads.shared.resume(item.identifier) }
-    /// The engine cancels what it is transferring. A download restored from the last session (paused or interrupted) has nothing live to cancel: the engine
-    /// then stays silent (CEF's DoCancel acts on in-progress items only) and the row would stay for good, so after `cancelGrace` that row is given up like a
-    /// removed one. A row in progress is never given up: a slow cancel is still a live transfer.
+    /// The engine cancels the download, a restored paused or interrupted one included (engine patch 0011): its canceled update ends the row as Canceled with
+    /// Remove and the partial file is deleted. If the engine stays silent for a restored row (an engine without that patch) the row would stay for good, so
+    /// after `cancelGrace` that row is given up like a removed one. A row in progress is never given up: a slow cancel is still a live transfer.
     static let cancelGrace = 2.0
     func cancel(_ item: NCDownloadItem) {
 #if NOCHE_TESTHOOKS
-        if !holdCancel { NCDownloads.shared.cancel(item.identifier) }  // a test holds the cancel: the engine has not landed it yet
+        let silent = (silentRestoredCancel || BarHook.on("DL_SKIPENGINE")) && (item.state == .paused || item.state == .interrupted)
+        if !holdCancel && !silent { NCDownloads.shared.cancel(item.identifier) }  // a test holds the cancel (the engine has not landed it yet) or skips it for a restored row
 #else
         NCDownloads.shared.cancel(item.identifier)
 #endif
@@ -161,6 +170,9 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     private func giveUpIfRestored(_ id: UInt32) {
         guard let now = items.first(where: { $0.identifier == id }), !BarHook.on("DL_NOGIVEUP") else { return }
         guard now.state == .paused || now.state == .interrupted || BarHook.on("DL_GIVEUPLIVE") else { return }
+#if NOCHE_TESTHOOKS
+        Self.giveUps += 1
+#endif
         giveUp(now)
     }
 

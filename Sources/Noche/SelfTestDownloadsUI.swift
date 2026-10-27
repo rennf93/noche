@@ -159,9 +159,10 @@ extension SelfTest {
     }
 
     /// Phase 1 prints its verdict from `beforeExit` (the quit path's pause has to have landed); phase 2 resumes after the relaunch.
-    /// |cancelRestored|: dl-restored-cancel-relaunch, the same first phase; phase 2 cancels the restored paused row (the engine's callback for it exists
-    /// only once the engine announced the item) and removes it, with no server and no Resume.
-    func dlQuitRelaunch(cancelRestored: Bool = false) async {
+    /// |cancelRestored|: dl-restored-cancel-relaunch, the same first phase; phase 2 cancels the restored paused row and the engine's canceled update ends it
+    /// (partial file deleted); |silent|: dl-restored-silent-relaunch, the same with Cancel never reaching the engine (an engine without patch 0011), so the
+    /// give-up ends the row and the partial file stays.
+    func dlQuitRelaunch(cancelRestored: Bool = false, silent: Bool = false) async {
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
         let serverLog = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-server.log").path
         if phase == 1 {
@@ -175,17 +176,23 @@ extension SelfTest {
         }
         let givenUp = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-given-up.txt")
         if cancelRestored && phase == 3 {
-            // Third launch: the engine announces the restored item again (Cancel never reached it), and its row stays hidden.
+            // Third launch: the engine announces the restored item again, and its row stays hidden (the person removed it).
             guard let id = (try? String(contentsOf: givenUp, encoding: .utf8)).flatMap({ UInt32($0) }) else { return finish(false, "phase 2 left no given-up id") }
             guard await ready() else { return }
             guard await until(20, { NCDownloads.shared.items.contains { $0.identifier == id } }) else { return finish(false, "the engine did not announce item \(id) again, so nothing proves its row stays hidden (announced \(NCDownloads.shared.items.map(\.identifier)))") }
             try? await Task.sleep(for: .milliseconds(500))
             app.showDownloads(nil)
             guard await until(5, { dc.windowController.window.isVisible }) else { return finish(false, "no Downloads window") }
-            guard dc.items.isEmpty, dc.windowController.rows.isEmpty else { return finish(false, "the given-up row came back after the relaunch: \(dc.items.map { "\($0.identifier):\($0.suggestedName):\($0.state.rawValue)" })") }
+            guard dc.items.isEmpty, dc.windowController.rows.isEmpty else { return finish(false, "the removed row came back after the relaunch: \(dc.items.map { "\($0.identifier):\($0.suggestedName):\($0.state.rawValue)" })") }
+            let announced = NCDownloads.shared.items.first { $0.identifier == id }?.state
             let partial = folderFiles().filter { $0.hasSuffix(".crdownload") }
-            guard !partial.isEmpty else { return finish(false, "the partial file is gone (folder \(folderFiles())): the engine's cancel works now, so the give-up and this note are obsolete") }
-            return finish(violations.isEmpty, "after the relaunch the engine announced item \(id) again and its row stays hidden; the partial file stays on disk as \(partial) \(violations)")
+            if silent {  // the engine never canceled it: still paused in its history, partial on disk
+                guard !partial.isEmpty else { return finish(false, "the partial file is gone (folder \(folderFiles())) though the engine was never asked to cancel") }
+                return finish(violations.isEmpty, "after the relaunch the engine announced item \(id) again (state \(announced?.rawValue ?? -1)) and its row stays hidden; the partial file stays on disk as \(partial) \(violations)")
+            }
+            guard announced == .canceled else { return finish(false, "the relaunch announced the canceled item as state \(announced?.rawValue ?? -1), want canceled (a paused one would bring Resume back)") }
+            guard partial.isEmpty else { return finish(false, "the canceled download's partial file is back: \(partial)") }
+            return finish(violations.isEmpty, "after the relaunch the engine announced item \(id) as canceled and its removed row stays hidden, no Resume anywhere; no partial file \(violations)")
         }
         let saved = ((try? String(contentsOf: state, encoding: .utf8)) ?? "").split(separator: " ").map(String.init)
         guard saved.count >= 3, let port = Int(saved[0]), let before = Int64(saved[2]) else { return finish(false, "phase 1 left no state (\(saved))") }
@@ -198,24 +205,41 @@ extension SelfTest {
         if cancelRestored {
             app.showDownloads(nil)
             guard await until(5, { dc.windowController.rows.first?.visibleButtons == ["Resume", "Cancel"] }) else { return finish(false, "restored row buttons \(dc.windowController.rows.first?.visibleButtons ?? [])") }
+            let partialBefore = folderFiles().filter { $0.hasSuffix(".crdownload") }
+            guard !partialBefore.isEmpty else { return finish(false, "no partial file before Cancel (folder \(folderFiles())), so its absence after would prove nothing") }
+            let id = restored.identifier
+            dc.silentRestoredCancel = silent
+            dc.canceledAt[id] = nil  // only an update after this Cancel counts
+            let giveUpsBefore = DownloadsController.giveUps, t0 = Date()
             dc.windowController.rows[0].button("Cancel")?.performClick(nil)
-            // A restored row has a way out: the engine cancels it (a canceled row with Remove), or the app gives it up after DownloadsController.cancelGrace.
-            let engineCanceled = await until(DownloadsController.cancelGrace - 0.5, { item(restored.identifier)?.state == .canceled })
-            line("info", "Cancel on the restored paused row: the engine ended it canceled \(engineCanceled) (state now \(item(restored.identifier)?.state.rawValue ?? -1), rows \(rowNamesNow()))")
-            guard await until(DownloadsController.cancelGrace + 8, { item(restored.identifier) == nil || item(restored.identifier)?.state == .canceled }) else {
-                return finish(false, "the restored paused row has no way out: after Cancel it is still state \(item(restored.identifier)?.state.rawValue ?? -1) with buttons \(dc.windowController.rows.first?.visibleButtons ?? [])")
+            if silent {
+                // The engine never hears of it: the row stays paused through the grace and then the give-up takes it off the list.
+                try? await Task.sleep(for: .seconds(DownloadsController.cancelGrace - 0.5))
+                guard item(id)?.state == .paused, dc.canceledAt[id] == nil else { return finish(false, "the seam let the engine cancel it (state \(item(id)?.state.rawValue ?? -1))") }
+                guard await until(DownloadsController.cancelGrace + 8, { item(id) == nil }) else {
+                    return finish(false, "the restored paused row has no way out: after Cancel it is still state \(item(id)?.state.rawValue ?? -1) with buttons \(dc.windowController.rows.first?.visibleButtons ?? [])")
+                }
+                guard DownloadsController.giveUps == giveUpsBefore + 1, dc.windowController.rows.isEmpty else { return finish(false, "the row left but not by the give-up (give-ups \(DownloadsController.giveUps - giveUpsBefore)): \(rowNamesNow())") }
+                let partial = folderFiles().filter { $0.hasSuffix(".crdownload") }
+                guard !partial.isEmpty else { return finish(false, "the partial file is gone (folder \(folderFiles())) though the engine was never asked to cancel") }
+                try? "\(id)".write(to: givenUp, atomically: true, encoding: .utf8)
+                return finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: with the engine silent, Cancel on the restored row was given up after the grace (one give-up), the partial file stays \(partial) \(violations)")
             }
-            if item(restored.identifier) != nil {
-                guard await until(3, { dc.windowController.rows.first?.visibleButtons == ["Remove"] }) else { return finish(false, "the canceled restored row shows \(dc.windowController.rows.first?.visibleButtons ?? [])") }
-                dc.windowController.rows[0].button("Remove")?.performClick(nil)
+            // The engine's canceled update arrives well before the grace, and nothing else ended the row.
+            guard await until(DownloadsController.cancelGrace - 0.5, { dc.canceledAt[id] != nil }), let at = dc.canceledAt[id] else {
+                return finish(false, "the restored paused row has no way out: no canceled update from the engine within \(DownloadsController.cancelGrace - 0.5) s of Cancel (state \(item(id)?.state.rawValue ?? -1), rows \(rowNamesNow()))")
             }
+            guard at >= t0, at.timeIntervalSince(t0) < DownloadsController.cancelGrace else { return finish(false, "the canceled update came \(at.timeIntervalSince(t0)) s after Cancel") }
+            guard await until(5, { folderFiles().filter { $0.hasSuffix(".crdownload") }.isEmpty }) else { return finish(false, "the engine canceled the item but the partial file is still on disk: \(folderFiles())") }
+            try? await Task.sleep(for: .seconds(DownloadsController.cancelGrace + 0.5))  // past the give-up's deadline
+            guard DownloadsController.giveUps == giveUpsBefore else { return finish(false, "the give-up fired though the engine canceled it") }
+            guard item(id)?.state == .canceled, dc.windowController.rows.first?.visibleButtons == ["Remove"], dc.windowController.rows.first?.detailField.stringValue == "Canceled" else {
+                return finish(false, "the canceled restored row reads \(dc.windowController.rows.first?.detailField.stringValue ?? "none") with buttons \(dc.windowController.rows.first?.visibleButtons ?? []), state \(item(id)?.state.rawValue ?? -1)")
+            }
+            dc.windowController.rows[0].button("Remove")?.performClick(nil)
             guard dc.windowController.rows.isEmpty, dc.items.isEmpty else { return finish(false, "the restored row is still listed: \(rowNamesNow())") }
-            try? "\(restored.identifier)".write(to: givenUp, atomically: true, encoding: .utf8)
-            let partial = folderFiles().filter { $0.hasSuffix(".crdownload") }
-            // Today's behavior, recorded: the engine ignored the Cancel, so the partial file is still on disk (the self-test's own download folder).
-            guard engineCanceled || !partial.isEmpty else { return finish(false, "the engine ignored Cancel but the partial file is gone (folder \(folderFiles()))") }
-            line("info", "partial file after the give-up: \(partial), engine canceled \(engineCanceled)")
-            finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: Cancel on the restored row took it off the list (engine canceled it first: \(engineCanceled); partial files left \(partial)) \(violations)")
+            try? "\(id)".write(to: givenUp, atomically: true, encoding: .utf8)
+            finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: Cancel on the restored row got the engine's canceled update \(Int(at.timeIntervalSince(t0) * 1000)) ms later, no give-up, a Canceled row with Remove, the partial file \(partialBefore) deleted \(violations)")
             return
         }
         guard let server = await startSlowServer(size: Self.slowSize, port: port, log: serverLog) else { return finish(false, "the slow server did not come back on port \(port)") }
@@ -239,7 +263,7 @@ extension SelfTest {
     /// Phase 1's verdict, after the quit's pause: the download must be paused with bytes, and the state file gets the bytes at exit.
     func dlQuitVerdict() {
         defer { slowServer?.stop() }  // every way out, with or without a verdict
-        guard check == "dl-quit-relaunch" || check == "dl-restored-cancel-relaunch" || check.hasPrefix("quit-gap-"), phase == 1, !verdictPrinted, let id = relaunchID else { return }
+        guard check == "dl-quit-relaunch" || check == "dl-restored-cancel-relaunch" || check == "dl-restored-silent-relaunch" || check.hasPrefix("quit-gap-"), phase == 1, !verdictPrinted, let id = relaunchID else { return }
         let it = item(id)
         let ok = it?.state == .paused && (it?.receivedBytes ?? 0) >= 800_000
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
