@@ -458,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !exiting else { return }
         exiting = true
         // OnBeforeClose runs inside CEF teardown; shut down from a clean stack.
-        shutDownOnClearStack(until: ProcessInfo.processInfo.systemUptime + 3) { [self] in
+        shutDownOnClearStack(until: ProcessInfo.processInfo.systemUptime + min(Self.menuWait, max(0, shutdownCap - ProcessInfo.processInfo.systemUptime))) { [self] in
 #if NOCHE_TESTHOOKS
             selfTest?.beforeExit(watchdogFired: watchdogFired)
             let code = exitCodeOverride ?? exitCode
@@ -470,14 +470,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// Seconds the shutdown waits for an open menu to end, at most (the time left in the overall cap bounds it further).
+    private static let menuWait: TimeInterval = 3
+    /// How often the shutdown found a menu still tracking and queued itself again.
+    private(set) var menuWaits = 0
+    private(set) var shutdownNotes: [String] = []
+
+    private func note(_ text: String) {
+        shutdownNotes.append(text)
+        FileHandle.standardError.write(Data((text + "\n").utf8))
+    }
+
     /// Runs |body| from the main queue once no menu tracking is on the stack: a block queued inside NSMenu's nested loop runs within a Chromium task, and CefShutdown there aborts.
-    /// A menu that does not end within the bound (|deadline|, uptime) is left behind and the shutdown goes on.
+    /// A menu that does not end by |deadline| (uptime) is left behind, said on stderr, and the shutdown goes on.
     private func shutDownOnClearStack(until deadline: TimeInterval, _ body: @escaping () -> Void) {
         DispatchQueue.main.async { [self] in
-            if ContextMenus.tracking, ProcessInfo.processInfo.systemUptime < deadline {
-                ContextMenus.cancelOpen()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.shutDownOnClearStack(until: deadline, body) }
-            } else { body() }
+#if NOCHE_TESTHOOKS
+            if ContextMenus.env("NOCHE_TEST_QUIT_NOWAIT") { return body() }  // negative control: no wait
+#endif
+            guard ContextMenus.tracking else { return body() }
+            if ProcessInfo.processInfo.systemUptime >= deadline {
+#if NOCHE_TESTHOOKS
+                if ContextMenus.env("NOCHE_TEST_QUIT_SILENT") { return body() }  // negative control: the bound expires without a word
+#endif
+                note("NOCHE shutdown: a menu was still open after \(menuWaits) waits, shutting down anyway")
+                return body()
+            }
+            menuWaits += 1
+            ContextMenus.cancelOpen()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.shutDownOnClearStack(until: deadline, body) }
         }
     }
 }

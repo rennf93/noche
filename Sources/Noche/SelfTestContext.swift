@@ -112,6 +112,8 @@ extension SelfTest {
         guard await ready(), let tab = win?.activeTab else { return }
         guard let p = await pageRightClick(tab), ContextMenus.tracking, p.kind == "page" else { return finish(false, "no page menu open to quit under") }
         menuOpenedAtQuit = true
+        ContextMenus.testCancel = check == "quit-menu-late" ? .late : check == "quit-menu-stuck" ? .never : .now
+        quitSentAt = ProcessInfo.processInfo.systemUptime
         line("info", "page menu open (tracking=\(ContextMenus.tracking)), sending the Quit menu action")
         quitViaMenu()
     }

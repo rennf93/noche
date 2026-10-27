@@ -52,6 +52,9 @@ enum ContextMenus {
         if item == nil, env("NOCHE_TEST_CTX_NOCANCEL") { return }  // negative control: a dismissed menu is dropped without its completion
         p.finish()
     }
+    enum TestCancel { case now, late, never }
+    static var testCancel = TestCancel.now
+    private static var lateScheduled = false
     static func env(_ name: String) -> Bool { ProcessInfo.processInfo.environment[name] == "1" }
 #endif
 
@@ -62,7 +65,12 @@ enum ContextMenus {
     static func cancelOpen() {
 #if NOCHE_TESTHOOKS
         if env("NOCHE_TEST_QUIT_KEEPMENU") { return }  // negative control: the quit leaves the menu open
-        dismiss(choosing: nil)
+        switch testCancel {
+        case .now: dismiss(choosing: nil)
+        case .late:  // the tracking loop ends on a later turn, as AppKit's does after cancelTracking
+            if !lateScheduled { lateScheduled = true; DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { dismiss(choosing: nil) } }
+        case .never: break  // a menu that does not end
+        }
 #else
         tracked?.cancelTracking()
 #endif

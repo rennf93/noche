@@ -42,6 +42,7 @@ final class SelfTest {
     var lastExtensionReply = ""
     var tabsAtQuit = 0
     var menuOpenedAtQuit = false
+    var quitSentAt: TimeInterval = 0
     var permissionRequests: [(mask: NCPermissionMask, origin: String, topOrigin: String, id: UInt64)] = []
     /// The MIDI sysex check may Allow a request whose mask is Other only; every other Allow of a test run is a violation.
     var allowOther = false
@@ -82,11 +83,24 @@ final class SelfTest {
             line(ok ? "pass" : "fail", "2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
-        if check == "quit-with-context-menu", !verdictPrinted {
-            // Before NCEngine.shutdown: no menu tracking may be running (a shutdown inside it runs inside a Chromium task and aborts).
-            let ok = menuOpenedAtQuit && !ContextMenus.tracking && !watchdogFired && violations.isEmpty && zombies.isEmpty
-            line(ok ? "pass" : "fail", "a page context menu open, quit menu action, no menu tracking when the engine shutdown starts (opened=\(menuOpenedAtQuit) tracking=\(ContextMenus.tracking) watchdog=\(watchdogFired) \(violations) \(zombies))")
-            if !ok { app.exitCodeOverride = 1 }
+        if check.hasPrefix("quit-menu-") || check == "quit-with-context-menu", !verdictPrinted {
+            // Before NCEngine.shutdown. A shutdown inside menu tracking runs inside a Chromium task and aborts. The waits and the stderr note come from the app's own counters.
+            let waited = ProcessInfo.processInfo.systemUptime - quitSentAt
+            let expired = app.shutdownNotes.contains { $0.hasPrefix("NOCHE shutdown: a menu was still open") }
+            let ok: Bool, what: String
+            switch check {
+            case "quit-menu-late":  // the menu ends 300 ms after the cancel: the shutdown waits for it
+                ok = !ContextMenus.tracking && app.menuWaits >= 1 && waited >= 0.25 && !expired
+                what = "the menu ends 300 ms after the quit cancels it, the shutdown waits (waits>=1) and starts with no menu tracking"
+            case "quit-menu-stuck":  // the menu never ends: the bound expires with one stderr line and the quit still completes
+                ok = ContextMenus.tracking && app.menuWaits >= 1 && expired && waited >= 2.5 && waited < 12
+                what = "a menu that never ends: the wait expires after about 3 s with one NOCHE shutdown line on stderr and the quit completes"
+            default:
+                ok = !ContextMenus.tracking
+                what = "a page context menu open, quit menu action, no menu tracking when the engine shutdown starts"
+            }
+            line(ok && menuOpenedAtQuit && !watchdogFired && violations.isEmpty && zombies.isEmpty ? "pass" : "fail", "\(what) (opened=\(menuOpenedAtQuit) tracking=\(ContextMenus.tracking) waits=\(app.menuWaits) waited=\(String(format: "%.2f", waited)) s notes=\(app.shutdownNotes.count) watchdog=\(watchdogFired) \(violations) \(zombies))")
+            if !(ok && menuOpenedAtQuit && !watchdogFired && violations.isEmpty && zombies.isEmpty) { app.exitCodeOverride = 1 }
         }
         if check == "quit-100", !verdictPrinted {
             let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
@@ -125,7 +139,7 @@ final class SelfTest {
             case "close-last": await closeLast()
             case "quit-many": await quitMany()
             case "quit-early": await quitEarly()
-            case "quit-with-context-menu": await quitWithContextMenu()
+            case "quit-with-context-menu", "quit-menu-late", "quit-menu-stuck": await quitWithContextMenu()
             case "quit-100": await quit100()
             case "web-insets": await webInsets()
             case "layout": await layout()
