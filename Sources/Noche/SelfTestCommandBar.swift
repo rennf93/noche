@@ -276,6 +276,7 @@ extension SelfTest {
         press(.escape)
         guard await until(5, { !barOpen() && inPage() }) else { return finish(false, "Escape on the untouched address '\(prefilled)': text '\(barText)' open \(barOpen()) in page \(inPage())") }
         seed("http://wx-1.test/page", "Weather 1")
+        try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the Escape above) runs before the bar opens again
         guard await openBar() else { return finish(false, "no bar") }
         barType("wx")
         guard await until(2, { !rowValues.isEmpty }) else { return finish(false, "no rows for wx") }
@@ -371,6 +372,7 @@ extension SelfTest {
         // Case as typed stays; a title-only match and a space never complete.
         press(.escape)
         barType("Weather")
+        _ = await until(2, { barText == "Weather" + rem })  // the completion lands with the ranking, off the main thread
         guard barText == "Weather" + rem else { return finish(false, "case: \(state()), want 'Weather' + the lowercase remainder") }
         // A delete that changes nothing (empty field) must not leave "just deleted" armed for the next character.
         press(.escape)
@@ -379,9 +381,11 @@ extension SelfTest {
         guard await until(2, { barText == full }) else { return finish(false, "after a Backspace on an empty field the next character did not complete: \(state())") }
         press(.escape)
         barType("weather forecast")
+        _ = await until(2, { bar?.state.rows.contains { $0.kind == .query && $0.title == "weather forecast" } == true })  // the ranking has landed, so "never completes" is not vacuous
         guard barText == "weather forecast" else { return finish(false, "a space completed: \(state())") }
         press(.escape)
         barType("italy")
+        _ = await until(2, { bar?.state.rows.contains { $0.kind == .query && $0.title == "italy" } == true })
         guard barText == "italy" else { return finish(false, "a title-only match completed: \(state())") }
         // A typed scheme finds the page and completes to the whole address, scheme included.
         press(.escape)

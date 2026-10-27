@@ -35,7 +35,7 @@ final class StoreTests: XCTestCase {
         try store.db.read { db in
             let tables = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'"))
             for t in ["profile", "space", "window", "tabGroup", "tab", "setting", "grdb_migrations"] { XCTAssertTrue(tables.contains(t), t) }
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1", "v2", "v3", "v4"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"])
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM profile"), 1)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM space"), 1)
         }
@@ -442,7 +442,7 @@ final class StoreTests: XCTestCase {
         }
         try pool.close()
         let store = try Store.open(at: file)
-        try store.db.read { XCTAssertEqual(try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4"]) }
+        try store.db.read { XCTAssertEqual(try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"]) }
         let w = try XCTUnwrap(store.loadWindows().first)
         XCTAssertEqual(w.id, win)
         XCTAssertEqual(w.tabs.map(\.url), ["https://e0.com", "https://e1.com", "https://e2.com"])

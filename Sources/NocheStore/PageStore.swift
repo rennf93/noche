@@ -31,15 +31,16 @@ extension Store {
             if let id = pageId {
                 try db.execute(sql: """
                     UPDATE page SET visitCount = visitCount + 1, typedCount = typedCount + ?, lastVisitAt = ?,
-                      title = CASE WHEN ? = '' THEN title ELSE ? END, updatedAt = ? WHERE id = ?
-                    """, arguments: [typed ? 1 : 0, t, title, title, n, id])
+                      title = CASE WHEN ? = '' THEN title ELSE ? END,
+                      titleFolded = CASE WHEN ? = '' THEN titleFolded ELSE ? END, updatedAt = ? WHERE id = ?
+                    """, arguments: [typed ? 1 : 0, t, title, title, title.lowercased(), title.lowercased(), n, id])
             } else {
                 let id = UUID().uuidString
                 pageId = id
                 try db.execute(sql: """
-                    INSERT INTO page (id, profileId, url, host, title, visitCount, typedCount, lastVisitAt, createdAt, updatedAt)
-                    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-                    """, arguments: [id, pid, url, host, title, typed ? 1 : 0, t, n, n])
+                    INSERT INTO page (id, profileId, url, host, title, titleFolded, visitCount, typedCount, lastVisitAt, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                    """, arguments: [id, pid, url, host, title, title.lowercased(), typed ? 1 : 0, t, n, n])
             }
             try db.execute(sql: "INSERT INTO visit (id, pageId, visitedAt, transition, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
                            arguments: [UUID().uuidString, pageId, t, typed ? "typed" : "link", n, n])
@@ -50,8 +51,8 @@ extension Store {
     public func updateTitle(url: String, title: String) throws {
         let n = now().timeIntervalSince1970
         try db.write {
-            try $0.execute(sql: "UPDATE page SET title = ?, updatedAt = ? WHERE profileId = ? AND url = ? AND deletedAt IS NULL",
-                           arguments: [title, n, Schema.defaultProfileID, url])
+            try $0.execute(sql: "UPDATE page SET title = ?, titleFolded = ?, updatedAt = ? WHERE profileId = ? AND url = ? AND deletedAt IS NULL",
+                           arguments: [title, title.lowercased(), n, Schema.defaultProfileID, url])
         }
     }
 
@@ -71,8 +72,8 @@ extension Store {
                     profileId = :pid AND (host LIKE :q || '%' ESCAPE '\\' OR url LIKE 'http://' || :q || '%' ESCAPE '\\'
                      OR url LIKE 'https://' || :q || '%' ESCAPE '\\' OR url LIKE 'https://www.' || :q || '%' ESCAPE '\\'
                      OR url LIKE 'http://www.' || :q || '%' ESCAPE '\\'
-                     OR swiftLowercaseString(title) LIKE '% ' || :tq || '%' ESCAPE '\\'
-                     OR swiftLowercaseString(title) LIKE :tq || '%' ESCAPE '\\')
+                     OR titleFolded LIKE '% ' || :tq || '%' ESCAPE '\\'
+                     OR titleFolded LIKE :tq || '%' ESCAPE '\\')
                     """, arguments: ["q": q, "tq": tq, "pid": Schema.defaultProfileID])
                 .order(Column("lastVisitAt").desc, Column("rowid").desc)
                 .limit(limit)

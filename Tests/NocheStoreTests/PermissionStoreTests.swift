@@ -17,7 +17,7 @@ final class PermissionStoreTests: XCTestCase {
         try pool.close()
         let store = try Store.open(at: file)
         try store.db.read { db in
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"])
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM page"), 1)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM sitePermission"), 0)
             XCTAssertEqual(try String.fetchAll(db, sql: "SELECT title FROM bookmark WHERE profileId = ? AND parentId IS NULL ORDER BY position",

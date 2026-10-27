@@ -22,7 +22,12 @@ extension AppDelegate {
         controllers.forEach { $0.bookmarksBarModeChanged() }
     }
 
+    func reloadBookmarkCandidates() {
+        bookmarkCandidates = ((try? writer?.store.urlBookmarks()) ?? nil)?.map { BookmarkCandidate(url: $0.url ?? "", title: $0.title, addedAt: $0.createdAt) } ?? []
+    }
+
     func bookmarksChanged() {
+        if !(BarHook.on("BM_STALECACHE") && !bookmarkCandidates.isEmpty) { reloadBookmarkCandidates() }  // negative control: a list that has entries is never rebuilt
         controllers.forEach { $0.refreshBookmarks() }
         madeBookmarksWindow?.changed()
     }

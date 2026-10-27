@@ -16,7 +16,7 @@ final class PageStoreTests: XCTestCase {
         let store = try Store.open(at: file)
         XCTAssertEqual(try store.setting("k"), "v")
         try store.db.read { db in
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"])
             XCTAssertNotNil(try Int.fetchOne(db, sql: "SELECT count(*) FROM page"))
         }
     }
@@ -113,6 +113,25 @@ final class PageStoreTests: XCTestCase {
         for q in ["прив", "ПРИВ", "мир"] { XCTAssertEqual(try s.pageCandidates(prefix: q).map(\.url), ["https://b.com/"], q) }
     }
 
+    func testTitleFoldedIsBackfilledAndFollowsTitleWrites() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("v4-\(UUID().uuidString).sqlite")
+        defer { for s in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + s) } }
+        let pool = try DatabasePool(path: file.path, configuration: { var c = Configuration(); c.prepareDatabase { $0.add(function: .lowercase) }; return c }())
+        try Schema.migrator.migrate(pool, upTo: "v4")
+        try pool.write { db in
+            try db.execute(sql: "INSERT INTO profile (id, name, chromiumDirName, isDefault, createdAt, updatedAt) VALUES (?, 'Default', 'Default', 1, 1, 1)", arguments: [Schema.defaultProfileID])
+            try db.execute(sql: "INSERT INTO page (id, profileId, url, host, title, visitCount, lastVisitAt, createdAt, updatedAt) VALUES ('p', ?, 'https://a.com/', 'a.com', 'ÉLAN Vital', 1, 1, 1, 1)", arguments: [Schema.defaultProfileID])
+        }
+        try pool.close()
+        let s = try Store.open(at: file)
+        XCTAssertEqual(try s.pageCandidates(prefix: "vit").map(\.url), ["https://a.com/"])
+        try s.updateTitle(url: "https://a.com/", title: "ПРИВЕТ Мир")
+        XCTAssertTrue(try s.pageCandidates(prefix: "vit").isEmpty)
+        XCTAssertEqual(try s.pageCandidates(prefix: "мир").count, 1)
+        try s.recordVisit(url: "https://a.com/", title: "", typed: false, at: at(5))
+        XCTAssertEqual(try s.pageCandidates(prefix: "мир").count, 1)  // an empty title keeps both columns
+    }
+
     func testHostCandidatesGroupPerHost() throws {
         let s = try Store.inMemory()
         try s.recordVisit(url: "https://a.com/1", title: "One", typed: true, at: at(1))
@@ -125,5 +144,35 @@ final class PageStoreTests: XCTestCase {
         XCTAssertEqual(h[0].visitCount, 3)
         XCTAssertEqual(h[0].typedCount, 1)
         XCTAssertEqual(h[0].lastVisitAt, at(4))
+    }
+}
+
+final class PageCandidatesBudgetTests: XCTestCase {
+    /// 200,000 live pages in a temporary database (never the owner's profile): a typed prefix is one read, newest 50 of the matches.
+    func testPageCandidatesOver200kPagesStayInBudget() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("pages-\(UUID().uuidString).sqlite")
+        defer { for s in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: file.path + s) } }
+        let store = try Store.open(at: file)
+        let words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima"]
+        try store.db.write { db in
+            let st = try db.makeStatement(sql: """
+                INSERT INTO page (id, profileId, url, host, title, titleFolded, visitCount, typedCount, lastVisitAt, createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, 1, 1)
+                """)
+            for i in 0..<200_000 {
+                let title = "Élan \(words[i % 12]) \(words[(i / 12) % 12]) \(i)"
+                try st.execute(arguments: ["id\(i)", Schema.defaultProfileID, "https://site\(i % 5000).example.com/p/\(i)", "site\(i % 5000).example.com",
+                                           title, title.lowercased(), Double(i)])
+            }
+        }
+        // Before the folded column: 0.58 s for a miss (a Swift closure per row), 0.0005 to 0.002 s for a common prefix. After: 0.097 s for a miss. Budget: about 3x that.
+        var worst = 0.0
+        for (q, want) in [("zq", 0), ("19999", 11), ("golf", 50), ("site42", 50), ("élan", 50)] {  // no match (full scan), rare title word, title word, host prefix, many matches
+            let t0 = Date()
+            let rows = try store.pageCandidates(prefix: q)
+            worst = max(worst, Date().timeIntervalSince(t0))
+            XCTAssertEqual(rows.count, want, q)
+        }
+        XCTAssertLessThan(worst, 0.3)
     }
 }

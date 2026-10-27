@@ -94,6 +94,11 @@ enum Schema {
             let ids = try String.fetchAll(db, sql: "SELECT id FROM profile WHERE deletedAt IS NULL ORDER BY createdAt, rowid")
             for (i, id) in ids.enumerated() { try db.execute(sql: "UPDATE profile SET position = ? WHERE id = ?", arguments: [i, id]) }
         }
+        // The command bar's title test is a plain LIKE on a column folded the way typed text is (Swift lowercased()), not a Swift closure per row.
+        m.registerMigration("v5-page-title-folded") { db in
+            try db.execute(sql: "ALTER TABLE page ADD COLUMN titleFolded TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "UPDATE page SET titleFolded = swiftLowercaseString(title)")
+        }
         return m
     }
 

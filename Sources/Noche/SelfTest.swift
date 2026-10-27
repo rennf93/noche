@@ -174,6 +174,7 @@ final class SelfTest {
             case "bm-open": await bmOpen()
             case "bm-manager": await bmManager()
             case "bm-suggest": await bmSuggest()
+            case "cb-readpath": await cbReadPath()
             case "bm-all-tabs": await bmAllTabs()
             case "cb-layout": await cbLayout()
             case "cb-open": await cbOpen()

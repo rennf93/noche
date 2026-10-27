@@ -16,20 +16,21 @@ public enum SuggestionRanker {
         func key(_ url: String) -> String { pageKey(url) }
         func isHttps(_ url: String) -> Bool { url.lowercased().hasPrefix("https://") }
         var httpsOf: [String: String] = [:]
-        for b in bookmarks where isHttps(b.url) && httpsOf[key(b.url)] == nil { httpsOf[key(b.url)] = b.url }
-        let marked = Set(bookmarks.map { key($0.url) })
-        var wasURL: [String: String] = [:]  // a page rewritten to its https address: the address an open tab may still be at
+        for b in bookmarks where b.isHttps && httpsOf[b.key] == nil { httpsOf[b.key] = b.url }
+        let marked = Set(bookmarks.map(\.key))
+        var wasURL: [String: [String]] = [:]  // a page rewritten to its https address: every address an open tab may still be at
         let pages = pages.map { p -> PageCandidate in
             guard !isHttps(p.url), let https = httpsOf[key(p.url)] else { return p }
-            wasURL[https] = p.url
+            wasURL[https, default: []].append(p.url)
             return PageCandidate(url: https, host: p.host, title: p.title, visitCount: p.visitCount, typedCount: p.typedCount, lastVisitAt: p.lastVisitAt)
         }
         let known = Set(pages.map { key($0.url) })
+        // Only a bookmark that matches the typed text becomes a page (the test is on the precomputed fields); one address once.
         var listedMarks = Set<String>()
-        let bookmarkPages = bookmarks.filter { !known.contains(key($0.url)) && listedMarks.insert(key($0.url)).inserted }.compactMap { b -> PageCandidate? in
-            guard var host = URLComponents(string: b.url)?.host?.lowercased(), !host.isEmpty else { return nil }
-            if host.hasPrefix("www.") { host.removeFirst(4) }
-            return PageCandidate(url: httpsOf[key(b.url)] ?? b.url, host: host, title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
+        let bookmarkPages = bookmarks.filter { b in
+            b.host != nil && !known.contains(b.key) && matches(tokens, display: b.display, host: b.host ?? "", words: b.titleWords) && listedMarks.insert(b.key).inserted
+        }.map { b in
+            PageCandidate(url: httpsOf[b.key] ?? b.url, host: b.host ?? "", title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
         }
         var seen = Set<String>()
         let matches = (pages + bookmarkPages)
@@ -46,9 +47,10 @@ public enum SuggestionRanker {
         let others = tabs.filter { $0.id != activeTabID && $0.url != "about:blank" }
         var tabByURL: [String: TabID] = [:]
         for t in others where tabByURL[t.url] == nil { tabByURL[t.url] = t.id }
-        func tabOf(_ url: String) -> TabID? { tabByURL[url] ?? wasURL[url].flatMap { tabByURL[$0] } }
-        let matchedURLs = Set(matches.flatMap { [$0.0.url] + [wasURL[$0.0.url]].compactMap { $0 } })
         let tabIndex = Dictionary(others.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // The row's own address first, else the first open tab (in tab order) at any address merged into it.
+        func tabOf(_ url: String) -> TabID? { tabByURL[url] ?? (wasURL[url] ?? []).compactMap { tabByURL[$0] }.min { (tabIndex[$0] ?? 0) < (tabIndex[$1] ?? 0) } }
+        let matchedURLs = Set(matches.flatMap { [$0.0.url] + (wasURL[$0.0.url] ?? []) })
         let tabRows = others.filter { !matchedURLs.contains($0.url)
             && pageMatches(tokens, display: urlDisplay($0.url).lowercased(), host: AddressInput.displayHost($0.url).lowercased(), title: $0.title) }
             .map { Suggestion(kind: .tab, title: "\($0.title) - \(AddressInput.displayHost($0.url))", url: $0.url, tabID: $0.id, frecency: 0) }
@@ -117,15 +119,14 @@ public enum SuggestionRanker {
         return Double(max(1, p.visitCount + p.typedCount)) * w
     }
 
-    private static func words(_ s: String) -> [String] {
-        s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
-    }
+    private static func words(_ s: String) -> [String] { suggestionWords(s) }
 
     private static func pageMatches(_ tokens: [String], display: String, host: String, title: String) -> Bool {
-        let titleWords = words(title)
-        return tokens.allSatisfy { t in
-            display.hasPrefix(t) || host.hasPrefix(t) || titleWords.contains { $0.hasPrefix(t) }
-        }
+        matches(tokens, display: display, host: host, words: words(title))
+    }
+
+    private static func matches(_ tokens: [String], display: String, host: String, words: [String]) -> Bool {
+        tokens.allSatisfy { t in display.hasPrefix(t) || host.hasPrefix(t) || words.contains { $0.hasPrefix(t) } }
     }
 
     private static func siteMatches(_ typed: String, _ s: SiteEntry) -> Bool {

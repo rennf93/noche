@@ -263,13 +263,76 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         if isOpen, placement == .overlay { close(restoreFocus: false) }
     }
 
-    private func rank(_ q: String) -> [Suggestion] {
-        let first = q.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? q
-        let pages = ((try? owner.app.writer?.store.pageCandidates(prefix: first, limit: 50)) ?? nil) ?? []
-        // Read from the store on every keystroke, never kept: a bookmark that was deleted is gone from the next row list.
-        let marks = ((try? owner.app.writer?.store.urlBookmarks()) ?? nil)?.map { BookmarkCandidate(url: $0.url ?? "", title: $0.title, addedAt: $0.createdAt) } ?? []
-        return SuggestionRanker.rank(query: q, pages: pages, tabs: owner.list.items, sites: Self.sites, remote: state.remote, activeTabID: owner.list.activeID,
-                                     bookmarks: BarHook.on("BM_NOSUGGEST") ? [] : marks)
+    /// What one ranking reads, copied on the main thread so the work can run anywhere. The bookmarks are the app's list (kept between changes, so a deleted one
+    /// is gone from the next keystroke); the pages are read from the store here, off the main thread when this runs in the background.
+    private struct RankJob: Sendable {
+        let q: String, store: Store?, tabs: [TabItem], sites: [SiteEntry], remote: [String], active: TabID?, marks: [BookmarkCandidate]
+        func run() -> [Suggestion] {
+            let first = q.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? q
+            let pages = ((try? store?.pageCandidates(prefix: first, limit: 50)) ?? nil) ?? []
+            return SuggestionRanker.rank(query: q, pages: pages, tabs: tabs, sites: sites, remote: remote, activeTabID: active, bookmarks: marks)
+        }
+    }
+
+    private func job(_ q: String) -> RankJob {
+        RankJob(q: q, store: owner.app.writer?.store, tabs: owner.list.items, sites: Self.sites, remote: state.remote, active: owner.list.activeID,
+                marks: BarHook.on("BM_NOSUGGEST") ? [] : owner.app.bookmarkCandidates)
+    }
+
+    /// A ranking waits here until its rows land; `settle()` runs it on the spot when the person acts before then.
+    private var pendingRank: (q: String, deleting: Bool?)?
+    private var generation = 0
+#if NOCHE_TESTHOOKS
+    /// Test only: seconds a ranking for this query is held back before it lands (a slow older result).
+    var rankDelay: ((String) -> TimeInterval)?
+#endif
+
+    /// Ranks off the main thread; only the newest ranking lands, an older one never replaces a newer one. `deleting` nil: no inline completion (remote rows arriving).
+    private func startRank(_ q: String, deleting: Bool?) {
+        generation += 1
+        let gen = generation
+        guard !q.isEmpty else { pendingRank = nil; return land([], deleting: deleting) }
+        pendingRank = (q, deleting)
+        let job = job(q)
+        var delay = 0.0
+#if NOCHE_TESTHOOKS
+        delay = rankDelay?(q) ?? 0
+#endif
+        let typed = state.typed
+        Task.detached(priority: .userInitiated) { [weak self, delay] in
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            let rows = job.run()
+            await MainActor.run {
+                // negative control: RANK_STALE lets any result land
+                guard let self, BarHook.on("RANK_STALE") || (gen == self.generation && self.isOpen && self.state.typed == typed) else { return }
+                self.pendingRank = nil
+                self.land(rows, deleting: deleting)
+            }
+        }
+    }
+
+    /// Return, the arrows and Tab act on the rows of the text in the field, not on the ones before the last keystroke.
+    private func settle() {
+        guard let p = pendingRank else { return }
+        generation += 1
+        pendingRank = nil
+        guard p.q == state.typed.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        land(job(p.q).run(), deleting: p.deleting)
+    }
+
+    private func land(_ rows: [Suggestion], deleting: Bool?) {
+        state.rows = rows
+        if let deleting {
+            state.selected = 0
+            inline = nil
+            // Text still being composed (IME) is never rewritten: setText would end the composition (negative control: BAR_IME ignores it).
+            let composing = (view.field.currentEditor() as? NSTextView)?.hasMarkedText() == true && !BarHook.on("BAR_IME")
+            if !composing, let c = InlineAutocomplete.completion(typed: state.typed, topHit: state.rows.first, justDeleted: BarHook.on("BAR_INLINE") ? false : deleting) {
+                inline = c
+                setText(c.text, selection: c.selectedRange)
+            }
+        }
+        render()
     }
 
     private func refresh(deleting: Bool) {
@@ -277,15 +340,10 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         let typed = state.typed
         let q = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         state.remote = state.remote.filter { $0.lowercased().hasPrefix(q.lowercased()) }
-        state.rows = q.isEmpty ? [] : rank(q)
         state.selected = 0
         inline = nil
-        // Text still being composed (IME) is never rewritten: setText would end the composition (negative control: BAR_IME ignores it).
-        let composing = (view.field.currentEditor() as? NSTextView)?.hasMarkedText() == true && !BarHook.on("BAR_IME")
-        if !composing, let c = InlineAutocomplete.completion(typed: typed, topHit: state.rows.first, justDeleted: BarHook.on("BAR_INLINE") ? false : deleting) {
-            inline = c
-            setText(c.text, selection: c.selectedRange)
-        }
+        startRank(q, deleting: deleting)
+        // The typed character is drawn now; rows follow when the ranking lands (the earlier rows stay until then).
         render()
         let enabled = ((try? owner.app.writer?.store.setting("suggestRemote")) ?? nil) == "1"
         remote.request(typed, searchTemplate: owner.app.searchTemplate, enabled: enabled || BarHook.on("REMOTE_IGNORE_OFF")) { [weak self] rows in self?.remoteArrived(rows, for: typed) }
@@ -295,8 +353,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     private func remoteArrived(_ rows: [String], for typed: String) {
         guard isOpen, state.typed == typed, state.selected == 0 else { return }
         state.remote = rows
-        state.rows = rank(typed.trimmingCharacters(in: .whitespacesAndNewlines))
-        render()
+        startRank(typed.trimmingCharacters(in: .whitespacesAndNewlines), deleting: pendingRank?.deleting)  // a keystroke's ranking still waiting keeps its inline completion
     }
 
     // MARK: keys (they arrive as commands from the field editor)
@@ -364,6 +421,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     }
 
     private func move(_ delta: Int) {
+        settle()
         guard !state.rows.isEmpty else { return }
         let i = min(max(state.selected + delta, 0), state.rows.count - 1)
         if i != state.selected { select(i) }
@@ -371,6 +429,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     /// Tab accepts the inline remainder (caret to the end); without one it acts like Down.
     private func tab() {
+        settle()
         guard let inline, state.selected == 0 else { return move(1) }
         state.typed = inline.text
         setText(inline.text)
@@ -384,6 +443,8 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
             refresh(deleting: true)
             focusField()
         } else if i < state.rows.count {
+            generation += 1  // the row clicked is the one on screen: no ranking lands over it
+            pendingRank = nil
             state.selected = i
             commit(newTab: false)
         }
@@ -392,6 +453,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     // MARK: running a row
 
     func commit(newTab: Bool) {
+        settle()
         if state.rows.isEmpty, state.typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if placement == .overlay { close() } else { unfocusCard() }
             return

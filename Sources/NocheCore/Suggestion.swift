@@ -37,16 +37,33 @@ public struct PageCandidate: Equatable, Sendable {
     }
 }
 
-/// A stored bookmark that can be suggested (an address, its title and when it was added).
+/// A stored bookmark that can be suggested (an address, its title and when it was added). What the ranker tests on each keystroke is worked out once here,
+/// so the app keeps these between bookmark changes: the page key, the lowercased display address and host, the title's words, and whether the address is https.
 public struct BookmarkCandidate: Equatable, Sendable {
     public let url: String
     public let title: String
     public let addedAt: Date
+    let key: String
+    let display: String
+    let host: String?
+    let titleWords: [String]
+    let isHttps: Bool
     public init(url: String, title: String, addedAt: Date) {
         self.url = url
         self.title = title
         self.addedAt = addedAt
+        key = pageKey(url)
+        display = urlDisplay(url).lowercased()
+        isHttps = url.lowercased().hasPrefix("https://")
+        titleWords = suggestionWords(title)
+        var h = URLComponents(string: url)?.host?.lowercased()
+        if h?.hasPrefix("www.") == true { h?.removeFirst(4) }
+        host = h?.isEmpty == false ? h : nil
     }
+}
+
+func suggestionWords(_ s: String) -> [String] {
+    s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
 }
 
 /// A built-in site list row.

@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// View > Show Bookmarks Bar (stored in the `setting` table as `bookmarksBar`, loaded when the store opens).
     var barMode = BookmarksBarMode.newTabOnly
     var writer: StoreWriter?
+    /// Every url bookmark as the command bar ranks it, newest first; read from the store at open and again in `bookmarksChanged()`, never per keystroke.
+    var bookmarkCandidates: [BookmarkCandidate] = []
     private(set) var restored: [WindowSnapshot] = []
     private(set) var storeURL: URL?
     private(set) var storeFallback: String?
@@ -153,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         w.windowIDs = { [weak self] in self?.controllers.map(\.id) ?? [] }
         writer = w
+        reloadBookmarkCandidates()
         downloads.store = store
         restored = (try? store.loadWindows()) ?? []
     }

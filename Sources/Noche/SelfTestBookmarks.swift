@@ -282,6 +282,7 @@ extension SelfTest {
 
     /// Whether the command bar lists a page row for |suffix| when |text| is typed (the bar reads the store on each keystroke).
     func barHasPage(_ text: String, ending suffix: String) async -> Bool {
+        try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the last Escape) runs before the bar opens again
         guard await openBar() else { return false }
         barType(text)
         _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
@@ -458,6 +459,7 @@ extension SelfTest {
         guard await ready(), let ctl else { return }
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         func zebra() async -> Bool {
+            try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the Escape of the last call) runs before the bar opens again
             guard await openBar() else { return false }
             barType("zebra")
             let got = await until(3, { bar?.state.rows.contains { $0.kind == .page && ($0.url ?? "").hasSuffix("/zebra-never-visited.html") } == true })
@@ -475,6 +477,7 @@ extension SelfTest {
         seed("http://one.example/note", "Note One", ago: 3600)
         seed("http://two.example/note", "Note Two", ago: 60)
         func noteRows() async -> [String]? {
+            try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task runs before the bar opens again
             guard await openBar() else { return nil }
             barType("note")
             _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
@@ -492,6 +495,38 @@ extension SelfTest {
         guard marked?.filter({ $0.contains("one.example") }).count == 1 else { return finish(false, "a page both bookmarked and visited gave \(marked?.filter { $0.contains("one.example") } ?? []), want one row") }
         _ = ctl
         finish(violations.isEmpty, "a bookmarked page that was never visited is a command bar row, a deleted bookmark is gone at the next keystroke, a bookmarked page outranks an equal one \(violations)")
+    }
+
+    /// The command bar's read path: the bookmark list is the app's, rebuilt on a change (a bookmark deleted in the manager is gone from the next keystroke's rows),
+    /// and rankings run off the main thread where an older keystroke's result never lands over a newer one.
+    func cbReadPath() async {
+        guard await ready(), let ctl else { return }
+        guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
+        func zebraRow() -> Bool { bar?.state.rows.contains { $0.kind == .page && ($0.url ?? "").hasSuffix("/zebra-never-visited.html") } == true }
+        func queryRow() -> String? { bar?.state.rows.first { $0.kind == .query }?.title }
+        func closeBar() async { press(.escape); press(.escape); _ = await until(2, { !barOpen() }); _ = await until(3, { inPage() }); try? await Task.sleep(for: .milliseconds(500)) }  // the engine's own focus task runs before the bar opens again, or it takes the keys back from it
+        guard let b = addMark("Zebra Notes", fixture("zebra-never-visited.html")) else { return finish(false, "no bookmark added") }
+        guard await openBar() else { return finish(false, "no bar") }
+        barType("zebr")
+        guard await until(3, { zebraRow() }) else { return finish(false, "the bookmark is not a row for zebr (\(rowValues))") }
+        // Deleted while the bar is open (the manager's Delete is `deleteBookmark`): the very next keystroke has no row for it.
+        app.deleteBookmark(b.id)
+        barType("a")
+        guard await until(3, { queryRow() == "zebra" }) else { return finish(false, "the rows for zebra never arrived (\(rowValues))") }
+        guard !zebraRow() else { return finish(false, "a bookmark deleted in the manager is still a row at the next keystroke (\(rowValues))") }
+        await closeBar()
+        // An older keystroke's slow ranking lands after a newer one's: the newer rows stay.
+        bar?.rankDelay = { $0 == "ze" ? 1.0 : 0 }
+        guard await openBar() else { return finish(false, "no bar the second time") }
+        barType("zeb")
+        guard await until(3, { queryRow() == "zeb" }) else { return finish(false, "the rows for zeb never arrived (\(rowValues))") }
+        try? await Task.sleep(for: .milliseconds(1500))
+        let after = queryRow()
+        bar?.rankDelay = nil
+        guard after == "zeb" else { return finish(false, "an older keystroke's result replaced the newer one: the rows are for \(after ?? "nothing") while the field has \(barText)") }
+        await closeBar()
+        _ = ctl
+        finish(violations.isEmpty, "a bookmark deleted while the bar is open is gone from the next keystroke's rows, and the slow result of the older keystroke ze never replaced the rows of zeb \(violations)")
     }
 
     /// Bookmark All Tabs (tab list menu): the card in folder mode with "New Folder" selected under Bookmarks Bar; Cancel saves nothing; Save adds the folder with one bookmark per tab, in order.

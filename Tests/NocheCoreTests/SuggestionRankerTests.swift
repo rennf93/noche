@@ -244,6 +244,16 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(pageKey("x.com/?u=http://y.com/"), "x.com/?u=http://y.com")
     }
 
+    /// Every http variant merged into an https row counts: a tab at any of them joins the row, none stays a separate tab row (the earliest tab carries it).
+    func testEveryOpenTabOfAMergedRowJoinsIt() {
+        let first = tab("http://www.x.com/a", "X page"), second = tab("http://x.com/a", "X page")
+        let rows = SuggestionRanker.rank(query: "x", pages: [page("http://x.com/a", host: "x.com", title: "X page", visits: 3), page("http://www.x.com/a", host: "x.com", title: "X page", visits: 2)],
+                                         tabs: [first, second], sites: [], remote: [], activeTabID: nil, now: now,
+                                         bookmarks: [BookmarkCandidate(url: "https://x.com/a", title: "X page", addedAt: now)])
+        XCTAssertFalse(rows.contains { $0.kind == .tab }, "\(rows)")
+        XCTAssertEqual(rows.filter { $0.tabID != nil }.compactMap(\.tabID), [first.id])  // the earliest tab of the merged addresses carries the row
+    }
+
     func testBookmarkedPageGainsDoubleFrecency() {
         let a = page("https://a.example/x", host: "a.example", title: "Note one", visits: 3)
         let b = page("https://b.example/x", host: "b.example", title: "Note two", visits: 4)
@@ -260,5 +270,22 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(urlDisplay("https://www.example.com/"), "example.com")
         XCTAssertEqual(urlDisplay("http://a.com/p?q=1"), "a.com/p?q=1")
         XCTAssertEqual(urlDisplay("about:blank"), "about:blank")
+    }
+
+    /// 5,000 bookmarks and 50 history pages (what the store returns) per keystroke. Debug build, worst query of five: 0.217 s before the precomputed fields, 0.095 s after. Budget about 3x that.
+    func testRankWith5000BookmarksStaysInBudget() {
+        let marks = (0..<5000).map { i in
+            BookmarkCandidate(url: "\(i % 2 == 0 ? "https" : "http")://www.site\(i % 700).example.com/p/\(i)?q=\(i)", title: "Bookmark number \(i) about topic\(i % 90)",
+                              addedAt: now.addingTimeInterval(Double(-i)))
+        }
+        let pages = (0..<50).map { page("https://site\($0).example.com/p/\($0)", host: "site\($0).example.com", title: "Page \($0)", visits: 2, ageDays: Double($0)) }
+        var worst = 0.0
+        for q in ["z", "site4", "topic7", "bookmark", "bookmark number 49"] {
+            let t0 = Date()
+            let rows = SuggestionRanker.rank(query: q, pages: pages, tabs: [], sites: [], remote: [], activeTabID: nil, now: now, bookmarks: marks)
+            worst = max(worst, Date().timeIntervalSince(t0))
+            XCTAssertFalse(rows.isEmpty)
+        }
+        XCTAssertLessThan(worst, 0.3)
     }
 }
