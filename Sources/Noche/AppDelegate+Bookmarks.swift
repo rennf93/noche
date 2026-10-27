@@ -28,6 +28,7 @@ extension AppDelegate {
     }
 
     func bookmarksChanged() {
+        bookmarksRevision += 1
         if !(BarHook.on("BM_STALECACHE") && !bookmarkCandidates.isEmpty) { reloadBookmarkCandidates() }  // negative control: a list that has entries is never rebuilt
         controllers.forEach { $0.refreshBookmarks() }
         madeBookmarksWindow?.changed()

@@ -40,8 +40,8 @@ extension SelfTest {
 
     // MARK: cb-reopen-late
 
-    /// The engine's hand-back to the page lands 1 s after Escape (past the 0.75 s guard): a bar opened right after the close keeps the keys, because the engine's
-    /// focus request is refused at the source (OnSetFocus) while the bar is open.
+    /// The engine's hand-back to the page lands 1 s after Escape (past the 0.75 s guard): a bar opened right after the close keeps the keys. What holds them
+    /// is the guard (it waits for the engine's report that the page got the keys); the OnSetFocus refusal of the late system SetFocus is a counted extra.
     func cbReopenLate() async {
         guard await ready(), let ctl else { return }
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }

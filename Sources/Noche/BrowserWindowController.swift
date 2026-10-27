@@ -46,6 +46,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// The address of the page the card was opened on: its Remove deletes every bookmark of that page (`AppDelegate.bookmarks(ofPage:)`).
     var bookmarkEditorPage = ""
     /// What the card's Remove took, one undo action per Remove (every copy of the page comes back together).
+    /// The tree revision right after that Remove: any other change since expires the entry (`bookmarkUndoValid`).
+    var bookmarkUndoRevision = -1
     let bookmarkUndo: UndoManager = { let m = UndoManager(); m.groupsByEvent = false; return m }()
     /// Site permission requests the engine waits for, oldest first; the card shows the first one of the active tab.
     var permissionQueue: [PermissionRequest] = []

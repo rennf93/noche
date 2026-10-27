@@ -183,6 +183,8 @@ final class SelfTest {
             case "window-front": await windowFront()
             case "bm-dupes": await bmDupes()
             case "bm-remove-undo": await bmRemoveUndo()
+            case "bm-undo-valid": await bmUndoValid()
+            case "cb-reopen-reqlate": await cbReopenReqLate()
             case "cb-reopen-late": await cbReopenLate()
             case "dl-file-stats": await dlFileStats()
             case "bm-menu-lazy": await bmMenuLazy()

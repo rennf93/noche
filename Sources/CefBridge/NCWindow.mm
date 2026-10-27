@@ -370,9 +370,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CGFloat _webCornerRadius;
   BOOL _webContentHidden;
   NSTimeInterval _lastFocusHandback;
-  BOOL _keysHeld, _handbackPending;
+  BOOL _keysHeld, _handbackPending, _requestIssued;
   NSTimeInterval _lastGotFocus;
-  NSInteger _focusSystem, _focusOther, _focusRefused;
+  NSInteger _focusSystem, _focusOther, _focusRefused, _requestCalls, _setFocusCalls;
   CAShapeLayer* _mask;
   // What the layout and the mask were last built from, so the same inputs build nothing (the sidebar motion sets insets every tick).
   CefInsets _layoutInsets;
@@ -392,6 +392,8 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (NSInteger)testFocusSystemRequests { return _focusSystem; }
 - (NSInteger)testFocusOtherRequests { return _focusOther; }
 - (NSInteger)testFocusRefused { return _focusRefused; }
+- (NSInteger)testRequestFocusCalls { return _requestCalls; }
+- (NSInteger)testSetFocusCalls { return _setFocusCalls; }
 #endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
@@ -656,6 +658,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 - (void)browserGotFocus {
+  // Only a report that follows the hand-back's own RequestFocus ends the wait: one that came earlier (another focus event, SetFocus's) says nothing about a
+  // request still to come.
+  if (!_requestIssued && !NC_TEST_FLAG("NOCHE_TEST_FOCUS_ANYREPORT")) return;  // the flag is a negative control: any report ends the wait
   _handbackPending = NO;
   _lastGotFocus = NSProcessInfo.processInfo.systemUptime;
 }
@@ -665,17 +670,32 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   _lastFocusHandback = NSProcessInfo.processInfo.systemUptime;
   if (!_view) return;
   _handbackPending = YES;
-  void (^engine)(void) = ^{
+  _requestIssued = NO;
+  void (^request)(void) = ^{
     if (!self->_view) return;
+    self->_requestIssued = YES;
+#ifdef NOCHE_TESTHOOKS
+    self->_requestCalls++;
+#endif
     self->_view->RequestFocus();
+  };
+  void (^setFocus)(void) = ^{
+    if (!self->_view) return;
+#ifdef NOCHE_TESTHOOKS
+    self->_setFocusCalls++;
+#endif
     if (CefRefPtr<CefBrowser> b = self->_view->GetActiveTab()) b->GetHost()->SetFocus(true);
   };
 #ifdef NOCHE_TESTHOOKS
-  // Test seam: the engine's side of the hand-back lands this many milliseconds late (its own turn on a loaded machine), so a bar opened meanwhile meets it late.
-  if (const int ms = NCTestInt("NOCHE_TEST_HANDBACK_DELAY_MS")) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)ms * NSEC_PER_MSEC), dispatch_get_main_queue(), engine);
-  else engine();
+  // Test seams: the engine's side of the hand-back lands this many milliseconds late (its own turn on a loaded machine), so a bar opened meanwhile meets it late.
+  // HANDBACK_DELAY_MS delays both calls; REQFOCUS_DELAY_MS delays only the Views RequestFocus while SetFocus lands at once.
+  auto later = ^(int ms, void (^blk)(void)) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)ms * NSEC_PER_MSEC), dispatch_get_main_queue(), blk); };
+  if (const int ms = NCTestInt("NOCHE_TEST_HANDBACK_DELAY_MS")) { later(ms, request); later(ms, setFocus); }
+  else if (const int ms = NCTestInt("NOCHE_TEST_REQFOCUS_DELAY_MS")) { later(ms, request); setFocus(); [self browserGotFocus]; }  // SetFocus reports at once (the engine's report, ahead of the late request)
+  else { request(); setFocus(); }
 #else
-  engine();
+  request();
+  setFocus();
 #endif
   // Views records the focus but leaves AppKit's first responder alone while the window is not key (hidden runs, a window
   // behind another): then the page's own responder takes it, as content would on a key window.

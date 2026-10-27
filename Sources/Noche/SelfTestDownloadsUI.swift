@@ -211,6 +211,8 @@ extension SelfTest {
             dc.silentRestoredCancel = silent
             dc.canceledAt[id] = nil  // only an update after this Cancel counts
             let giveUpsBefore = DownloadsController.giveUps, t0 = Date()
+            DownloadsController.cancelRequests = 0
+            DownloadsController.engineCancels = 0
             dc.windowController.rows[0].button("Cancel")?.performClick(nil)
             if silent {
                 // The engine never hears of it: the row stays paused through the grace and then the give-up takes it off the list.
@@ -227,7 +229,7 @@ extension SelfTest {
             }
             // The engine's canceled update arrives well before the grace, and nothing else ended the row.
             guard await until(DownloadsController.cancelGrace - 0.5, { dc.canceledAt[id] != nil }), let at = dc.canceledAt[id] else {
-                return finish(false, "the restored paused row has no way out: no canceled update from the engine within \(DownloadsController.cancelGrace - 0.5) s of Cancel (state \(item(id)?.state.rawValue ?? -1), rows \(rowNamesNow()))")
+                return finish(false, "the restored paused row has no way out: Cancel reached the controller \(DownloadsController.cancelRequests) times and the app asked the engine to cancel \(DownloadsController.engineCancels) times, and no canceled update came within \(DownloadsController.cancelGrace - 0.5) s of Cancel (state \(item(id)?.state.rawValue ?? -1), rows \(rowNamesNow()))")
             }
             guard at >= t0, at.timeIntervalSince(t0) < DownloadsController.cancelGrace else { return finish(false, "the canceled update came \(at.timeIntervalSince(t0)) s after Cancel") }
             guard await until(5, { folderFiles().filter { $0.hasSuffix(".crdownload") }.isEmpty }) else { return finish(false, "the engine canceled the item but the partial file is still on disk: \(folderFiles())") }

@@ -107,12 +107,18 @@ extension BrowserWindowController {
             var ids = [id]
             if !BarHook.on("BM_ONEDUP") { ids += ((try? app.bookmarks(ofPage: bookmarkEditorPage)) ?? []).map(\.id).filter { $0 != id } }
             let taken = ids.compactMap { app.deleteBookmark($0) }
+            bookmarkUndo.removeAllActions()  // one entry: a later Remove replaces the earlier one
             if !taken.isEmpty, !BarHook.on("BM_NOCARDUNDO") {  // negative control: nothing is registered
                 bookmarkUndo.beginUndoGrouping()
                 // Newest delete first: a copy deleted later was renumbered after the earlier ones, so putting them back in reverse gives every row its old position.
-                bookmarkUndo.registerUndo(withTarget: self) { c in for d in taken.reversed() { c.app.restoreBookmark(d) } }
+                bookmarkUndo.registerUndo(withTarget: self) { c in
+                    for d in taken.reversed() where !c.app.restoreBookmark(d) {
+                        FileHandle.standardError.write(Data("NOCHE bookmark undo restore failed for \(d.id)\n".utf8))
+                    }
+                }
                 bookmarkUndo.setActionName("Remove Bookmark")
                 bookmarkUndo.endUndoGrouping()
+                bookmarkUndoRevision = app.bookmarksRevision
             }
         case .folder: break
         }
@@ -120,8 +126,27 @@ extension BrowserWindowController {
         bookmarkEditorClosed()
     }
 
+    /// The card's undo is good only while the tree is as that Remove left it: any other change (an add, a delete, a move, a rename, a folder delete, an import)
+    /// expires it, so Undo never restores a bookmark beside a re-added copy or into a folder deleted since.
+    var bookmarkUndoValid: Bool {
+        bookmarkUndo.canUndo && (bookmarkUndoRevision == app.bookmarksRevision || BarHook.on("BM_UNDOSTALE"))  // negative control: the entry never expires
+    }
+
     /// Edit > Undo after the card's Remove puts back every bookmark it took, in their folders and positions (the same restore the Bookmarks window's Undo uses).
-    @objc func undo(_ sender: Any?) { bookmarkUndo.undo() }
+    @objc func undo(_ sender: Any?) {
+        guard bookmarkUndoValid else { bookmarkUndo.removeAllActions(); return }
+        bookmarkUndo.undo()
+    }
+    @objc func redo(_ sender: Any?) { bookmarkUndo.redo() }
+
+    /// Undo reads enabled only with a valid entry (the Bookmarks window's pattern); Redo only when the manager has one (it never does: the entry registers no redo).
+    @objc func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        switch item.action {
+        case NSSelectorFromString("undo:"): return bookmarkUndoValid
+        case NSSelectorFromString("redo:"): return bookmarkUndo.canRedo
+        default: return true
+        }
+    }
 
     /// Done, Remove, Cancel and Escape give the keys back to the page (the name field had them).
     private func bookmarkEditorClosed() {

@@ -18,6 +18,8 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     /// What Open and Show in Finder asked of NSWorkspace; a test build records the call and never makes it.
     static var workspaceLog: [(call: String, path: String)] = []
     var holdCancel = false
+    /// Cancel reached the controller, and the controller asked the engine to cancel (a check tells a Cancel that never got here from one the engine never heard).
+    static var cancelRequests = 0, engineCancels = 0
     /// Test: Cancel on a paused or interrupted row never reaches the engine, as with an engine whose cancel ignores a restored item (the fallback's seam).
     var silentRestoredCancel = false
     /// Test: give-ups that fired from a Cancel's grace, and when the engine's update last delivered each item canceled (a test clears an entry before its Cancel).
@@ -158,8 +160,9 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     static let cancelGrace = 2.0
     func cancel(_ item: NCDownloadItem) {
 #if NOCHE_TESTHOOKS
+        Self.cancelRequests += 1
         let silent = (silentRestoredCancel || BarHook.on("DL_SKIPENGINE")) && (item.state == .paused || item.state == .interrupted)
-        if !holdCancel && !silent { NCDownloads.shared.cancel(item.identifier) }  // a test holds the cancel (the engine has not landed it yet) or skips it for a restored row
+        if !holdCancel && !silent { Self.engineCancels += 1; NCDownloads.shared.cancel(item.identifier) }  // a test holds the cancel (the engine has not landed it yet) or skips it for a restored row
 #else
         NCDownloads.shared.cancel(item.identifier)
 #endif

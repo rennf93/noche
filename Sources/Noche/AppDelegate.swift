@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var writer: StoreWriter?
     /// Every url bookmark as the command bar ranks it, newest first; read from the store at open and again in `bookmarksChanged()`, never per keystroke.
     var bookmarkCandidates: [BookmarkCandidate] = []
+    /// Counts every change of the bookmark tree (each writer ends in `bookmarksChanged`): what an undo entry was made against.
+    var bookmarksRevision = 0
     private(set) var restored: [WindowSnapshot] = []
     private(set) var storeURL: URL?
     private(set) var storeFallback: String?

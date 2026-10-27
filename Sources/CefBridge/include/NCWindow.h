@@ -155,6 +155,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger testAmbiguousFocusLogs;
 /// Test support: the engine's OnSetFocus calls by source (system, other) and how many were refused.
 @property(nonatomic, readonly) NSInteger testFocusSystemRequests, testFocusOtherRequests, testFocusRefused;
+/// Test support: how many times the hand-back actually called the engine's Views RequestFocus and the host's SetFocus.
+@property(nonatomic, readonly) NSInteger testRequestFocusCalls, testSetFocusCalls;
 #endif
 @end
 
