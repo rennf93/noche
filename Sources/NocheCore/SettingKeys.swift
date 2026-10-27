@@ -35,6 +35,8 @@ public enum SettingKeys {
         SettingKey(name: "quitBehavior", type: .choice(["preserve", "close"]), defaultValue: "preserve"),
         SettingKey(name: "suggestRemote", type: .bool, defaultValue: "0"),
         SettingKey(name: BookmarksBarMode.settingKey, type: .choice(BookmarksBarMode.allCases.map(\.rawValue)), defaultValue: BookmarksBarMode.newTabOnly.rawValue),
+        // Minutes a background tab may sit unused before the app discards its page (B: README builder calls).
+        SettingKey(name: "discardAfterMinutes", type: .int(1...525_600), defaultValue: "120"),
     ]
 
     public static func key(_ name: String) -> SettingKey? { all.first { $0.name == name } }

@@ -167,6 +167,8 @@ final class SelfTest {
             case "pin-launch-held": await pinLaunch(held: true)
             case "reopen-container": await reopenContainer()
             case "pin-reveal": await pinReveal()
+            case "discard-click": await discardClick()
+            case "discard-policy": await discardPolicy()
             case "min-width": await minWidth()
             case "min-width-relaunch": await minWidthRelaunch()
             case "shortcuts-once": await shortcutsOnce()

@@ -123,10 +123,15 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var cardX = ChromeStyle.sidebarWidth
     var animation: (start: TimeInterval, from: CGFloat, to: CGFloat, duration: TimeInterval, overshoot: Bool)?
     var animationTimer: Timer?
+    /// When each tab last stopped being the active one: a tab used for hours is idle from when it was left, not from when it was selected.
+    var leftAt: [TabID: Date] = [:]
+    var discardTimer: Timer?
 #if NOCHE_TESTHOOKS
     /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
     /// every time it moved, and where Copy URL writes.
     static var actionCounts: [String: Int] = [:]
+    /// Test support: every tab the discard policy asked the engine to discard (the engine refuses some itself, so the policy is read here).
+    static var discardCalls: [TabID] = []
     static var commandLog: [Int] = []
     static var pasteboard = NSPasteboard.general
     /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
@@ -198,6 +203,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             return
         }
         installed = true
+        startDiscardTimer()
         let center = NotificationCenter.default
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
             observers.append(center.addObserver(forName: name, object: ns, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.changed(geometry: true) } })

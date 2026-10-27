@@ -184,6 +184,11 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic) double zoomLevel;
 /// Chromium's own zoom step through its preset factors (25 to 500 percent): 1 zooms in, -1 out, 0 resets to the default.
 - (void)zoomStep:(NSInteger)step;
+/// The engine discarded the tab's page (Noche's own |discard|, Memory Saver, memory pressure): no renderer, but the tab, its history, url, title and icon stay.
+/// It is reloaded in place when the tab becomes the active one; |isDiscarded| then goes back to NO. Delivered through the delegate's didUpdateTab.
+@property(nonatomic, readonly) BOOL isDiscarded;
+/// Discards the tab's page (CefBrowserHost::DiscardTab). NO, and nothing done, for the active tab or one already discarded.
+- (BOOL)discard;
 - (void)loadURL:(NSString *)url;
 - (void)goBack; - (void)goForward; - (void)reload; - (void)reloadIgnoringCache; - (void)stopLoad;
 - (void)showDevTools;

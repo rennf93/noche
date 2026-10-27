@@ -70,7 +70,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 }
 
 @synthesize identifier = _identifier, url = _url, title = _title, favicon = _favicon, faviconURL = _faviconURL;
-@synthesize isLoading = _isLoading, canGoBack = _canGoBack, canGoForward = _canGoForward;
+@synthesize isDiscarded = _isDiscarded, isLoading = _isLoading, canGoBack = _canGoBack, canGoForward = _canGoForward;
 @synthesize browser = _browser, closeRequested = _closeRequested;
 @synthesize faviconListSeen = _faviconListSeen, clearFaviconAtLoadEnd = _clearFaviconAtLoadEnd, lastLoadURL = _lastLoadURL;
 
@@ -121,6 +121,7 @@ static BOOL g_force_html_fullscreen = NO;
 }
 - (void)goBack { if (_browser) _browser->GoBack(); }
 - (void)goForward { if (_browser) _browser->GoForward(); }
+- (BOOL)discard { return _browser && _browser->GetHost()->DiscardTab(); }
 - (void)reload { if (_browser) _browser->Reload(); }
 - (void)reloadIgnoringCache { if (_browser) _browser->ReloadIgnoreCache(); }
 - (void)stopLoad { if (_browser) _browser->StopLoad(); }

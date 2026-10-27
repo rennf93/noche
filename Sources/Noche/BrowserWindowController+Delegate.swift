@@ -110,6 +110,7 @@ extension BrowserWindowController {
     }
 
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
+        if let p = previous, let pid = ids[p.identifier] { leftAt[pid] = Date() }
         if let id = ids[tab.identifier] {
             // Using a tab stamps it; the restore's own activation (and the engine re-announcing the active tab) does not.
             if id == skipActivation { skipActivation = nil; list.activate(id) } else if list.activeID != id { list.markActive(id, at: Date()) }
@@ -171,7 +172,10 @@ extension BrowserWindowController {
     func window(_ window: NCWindow, didUpdate tab: NCTab) {
         // The next committed navigation of the tab, whatever caused it, ends the failed display.
         if let f = failed[tab.identifier], tab.url != f.shown, tab.url != f.url { failed[tab.identifier] = nil }
-        if let id = ids[tab.identifier] { list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading) }
+        if let id = ids[tab.identifier] {
+            list.update(id, url: shownURL(tab), title: tab.title, isLoading: tab.isLoading)
+            list.setDiscarded(id, tab.isDiscarded)
+        }
         recordTitle(tab)
         refresh()
         changed()
@@ -260,6 +264,7 @@ extension BrowserWindowController {
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()
+        discardTimer?.invalidate()
         madeCommandBar?.teardown()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []

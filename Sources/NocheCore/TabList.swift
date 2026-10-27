@@ -13,6 +13,8 @@ public struct TabItem: Equatable, Sendable {
     public var url: String
     public var title: String
     public var isLoading: Bool
+    /// The engine discarded the page (no renderer) but the engine tab stays and reloads in place when selected. Runtime only, never stored.
+    public var isDiscarded: Bool
     /// Pinned: in the grid (|inGrid|) or a loose row of the persistent area. A pinned tab is never in a group.
     public var isPinned: Bool
     public var inGrid: Bool
@@ -32,6 +34,7 @@ public struct TabItem: Equatable, Sendable {
         self.url = url
         self.title = title
         self.isLoading = isLoading
+        self.isDiscarded = false
         self.isPinned = isPinned
         self.inGrid = inGrid
         self.pinnedURL = pinnedURL
@@ -274,7 +277,14 @@ public struct TabList: Equatable, Sendable {
 
     /// A tab gets an engine tab (waking from dormant) or loses it (going dormant).
     public mutating func setEngineID(_ id: TabID, _ engineID: Int?) {
-        if let i = index(of: id) { items[i].engineID = engineID }
+        guard let i = index(of: id) else { return }
+        items[i].engineID = engineID
+        if engineID == nil { items[i].isDiscarded = false }  // no engine tab, nothing discarded: a dormant tab is another state
+    }
+
+    /// The engine reported the tab's page discarded or restored. An unknown id is a no-op.
+    public mutating func setDiscarded(_ id: TabID, _ discarded: Bool) {
+        if let i = index(of: id) { items[i].isDiscarded = discarded }
     }
 
     /// Selects a tab without stamping it (the engine re-announcing the active tab, a restore).

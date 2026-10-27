@@ -21,13 +21,13 @@ final class SlowServer: @unchecked Sendable {
     private(set) var sha = ""
     private(set) var pid: Int32 = 0
 
-    static func start(size: Int = 40_000_000, port: Int = 0, log: String = "") async -> SlowServer? {
+    static func start(size: Int = 40_000_000, port: Int = 0, log: String = "", contentType: String = "application/octet-stream") async -> SlowServer? {
         let server = SlowServer()
         let out = Pipe()
         server.process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         server.process.arguments = ["-I", "-c", """
         import http.server, time, hashlib, sys, os, threading
-        SIZE, PORT, LOG, WATCH = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
+        SIZE, PORT, LOG, WATCH, CTYPE = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
         if WATCH == '1': threading.Thread(target=lambda: (sys.stdin.read(), os._exit(0)), daemon=True).start()
         PAT = bytes(range(251)) * 70
         def chunk(off, n): return PAT[off % 251:off % 251 + n]
@@ -43,7 +43,7 @@ final class SlowServer: @unchecked Sendable {
                 if start >= SIZE:
                     self.send_response(416); self.send_header('Content-Range', 'bytes */%d' % SIZE); self.end_headers(); return
                 self.send_response(206 if r else 200)
-                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Type', CTYPE)
                 self.send_header('Accept-Ranges', 'bytes')
                 self.send_header('ETag', '"noche-slow"')
                 self.send_header('Last-Modified', 'Mon, 01 Jan 2024 00:00:00 GMT')
@@ -59,7 +59,7 @@ final class SlowServer: @unchecked Sendable {
         s = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), H)
         print(s.server_address[1], h.hexdigest(), os.getpid(), flush=True)
         s.serve_forever()
-        """, String(size), String(port), log, BarHook.on("STRAY_SERVER") ? "0" : "1"]
+        """, String(size), String(port), log, BarHook.on("STRAY_SERVER") ? "0" : "1", contentType]
         server.process.standardInput = server.input
         server.process.standardOutput = out
         guard (try? server.process.run()) != nil else { return nil }
@@ -79,8 +79,8 @@ final class SlowServer: @unchecked Sendable {
 
 extension SelfTest {
     /// Starts a slow server and prints its PID, which scripts/app-test.sh checks is gone once the app has exited (`stray-server`).
-    func startSlowServer(size: Int = 40_000_000, port: Int = 0, log: String = "") async -> SlowServer? {
-        let server = await SlowServer.start(size: size, port: port, log: log)
+    func startSlowServer(size: Int = 40_000_000, port: Int = 0, log: String = "", contentType: String = "application/octet-stream") async -> SlowServer? {
+        let server = await SlowServer.start(size: size, port: port, log: log, contentType: contentType)
         if let server { line("info", "slow-server-pid \(server.pid)") }
         return server
     }

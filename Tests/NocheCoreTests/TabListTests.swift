@@ -20,6 +20,20 @@ final class TabListTests: XCTestCase {
         XCTAssertEqual(l.items.map(\.id), [a.id, b.id])
         XCTAssertEqual(l.activeID, a.id)
     }
+    func testDiscardedKeepsTheEngineTabAndIsRuntimeOnly() {
+        var (l, ts) = list(2)
+        l.setDiscarded(ts[1].id, true)
+        XCTAssertTrue(l.items[1].isDiscarded)
+        XCTAssertEqual(l.items[1].engineID, 1, "a discarded tab keeps its engine tab")
+        XCTAssertFalse(l.items[0].isDiscarded)
+        l.setDiscarded(ts[1].id, false)
+        XCTAssertFalse(l.items[1].isDiscarded)
+        l.setDiscarded(ts[1].id, true)
+        l.setEngineID(ts[1].id, nil)   // it went dormant: that is another state
+        XCTAssertFalse(l.items[1].isDiscarded)
+        l.setDiscarded(TabID(), true)  // unknown id: no change
+        XCTAssertEqual(l.items.filter(\.isDiscarded).count, 0)
+    }
     func testUpdateChangesTitleAndURL() {
         var (l, ts) = list(2)
         l.update(ts[1].id, url: "https://b.example/", title: "B", isLoading: true)

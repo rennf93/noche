@@ -60,6 +60,8 @@ extension BrowserWindowController {
     /// Selects a tab: its engine tab becomes active; a dormant one gets a new engine tab first.
     func activate(_ t: TabItem) {
         closeNext.removeAll()
+        // A discarded tab has its engine tab: it reloads in place. The hook opens a second engine tab for it instead (a duplicate).
+        if t.isDiscarded && BarHook.on("DISCARD_WAKE") { _ = window.addTab(withURL: t.url, activate: true); return }
         if let tab = engineTab(t) { intendedActive = tab; window.activateTab(tab) } else { wake(t) }
     }
 

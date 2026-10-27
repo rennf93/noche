@@ -284,6 +284,10 @@ class NCClient : public CefClient,
     NSString* s = @(title.ToString().c_str());
     [w_ browser:b update:^(NCTab* t) { t.title = s; }];
   }
+  void OnTabDiscarded(CefRefPtr<CefBrowser> b, bool discarded) override {
+    NC_CEF_CALLBACK;
+    [w_ browser:b update:^(NCTab* t) { t.isDiscarded = discarded; }];
+  }
   void OnAddressChange(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame> f, const CefString& url) override {
     NC_CEF_CALLBACK;
     if (!f->IsMain()) return;

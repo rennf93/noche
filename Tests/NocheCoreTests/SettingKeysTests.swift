@@ -21,6 +21,12 @@ final class SettingKeysTests: XCTestCase {
         for m in BookmarksBarMode.allCases { XCTAssertTrue(SettingKeys.isValid(BookmarksBarMode.settingKey, m.rawValue)) }
         XCTAssertFalse(SettingKeys.isValid("unknown", "1"))
     }
+    func testDiscardAfterMinutes() {
+        let k = SettingKeys.key("discardAfterMinutes")
+        XCTAssertEqual(k?.defaultValue, "120")
+        XCTAssertTrue(SettingKeys.isValid("discardAfterMinutes", "1") && SettingKeys.isValid("discardAfterMinutes", "120"))
+        XCTAssertFalse(SettingKeys.isValid("discardAfterMinutes", "0") || SettingKeys.isValid("discardAfterMinutes", "x"))
+    }
     func testIntRangeType() {
         let k = SettingKey(name: "n", type: .int(1...5), defaultValue: "3")
         XCTAssertTrue(k.isValid("1") && k.isValid("5"))
