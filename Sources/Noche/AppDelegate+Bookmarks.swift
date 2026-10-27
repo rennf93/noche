@@ -6,7 +6,8 @@ import NocheStore
 /// Bookmarks (M1.5 Task 6) at the app level: the bar mode, every change to the store (so each window's bar, the Bookmarks menu, the manager and the
 /// command bar follow at once), and the menu actions.
 extension AppDelegate {
-    @objc func bookmarkThisPage(_ s: Any?) { active?.bookmarkThisPage() }
+    /// Cmd+D from a utility window acts on the browser window it follows: that window comes forward first, so its card gets the keys.
+    @objc func bookmarkThisPage(_ s: Any?) { if let a = active { bringForward(a); a.bookmarkThisPage() } }
     @objc func manageBookmarks(_ s: Any?) { if !closing && !BarHook.on("BM_NOMANAGE") { bookmarksWindow.show() } }
     /// Always, On New Tab Only and Never, by tag.
     @objc func setBookmarksBarMode(_ s: NSMenuItem) { setBarMode(BookmarksBarMode.allCases[s.tag]) }
@@ -49,7 +50,7 @@ extension AppDelegate {
         guard b.kind == .url, let url = b.url else { return }
         // negative control: BM_NOSCHEME skips the gate, so a stored javascript: or file: address opens
         guard BarHook.on("BM_NOSCHEME") || (["http", "https"].contains(URL(string: url)?.scheme?.lowercased() ?? "") && AddressInput.allowedSchemes.contains(URL(string: url)?.scheme?.lowercased() ?? "")) else { return }
-        if let a = active { a.openBookmark(url, newTab: newTab) } else if !closing { BrowserWindowController.note("bookmarkOpen"); newWindow(url: url) }
+        if let a = active { bringForward(a); a.openBookmark(url, newTab: newTab) } else if !closing { BrowserWindowController.note("bookmarkOpen"); newWindow(url: url) }
     }
 
     func renameBookmark(_ id: String, to title: String) {

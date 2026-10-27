@@ -282,7 +282,6 @@ extension SelfTest {
 
     /// Whether the command bar lists a page row for |suffix| when |text| is typed (the bar reads the store on each keystroke).
     func barHasPage(_ text: String, ending suffix: String) async -> Bool {
-        try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the last Escape) runs before the bar opens again
         guard await openBar() else { return false }
         barType(text)
         _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
@@ -459,7 +458,6 @@ extension SelfTest {
         guard await ready(), let ctl else { return }
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         func zebra() async -> Bool {
-            try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the Escape of the last call) runs before the bar opens again
             guard await openBar() else { return false }
             barType("zebra")
             let got = await until(3, { bar?.state.rows.contains { $0.kind == .page && ($0.url ?? "").hasSuffix("/zebra-never-visited.html") } == true })
@@ -477,7 +475,6 @@ extension SelfTest {
         seed("http://one.example/note", "Note One", ago: 3600)
         seed("http://two.example/note", "Note Two", ago: 60)
         func noteRows() async -> [String]? {
-            try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task runs before the bar opens again
             guard await openBar() else { return nil }
             barType("note")
             _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
@@ -504,7 +501,7 @@ extension SelfTest {
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         func zebraRow() -> Bool { bar?.state.rows.contains { $0.kind == .page && ($0.url ?? "").hasSuffix("/zebra-never-visited.html") } == true }
         func queryRow() -> String? { bar?.state.rows.first { $0.kind == .query }?.title }
-        func closeBar() async { press(.escape); press(.escape); _ = await until(2, { !barOpen() }); _ = await until(3, { inPage() }); try? await Task.sleep(for: .milliseconds(500)) }  // the engine's own focus task runs before the bar opens again, or it takes the keys back from it
+        func closeBar() async { press(.escape); press(.escape); _ = await until(2, { !barOpen() }); _ = await until(3, { inPage() }) }
         guard let b = addMark("Zebra Notes", fixture("zebra-never-visited.html")) else { return finish(false, "no bookmark added") }
         guard await openBar() else { return finish(false, "no bar") }
         barType("zebr")

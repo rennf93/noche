@@ -276,7 +276,6 @@ extension SelfTest {
         press(.escape)
         guard await until(5, { !barOpen() && inPage() }) else { return finish(false, "Escape on the untouched address '\(prefilled)': text '\(barText)' open \(barOpen()) in page \(inPage())") }
         seed("http://wx-1.test/page", "Weather 1")
-        try? await Task.sleep(for: .milliseconds(500))  // the engine's own focus task (after the Escape above) runs before the bar opens again
         guard await openBar() else { return finish(false, "no bar") }
         barType("wx")
         guard await until(2, { !rowValues.isEmpty }) else { return finish(false, "no rows for wx") }

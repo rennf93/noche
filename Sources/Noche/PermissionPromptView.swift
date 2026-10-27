@@ -29,8 +29,10 @@ final class PermissionPromptView: NSView {
     /// How often the card went from hidden to shown (test support: a stored decision must never show it).
     private(set) var shownCount = 0
 
-    func show(site siteText: String, request: String) {
+    /// |blocks| false (a request with no named kind): Block would not be remembered, so the button reads Dismiss.
+    func show(site siteText: String, request: String, blocks: Bool = true) {
         if isHidden { shownCount += 1 }
+        block.relabel(blocks ? "Block" : "Dismiss")
         site.stringValue = siteText
         text.stringValue = request
         isHidden = false
@@ -60,19 +62,25 @@ final class PermissionPromptView: NSView {
 
 /// A text button of the prompt in the command bar's tokens: the primary one is the light "go" pill.
 final class PromptButton: NSButton {
+    private let primary: Bool
     init(title: String, identifier: String, primary: Bool) {
+        self.primary = primary
         super.init(frame: .zero)
         self.title = title
         isBordered = false
         wantsLayer = true
         layer?.cornerRadius = 15
         layer?.backgroundColor = (primary ? ChromeStyle.barGoFill : ChromeStyle.barSendFill).cgColor
-        attributedTitle = NSAttributedString(string: title, attributes: [
+        relabel(title)
+        setAccessibilityIdentifier(identifier)
+    }
+    func relabel(_ text: String) {
+        title = text
+        attributedTitle = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
             .foregroundColor: primary ? ChromeStyle.barGoText : ChromeStyle.barTitle,
         ])
-        setAccessibilityIdentifier(identifier)
-        setAccessibilityLabel(title)
+        setAccessibilityLabel(text)
     }
     required init?(coder: NSCoder) { fatalError() }
 }

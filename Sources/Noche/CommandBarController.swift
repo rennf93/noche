@@ -121,7 +121,30 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         // Already editing: asking again would end the editing first, and that closes an overlay.
         if view.field.currentEditor() == nil, !BarHook.on("BAR_NOFOCUS") { ns.makeFirstResponder(view.field) }
         view.field.currentEditor()?.selectAll(nil)
+        guardKeys()
     }
+
+    /// The engine finishes a hand-back to the page (a close's `focusActiveContent`) on its own later turn. A bar opened inside that window keeps the keys:
+    /// while the guard runs, the page taking them back puts the field first responder again. A click, an unfocus or a close ends the guard (the person decides).
+    /// A poll, not a key-value observer: AppKit does not announce a first responder change to an observer.
+    private var keysGuard: Timer?
+    private static let keysGuardSpan: TimeInterval = 0.75
+
+    private func guardKeys() {
+        guard !BarHook.on("BAR_NOKEEPKEYS"), keysGuard == nil else { return }  // negative control: the late hand-back wins
+        let until = owner.window.lastFocusHandback + Self.keysGuardSpan
+        guard ProcessInfo.processInfo.systemUptime < until else { return }
+        let t = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isOpen, ProcessInfo.processInfo.systemUptime < until else { self?.endKeysGuard(); return }
+                if self.view.field.currentEditor() == nil { self.focusField() }
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        keysGuard = t
+    }
+
+    private func endKeysGuard() { keysGuard?.invalidate(); keysGuard = nil }
 
     private func attach() {
         isOpen = true
@@ -149,6 +172,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     func close(restoreFocus: Bool = true) {
         guard isOpen else { return }
         isOpen = false
+        endKeysGuard()
         stopMotion()
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
@@ -166,6 +190,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     /// The card stays; the field editor goes and the page view (when there is one) gets typing.
     func unfocusCard(restoreFocus: Bool = true) {
+        endKeysGuard()
         if let ns = owner.nsWindow, view.field.currentEditor() != nil { ns.makeFirstResponder(ns.contentView) }
         if restoreFocus { owner.window.focusActiveContent() }
     }
@@ -177,6 +202,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     private func mouseDown(_ event: NSEvent) {
         guard isOpen, event.window === owner.nsWindow else { return }
+        endKeysGuard()
         if view.bounds.contains(view.convert(event.locationInWindow, from: nil)) { return }
         if placement == .overlay { close(restoreFocus: false) } else { unfocusCard(restoreFocus: false) }
     }
@@ -258,9 +284,14 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         refresh(deleting: deleting)
     }
 
-    /// A dismissed field editor ends an overlay (the card stays).
+    /// While the keys guard is on the field editor refuses to resign: the engine's late hand-back to the page (a makeFirstResponder) fails, and no key of that moment
+    /// goes to the page. A person's own moves end the guard first (a click, Escape, a close).
+    func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool { keysGuard == nil }
+
+    /// A dismissed field editor ends an overlay (the card stays), unless the keys guard is on: then the page took the keys in the engine's late hand-back and the
+    /// guard's next tick gives them back.
     func controlTextDidEndEditing(_ obj: Notification) {
-        if isOpen, placement == .overlay { close(restoreFocus: false) }
+        if isOpen, placement == .overlay, keysGuard == nil { close(restoreFocus: false) }
     }
 
     /// What one ranking reads, copied on the main thread so the work can run anywhere. The bookmarks are the app's list (kept between changes, so a deleted one

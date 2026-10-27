@@ -6,7 +6,11 @@ import NocheStore
 /// A site permission request the engine waits for. |kinds| are the stored kinds (camera, microphone, geolocation, notifications) it names.
 struct PermissionRequest {
     let tab: NCTab
+    let id: UInt64
     let origin: String
+    /// The origin of the tab's top-level page. A request from an iframe has an |origin| of its own, and then no Allow is ever stored or used.
+    let topOrigin: String
+    var embedded: Bool { origin != topOrigin }
     let mask: NCPermissionMask
     let kinds: [String]
     let decide: (Bool, Bool) -> Void
@@ -17,23 +21,25 @@ extension BrowserWindowController {
     static let namedMask: NCPermissionMask = [.camera, .microphone, .geolocation, .notifications]
     static let namedKinds: [(NCPermissionMask, String)] = [(.camera, "camera"), (.microphone, "microphone"), (.geolocation, "geolocation"), (.notifications, "notifications")]
 
-    func window(_ window: NCWindow, tab: NCTab, requestsPermissions mask: NCPermissionMask, origin: String, decide: @escaping (Bool, Bool) -> Void) {
+    func window(_ window: NCWindow, tab: NCTab, requestsPermissions mask: NCPermissionMask, origin: String, topLevelOrigin: String, promptId: UInt64, decide: @escaping (Bool, Bool) -> Void) {
         let kinds = Self.namedKinds.filter { mask.contains($0.0) }.map(\.1)
 #if NOCHE_TESTHOOKS
         // A test run never reaches a macOS permission dialog: only the perm-* checks see the card at all.
         if let test = app.selfTest {
-            test.permissionRequests.append((mask, origin))
+            test.permissionRequests.append((mask, origin, topLevelOrigin, promptId))
             if !test.check.hasPrefix("perm-") { let a = test.permissionAnswer(mask); return decide(a.allow, a.remember) }
         }
 #endif
-        // Any stored Block wins; all stored Allow answers Allow; otherwise ask. "Other" (a kind with no name here) is never stored.
+        // Any stored Block wins; all stored Allow answers Allow (never for an iframe's request: the Allow was for the page the person was looking at); otherwise ask.
+        // "Other" (a kind with no name here) is never stored.
+        let embedded = origin != topLevelOrigin
         if let store = app.writer?.store, !kinds.isEmpty, !BarHook.on("PERM_NOLOOKUP") {  // negative control: the store is never asked
             let stored = kinds.map { try? store.permission(origin: origin, kind: $0) }
             if stored.contains(.block) { return decide(false, true) }
             // A bit Noche cannot name (Other, Screen) is never covered by a stored Allow: the card asks.
-            if stored.allSatisfy({ $0 == .allow }), mask.subtracting(Self.namedMask).isEmpty { return decide(true, false) }
+            if stored.allSatisfy({ $0 == .allow }), mask.subtracting(Self.namedMask).isEmpty, !embedded || BarHook.on("PERM_EMBEDALLOW") { return decide(true, false) }  // negative control: an iframe is answered from a stored Allow
         }
-        permissionQueue.append(PermissionRequest(tab: tab, origin: origin, mask: mask, kinds: kinds, decide: decide))
+        permissionQueue.append(PermissionRequest(tab: tab, id: promptId, origin: origin, topOrigin: topLevelOrigin, mask: mask, kinds: kinds, decide: decide))
         syncPermissionPrompt()
     }
 
@@ -57,10 +63,13 @@ extension BrowserWindowController {
         var allow = allow, remember = remember
 #if NOCHE_TESTHOOKS
         // The card never allows a named kind in a test run (a macOS camera, microphone, location or notification dialog could follow); this runs before the store write.
-        if allow, !r.kinds.isEmpty { app.selfTest?.violations.append("allowed \(r.kinds) in a test run"); allow = false; remember = false }
+        // The whole mask counts, Screen and Other too; only the MIDI sysex check (no macOS dialog exists for it) opens Other for its one Allow.
+        if allow, let test = app.selfTest, BarHook.on("PERM_GUARDKINDS") ? !r.kinds.isEmpty : !(r.mask == .other && test.allowOther) {  // negative control: named kinds only
+            test.violations.append("allowed \(r.mask) in a test run"); allow = false; remember = false
+        }
 #endif
         remember = remember || (!allow && BarHook.on("PERM_DISMISSSTORES"))  // negative control: a dismiss stores a Block
-        if remember, !BarHook.on("PERM_NOSTORE"), let store = app.writer?.store {
+        if remember, !(allow && r.embedded && !BarHook.on("PERM_EMBEDALLOW")), !BarHook.on("PERM_NOSTORE"), let store = app.writer?.store {
             for k in r.kinds { try? store.setPermission(origin: r.origin, kind: k, decision: allow ? .allow : .block) }
         }
         r.decide(allow && !BarHook.on("PERM_ALLOWDENY"), remember && !r.kinds.isEmpty)  // negative control: Allow tells the page no
@@ -70,9 +79,8 @@ extension BrowserWindowController {
     func syncPermissionPrompt() {
         guard installed else { return }
         guard let r = shownPermission, !BarHook.on("PERM_NOCARD") else { permissionPrompt.isHidden = true; return }  // negative control: the card never shows
-        let url = URL(string: r.origin)
-        let host = url?.host.map { h in url?.port.map { "\(h):\($0)" } ?? h } ?? r.origin
-        permissionPrompt.show(site: host, request: Self.requestText(r.mask))
+        let site = r.embedded ? "\(Self.hostText(r.origin)) on \(Self.hostText(r.topOrigin))" : Self.hostText(r.origin)
+        permissionPrompt.show(site: site, request: Self.requestText(r.mask), blocks: !r.kinds.isEmpty || BarHook.on("PERM_BLOCKLABEL"))  // negative control: Block on a request that is never remembered
     }
 
     /// The tab navigated or closed: its requests are over (the engine dismissed them; the bridge ignores a second answer).
@@ -83,20 +91,23 @@ extension BrowserWindowController {
         syncPermissionPrompt()
     }
 
+    static func hostText(_ origin: String) -> String {
+        let url = URL(string: origin)
+        return url?.host.map { h in url?.port.map { "\(h):\($0)" } ?? h } ?? origin
+    }
+
     static func requestText(_ mask: NCPermissionMask) -> String {
         PermissionRequestText.text(camera: mask.contains(.camera), microphone: mask.contains(.microphone), geolocation: mask.contains(.geolocation),
                                    notifications: mask.contains(.notifications), screen: mask.contains(.screen))
     }
 
-    /// The engine dismissed the |index|th request of |tab| that the host holds.
-    func permissionRequestDismissed(tab: NCTab, at index: Int) {
-        let mine = permissionQueue.indices.filter { permissionQueue[$0].tab === tab }
-        guard mine.indices.contains(index) else { return }
-        permissionQueue.remove(at: mine[index])
+    /// The engine dismissed the request |id| that the host holds. (The request is found by its id: another request answered since would shift a position.)
+    func window(_ window: NCWindow, tab: NCTab, dismissedPermissionPromptId id: UInt64) {
+        let i = BarHook.on("PERM_DISMISSFIRST") ? permissionQueue.firstIndex { $0.tab === tab } : permissionQueue.firstIndex { $0.id == id && $0.tab === tab }  // negative control: the tab's first request goes
+        guard let i else { return }
+        permissionQueue.remove(at: i)
         syncPermissionPrompt()
     }
-
-    func window(_ window: NCWindow, tab: NCTab, dismissedPermissionRequestNumber index: Int) { permissionRequestDismissed(tab: tab, at: index) }
 
     /// Forgets a stored decision: the Noche row and the engine's own copy (M1.8's settings page calls this; nothing in the UI does yet).
     func forgetPermission(origin: String, kind: String) {

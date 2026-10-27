@@ -41,7 +41,7 @@
 - (BOOL)chromeCommand:(int)commandId;
 - (void)browser:(CefRefPtr<CefBrowser>)browser foundMatches:(int)count active:(int)ordinal final:(BOOL)final identifier:(int)identifier;
 - (BOOL)browser:(CefRefPtr<CefBrowser>)browser contextMenu:(CefRefPtr<CefMenuModel>)model x:(int)x y:(int)y callback:(CefRefPtr<CefRunContextMenuCallback>)callback;
-- (BOOL)browser:(CefRefPtr<CefBrowser>)browser requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
+- (BOOL)browser:(CefRefPtr<CefBrowser>)browser requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin topLevelOrigin:(NSString*)topLevelOrigin promptId:(uint64_t)promptId
          decide:(void (^)(BOOL allow, BOOL remember))decide;
 - (void)promptDismissed:(uint64_t)promptId;
 - (void)closePrompts:(NSInteger)browserId;
@@ -62,7 +62,7 @@
 
 @interface NCPromptRecord : NSObject
 @property(nonatomic) NSInteger browserId;
-@property(nonatomic) uint64_t promptId;   // 0: a media request
+@property(nonatomic) uint64_t promptId;   // the engine's id, or one made here for a media request
 @property(nonatomic) BOOL delivered;      // the delegate has the request
 @property(nonatomic, copy) void (^engineDecide)(BOOL allow, BOOL remember);
 @end
@@ -131,6 +131,16 @@ NSString* NCOriginString(const CefString& origin) {
   return [s hasSuffix:@"/"] ? [s substringToIndex:s.length - 1] : s;
 }
 
+// The origin (scheme://host[:port], default port left out) of the tab's top-level page; "" for a page with no origin (about:blank).
+NSString* NCTopLevelOrigin(CefRefPtr<CefBrowser> b) {
+  CefRefPtr<CefFrame> frame = b->GetMainFrame();
+  NSURLComponents* c = frame ? [NSURLComponents componentsWithString:@(frame->GetURL().ToString().c_str())] : nil;
+  if (!c.scheme.length || !c.host.length) return @"";
+  const BOOL standard = ([c.scheme isEqualToString:@"http"] && c.port.intValue == 80) || ([c.scheme isEqualToString:@"https"] && c.port.intValue == 443);
+  NSString* host = [c.host containsString:@":"] ? [NSString stringWithFormat:@"[%@]", c.host] : c.host;  // an IPv6 literal
+  return c.port && !standard ? [NSString stringWithFormat:@"%@://%@:%@", c.scheme, host, c.port] : [NSString stringWithFormat:@"%@://%@", c.scheme, host];
+}
+
 // New tabs start on the card fill (live-ui.md section 2) so a tab never flashes white.
 CefBrowserSettings TabSettings() {
   CefBrowserSettings s;
@@ -168,7 +178,7 @@ class NCClient : public CefClient,
                                       CefRefPtr<CefMediaAccessCallback> callback) override {
     NC_CEF_CALLBACK;
     NCPermissionMask mask = [NCWindow maskForMediaRequest:requested];
-    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) promptId:0
+    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) topLevelOrigin:NCTopLevelOrigin(b) promptId:0
                 decide:^(BOOL allow, BOOL) {
                   if (allow) callback->Continue(requested); else callback->Cancel();
                 }];
@@ -189,7 +199,7 @@ class NCClient : public CefClient,
     if ((requested & ~kNamed) || !mask) mask |= NCPermissionMaskOther;
     if (NC_TEST_FLAG("NOCHE_TEST_PERM_MASK")) mask = NCPermissionMaskOther;  // negative control: the mask names nothing
     const bool dismissOnly = NC_TEST_FLAG("NOCHE_TEST_PERM_DISMISS");        // negative control: a deny is told to the page as a dismiss
-    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) promptId:prompt_id
+    return [w_ browser:b requestsPermissions:mask origin:NCOriginString(origin) topLevelOrigin:NCTopLevelOrigin(b) promptId:prompt_id
                 decide:^(BOOL allow, BOOL remember) {
                   callback->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : (remember && !dismissOnly) ? CEF_PERMISSION_RESULT_DENY : CEF_PERMISSION_RESULT_DISMISS);
                 }];
@@ -347,6 +357,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   NSEdgeInsets _webInsets;
   CGFloat _webCornerRadius;
   BOOL _webContentHidden;
+  NSTimeInterval _lastFocusHandback;
   CAShapeLayer* _mask;
   // What the layout and the mask were last built from, so the same inputs build nothing (the sidebar motion sets insets every tick).
   CefInsets _layoutInsets;
@@ -397,13 +408,16 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 // Hands a permission request to the delegate on a later main-queue turn; NO (Chromium shows its own prompt) when the delegate cannot decide.
-// |promptId| 0 is a media request (no dismiss callback). The request is open until it is answered, dismissed by the engine (never delivered
+// |engineId| 0 is a media request (no dismiss callback): it gets an id of its own from the top of the id range, so every request the host holds is
+// addressable. The request is open until it is answered, dismissed by the engine (never delivered
 // when that happens before the hop below) or its tab or window closes (answered once, deny and not remembered, so the engine's callback is never held).
-- (BOOL)browser:(CefRefPtr<CefBrowser>)b requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin promptId:(uint64_t)promptId
+- (BOOL)browser:(CefRefPtr<CefBrowser>)b requestsPermissions:(NCPermissionMask)mask origin:(NSString*)origin topLevelOrigin:(NSString*)topLevelOrigin promptId:(uint64_t)engineId
          decide:(void (^)(BOOL allow, BOOL remember))decide {
   NCTab* tab = [self tabFor:b create:NO];
   id<NCWindowDelegate> d = _delegate;
-  if (!tab || ![d respondsToSelector:@selector(window:tab:requestsPermissions:origin:decide:)]) return NO;
+  if (!tab || ![d respondsToSelector:@selector(window:tab:requestsPermissions:origin:topLevelOrigin:promptId:decide:)]) return NO;
+  static uint64_t nextMediaId = 1ULL << 62;  // engine prompt ids count up from 1
+  const uint64_t promptId = engineId ? engineId : NC_TEST_FLAG("NOCHE_TEST_PERM_MEDIAID0") ? 0 : nextMediaId++;  // the flag is a negative control: media requests have no id
   NCPromptRecord* rec = [NCPromptRecord new];
   rec.browserId = b->GetIdentifier();
   rec.promptId = promptId;
@@ -414,7 +428,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (![self->_prompts containsObject:rec] && !NC_TEST_FLAG("NOCHE_TEST_PERM_NOGUARD")) return;
     rec.delivered = YES;
-    [d window:self tab:tab requestsPermissions:mask origin:origin decide:^(BOOL allow, BOOL remember) { [self answer:rec allow:allow remember:remember]; }];
+    [d window:self tab:tab requestsPermissions:mask origin:origin topLevelOrigin:topLevelOrigin promptId:promptId decide:^(BOOL allow, BOOL remember) { [self answer:rec allow:allow remember:remember]; }];
     if (NC_TEST_FLAG("NOCHE_TEST_PERM_LATE")) [self promptDismissed:promptId];  // test: the engine dismisses right after the host got the request
   });
   return YES;
@@ -432,15 +446,13 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (!promptId) return;
   for (NCPromptRecord* r in [_prompts copy]) {
     if (r.promptId != promptId) continue;
-    // A request the host already holds is told to drop it: its position among the tab's delivered requests, in delivery order.
-    NSInteger index = 0;
-    for (NCPromptRecord* o in _prompts) { if (o == r) break; if (o.browserId == r.browserId && o.delivered) index++; }
+    // A request the host already holds is told to drop it, by its id (a position would shift when another request is answered before the hop below).
     NCTab* tab = r.delivered ? _table[@(r.browserId)] : nil;
     [_prompts removeObject:r];
     g_prompts_open--;
     id<NCWindowDelegate> d = _delegate;
-    if (tab && !NC_TEST_FLAG("NOCHE_TEST_PERM_NODISMISSCB") && [d respondsToSelector:@selector(window:tab:dismissedPermissionRequestNumber:)]) {
-      dispatch_async(dispatch_get_main_queue(), ^{ [d window:self tab:tab dismissedPermissionRequestNumber:index]; });
+    if (tab && !NC_TEST_FLAG("NOCHE_TEST_PERM_NODISMISSCB") && [d respondsToSelector:@selector(window:tab:dismissedPermissionPromptId:)]) {
+      dispatch_async(dispatch_get_main_queue(), ^{ [d window:self tab:tab dismissedPermissionPromptId:promptId]; });
     }
   }
 }
@@ -611,6 +623,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 
 - (void)focusActiveContent {
   if (NC_TEST_FLAG("NOCHE_TEST_NO_FOCUS")) return;  // negative control: focus stays where it is
+  _lastFocusHandback = NSProcessInfo.processInfo.systemUptime;
   if (!_view) return;
   _view->RequestFocus();
   if (CefRefPtr<CefBrowser> b = _view->GetActiveTab()) b->GetHost()->SetFocus(true);

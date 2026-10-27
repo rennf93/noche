@@ -239,7 +239,7 @@ extension SelfTest {
     /// Phase 1's verdict, after the quit's pause: the download must be paused with bytes, and the state file gets the bytes at exit.
     func dlQuitVerdict() {
         defer { slowServer?.stop() }  // every way out, with or without a verdict
-        guard check == "dl-quit-relaunch" || check == "dl-restored-cancel-relaunch", phase == 1, !verdictPrinted, let id = relaunchID else { return }
+        guard check == "dl-quit-relaunch" || check == "dl-restored-cancel-relaunch" || check.hasPrefix("quit-gap-"), phase == 1, !verdictPrinted, let id = relaunchID else { return }
         let it = item(id)
         let ok = it?.state == .paused && (it?.receivedBytes ?? 0) >= 800_000
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")

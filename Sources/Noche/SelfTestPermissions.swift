@@ -34,7 +34,7 @@ extension SelfTest {
         guard let ctl, let win else { return "no window" }
         let shownBefore = card?.shownCount ?? 0
         var answers: [String] = []
-        ctl.window(win, tab: tab, requestsPermissions: .geolocation, origin: origin) { allow, remember in answers.append("\(allow),\(remember)") }
+        ctl.window(win, tab: tab, requestsPermissions: .geolocation, origin: origin, topLevelOrigin: origin, promptId: 9000) { allow, remember in answers.append("\(allow),\(remember)") }
         return answers == ["false,true"] && card?.shownCount == shownBefore && ctl.permissionQueue.isEmpty ? "ok" : "answers \(answers) card shown \((card?.shownCount ?? 0) - shownBefore) times, queue \(ctl.permissionQueue.count)"
     }
 
@@ -65,7 +65,9 @@ extension SelfTest {
         await askMidi(tab)
         guard await waitCard(), card.text.stringValue.contains("browser feature") else { return finish(false, "the MIDI sysex request showed no card (requests \(permissionRequests.map { "\($0.mask.rawValue) \($0.origin)" }))") }
         let midiWaiting = await evaluate(tab, "window.__midi === undefined")
+        allowOther = true  // the one Allow of a test run that is not blocked (no macOS dialog exists for MIDI)
         press(card.allow)
+        allowOther = false
         let midi = await pageValue(tab, "window.__midi")
         let ok = geo == "\"error 1\"" && midiWaiting == "true" && midi == "\"granted sysex=true\"" && !cardShown && violations.isEmpty
         finish(ok, "geolocation card (\(geoCard)) answered Block, the page got \(geo ?? "nil"); the MIDI sysex card answered Allow, the page got \(midi ?? "nil") (it waited: \(midiWaiting ?? "nil")); stored \(storedPermissions()) \(violations)")
@@ -242,7 +244,7 @@ extension SelfTest {
         guard let store = app.writer?.store else { return finish(false, "no store") }
         let forced = "http://perm-test-forced.invalid", fake = "http://perm-test.invalid"
         var forcedAnswers: [String] = []
-        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: forced) { forcedAnswers.append("\($0),\($1)") }
+        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: forced, topLevelOrigin: forced, promptId: 9001) { forcedAnswers.append("\($0),\($1)") }
         guard await waitCard(5), let card else { return finish(false, "no card for the direct request") }
         press(card.allow)
         let violated = violations.count == 1
@@ -251,8 +253,8 @@ extension SelfTest {
         // A stored Allow answers a named kind alone, but never a request whose mask has a bit Noche cannot name.
         try? store.setPermission(origin: fake, kind: "geolocation", decision: .allow)
         var alone: [String] = [], mixed: [String] = []
-        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: fake) { alone.append("\($0),\($1)") }
-        ctl.window(win, tab: third, requestsPermissions: [.geolocation, .other], origin: fake) { mixed.append("\($0),\($1)") }
+        ctl.window(win, tab: third, requestsPermissions: .geolocation, origin: fake, topLevelOrigin: fake, promptId: 9002) { alone.append("\($0),\($1)") }
+        ctl.window(win, tab: third, requestsPermissions: [.geolocation, .other], origin: fake, topLevelOrigin: fake, promptId: 9003) { mixed.append("\($0),\($1)") }
         let queuedMixed = ctl.permissionQueue.count
         ctl.dropPermissionRequests(of: third)
         try? store.removePermission(origin: fake, kind: "geolocation")

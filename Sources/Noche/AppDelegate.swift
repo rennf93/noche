@@ -272,7 +272,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         openPage(url, note: "historyOpen")
     }
     private func openPage(_ url: String, note: String) {
-        if let a = active { a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
+        if let a = active { bringForward(a); a.openInNewTab(url, note: note) } else if !closing { BrowserWindowController.note(note); newWindow(url: url) }
+    }
+
+    /// What an action started in a History, Bookmarks or Downloads window shows: the browser window it acts on, in front and key (deminiaturized if it sat in
+    /// the Dock). Every path that opens a page or a card in |active| calls this after choosing it. A hidden run never orders anything front (the activation guards).
+#if NOCHE_TESTHOOKS
+    var frontLog: [UUID] = []  // test: the windows this was called for, hidden run or not
+#endif
+    func bringForward(_ c: BrowserWindowController) {
+#if NOCHE_TESTHOOKS
+        if BarHook.on("NOFRONT") { return }  // negative control: nothing is brought forward
+        frontLog.append(c.id)
+#endif
+        guard !hidden, let w = c.nsWindow else { return }
+        if w.isMiniaturized { w.deminiaturize(nil) }
+        w.makeKeyAndOrderFront(nil)
     }
     @objc func share(_ s: Any?) { active?.share() }
     @objc func taskManager(_ s: Any?) { active?.chromeCommand("IDC_TASK_MANAGER", note: "taskManager") }
@@ -345,7 +360,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #if NOCHE_TESTHOOKS
         selfTest?.windowDidClose()
 #endif
-        if closing && controllers.isEmpty { exitNow() }
+        // Not during the pause wait of a quit: the shutdown runs once, after it (negative control QUIT_EARLY: the old rule).
+        if closing && controllers.isEmpty && (quitClosesWindows || BarHook.on("QUIT_EARLY")) { exitNow() }
         // Otherwise the app keeps running with no window.
     }
 
@@ -377,6 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private(set) var closing = false
     private var exiting = false
+    /// The quit's pause wait is over and its windows are closing: only from here a closed last window ends the process, and a closing window is progress.
+    private var quitClosesWindows = false
     private var watchdogFired = false
     private var watchdogGeneration = 0
     private var shutdownCap: TimeInterval = 0   // uptime at which the overall cap ends
@@ -386,14 +404,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !closing else { return }
         closing = true
         finished = true
-        controllers.forEach { $0.flushTitles() }  // titles held back by the throttle are stored before the quit
-        writer?.quit()
+        if BarHook.on("QUIT_EARLY") { freezeSession() }  // negative control: the session is taken before the pause wait, as it was
         // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled. The engine applies
         // the pause on its own turn and the shutdown below would end the process first, so the windows close once every pause landed (3 s at most).
         downloads.pauseAllForQuit(timeout: 3) { [self] in closeWindowsForQuit() }
     }
 
+    /// The session as it is when the windows start to close: titles held back by the throttle are stored, then the store takes its last write.
+    private func freezeSession() {
+        controllers.forEach { $0.flushTitles() }
+        writer?.quit()
+    }
+
     private func closeWindowsForQuit() {
+        freezeSession()
+        quitClosesWindows = true
         shutdownTabs = windows.reduce(0) { $0 + $1.tabs.count }
         shutdownCap = ProcessInfo.processInfo.systemUptime + Self.capBase + Self.capPerTab * Double(shutdownTabs)
         armWatchdog()
@@ -426,7 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_FIXED_WATCHDOG"] == "1" { return }  // negative control: the old fixed timer
 #endif
-        if closing && !exiting { armWatchdog() }
+        if (quitClosesWindows || (closing && BarHook.on("QUIT_EARLY"))) && !exiting { armWatchdog() }
     }
 
     private func exitNow() {

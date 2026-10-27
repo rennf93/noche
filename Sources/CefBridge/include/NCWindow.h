@@ -63,14 +63,14 @@ NS_SWIFT_UI_ACTOR
 - (void)window:(NCWindow *)window tab:(NCTab *)tab didFindMatches:(NSInteger)count active:(NSInteger)ordinal final:(BOOL)final identifier:(NSInteger)identifier;
 @optional
 /// A page asks for |mask| (camera and microphone requests of getUserMedia, and Chromium's permission prompts for the rest). |origin| is the
-/// requesting origin. Not sent while the delegate does not implement it: Chromium then shows its own prompt. The host calls |decide| at most
+/// requesting origin and |topLevelOrigin| the origin of the tab's top-level page (the two differ for a request from an iframe; "" when the page has no origin).
+/// |promptId| names the request in a later dismissal (the engine's own id, or one the bridge made for a media request). Not sent while the delegate does not implement it: Chromium then shows its own prompt. The host calls |decide| at most
 /// once, on the main queue: |allow| NO with |remember| YES blocks the permission for good, NO and NO is a one-time dismiss (the page may ask
 /// again); |allow| YES grants it (|remember| is for the host's own store, Chromium keeps its own decision either way). Not calling it
 /// leaves the request open until the tab navigates or closes, which dismisses it.
-- (void)window:(NCWindow *)window tab:(NCTab *)tab requestsPermissions:(NCPermissionMask)mask origin:(NSString *)origin decide:(void (^)(BOOL allow, BOOL remember))decide;
-/// The engine dismissed a request the host already received (a page cancel, a replacement): |index| is its position among the tab's requests the host
-/// holds, in the order they were delivered. The host drops it; calling its |decide| afterwards is ignored.
-- (void)window:(NCWindow *)window tab:(NCTab *)tab dismissedPermissionRequestNumber:(NSInteger)index;
+- (void)window:(NCWindow *)window tab:(NCTab *)tab requestsPermissions:(NCPermissionMask)mask origin:(NSString *)origin topLevelOrigin:(NSString *)topLevelOrigin promptId:(uint64_t)promptId decide:(void (^)(BOOL allow, BOOL remember))decide;
+/// The engine dismissed the request |promptId| that the host already received (a page cancel, a replacement). The host drops it; calling its |decide| afterwards is ignored.
+- (void)window:(NCWindow *)window tab:(NCTab *)tab dismissedPermissionPromptId:(uint64_t)promptId;
 @end
 
 NC_EXPORT NS_SWIFT_UI_ACTOR
@@ -92,6 +92,9 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic) BOOL webContentHidden;
 /// Gives keyboard focus back to the active tab's page (after an AppKit view held it).
 - (void)focusActiveContent;
+/// The system uptime of the last |focusActiveContent| call (0 before the first). The engine finishes a hand-back on its own later turn, so a surface that
+/// takes the keys shortly after one (the command bar opened right after a close) uses this to tell that turn from a person moving the focus.
+@property(nonatomic, readonly) NSTimeInterval lastFocusHandback;
 @property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
 @property(nonatomic, readonly, nullable) NCTab *activeTab;
 @property(nonatomic, readonly) NSInteger devToolsCount;          // DevTools browsers open for this window's tabs

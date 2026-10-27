@@ -41,7 +41,9 @@ final class SelfTest {
     var keyLog: [String] = []
     var lastExtensionReply = ""
     var tabsAtQuit = 0
-    var permissionRequests: [(mask: NCPermissionMask, origin: String)] = []
+    var permissionRequests: [(mask: NCPermissionMask, origin: String, topOrigin: String, id: UInt64)] = []
+    /// The MIDI sysex check may Allow a request whose mask is Other only; every other Allow of a test run is a violation.
+    var allowOther = false
     /// dl-quit-relaunch: the server that must outlive the check until the quit's pause has landed, and the download it serves.
     var slowServer: SlowServer?
     var relaunchID: UInt32?
@@ -175,6 +177,12 @@ final class SelfTest {
             case "bm-manager": await bmManager()
             case "bm-suggest": await bmSuggest()
             case "cb-readpath": await cbReadPath()
+            case "cb-reopen": await cbReopen()
+            case "perm-origins": await permOrigins()
+            case "perm-dismiss-id": await permDismissId()
+            case "window-front": await windowFront()
+            case "quit-gap-close-relaunch": await quitGap(closeLast: true)
+            case "quit-gap-tab-relaunch": await quitGap(closeLast: false)
             case "bm-all-tabs": await bmAllTabs()
             case "cb-layout": await cbLayout()
             case "cb-open": await cbOpen()

@@ -140,6 +140,17 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     /// The quit path: asks the engine to pause what runs, and calls |then| once every pause landed (an update with nothing in progress), or after |timeout| seconds.
     func pauseAllForQuit(timeout: TimeInterval, then: @escaping () -> Void) {
+#if NOCHE_TESTHOOKS
+        // Test: the pause lands this many milliseconds late, so the windows are open and interactive for that long (the quit's gap).
+        if let ms = Double(ProcessInfo.processInfo.environment["NOCHE_TEST_PAUSE_DELAY_MS"] ?? ""), items.contains(where: { $0.state == .inProgress }) {
+            quietWaiter = then
+            DispatchQueue.main.asyncAfter(deadline: .now() + ms / 1000) { _ = NCDownloads.shared.pauseAllForQuit() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                MainActor.assumeIsolated { if let waiter = self?.quietWaiter { self?.quietWaiter = nil; waiter() } }
+            }
+            return
+        }
+#endif
         guard !BarHook.on("DL_NOPAUSE"), NCDownloads.shared.pauseAllForQuit() > 0, items.contains(where: { $0.state == .inProgress }) else { return then() }
         quietWaiter = then
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
