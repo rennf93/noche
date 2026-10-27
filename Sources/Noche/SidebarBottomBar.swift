@@ -4,6 +4,12 @@ import AppKit
 /// and the Spaces chevron at the right. There is a single Space in M1.6, so the dot and the chevron are drawn and inert.
 final class SidebarBottomBar: DragView {
     let downloadButton = DownloadButtonView(frame: .zero)
+    /// The dot and the chevron, in the bar's coordinates (the check reads them).
+    var spaceDotFrame: NSRect {
+        let d = ChromeStyle.spaceDot
+        return NSRect(x: ChromeStyle.spaceDotCenterX - d / 2, y: ChromeStyle.bottomIconY - d / 2, width: d, height: d)
+    }
+    var chevronCenter: NSPoint { NSPoint(x: ChromeStyle.spacesChevronCenterX, y: ChromeStyle.bottomIconY) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -18,12 +24,11 @@ final class SidebarBottomBar: DragView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let d = ChromeStyle.spaceDot
         ChromeStyle.spaceDotActive.setFill()
-        NSBezierPath(ovalIn: NSRect(x: bounds.midX - d / 2, y: ChromeStyle.bottomIconY - d / 2, width: d, height: d)).fill()
+        NSBezierPath(ovalIn: spaceDotFrame).fill()
         if let chevron = ChromeStyle.symbol("chevron.down", size: 10, color: ChromeStyle.sidebarIcon) {
             let s = chevron.size
-            chevron.draw(in: NSRect(x: bounds.maxX - 32 + 9 - s.width / 2, y: ChromeStyle.bottomIconY - s.height / 2, width: s.width, height: s.height))
+            chevron.draw(in: NSRect(x: chevronCenter.x - s.width / 2, y: chevronCenter.y - s.height / 2, width: s.width, height: s.height))
         }
     }
 }

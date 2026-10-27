@@ -29,6 +29,11 @@ extension SelfTest {
         for n in 0..<3 { nearID("sidebar.tab.\(7 + n)", 6, 944 + 37 * CGFloat(n), 185, 37, &bad) }
         // The bottom bar: the download button's box is 42 pt above the bottom (live-ui.md section 3), the list stops there.
         if let f = ctl.frame(ofIdentifier: "sidebar.downloads"), abs(f.minY - (H - ChromeStyle.sidebarBottom)) > 1 { bad.append("sidebar.downloads at \(f.minY), want \(H - ChromeStyle.sidebarBottom)") }
+        // Note 1.4 (B: the one Space takes the first dot's place): dot x 90..96 (center 93), chevron center x 174, both centered 18 pt into the row.
+        let bar = ctl.sidebar.bottomBar, barY = H - ChromeStyle.sidebarBottom
+        let box = bar.spaceDotFrame.offsetBy(dx: 0, dy: barY)
+        if !near(box, 90, barY + 15, 6, 6) { bad.append("space dot \(box), want (90, \(barY + 15), 6, 6)") }
+        if abs(bar.chevronCenter.x - 174) > 1 || abs(bar.chevronCenter.y - 18) > 1 { bad.append("chevron center \(bar.chevronCenter), want (174, 18)") }
         if ctl.frame(ofIdentifier: "sidebar.tab.10") != nil { bad.append("sidebar.tab.10 exists: the composition has 10 tab rows") }
         let views = ctl.sidebar.realizedCount
         if views != 12 + 10 + 11 { bad.append("\(views) views for 33 entries") }
@@ -101,23 +106,56 @@ extension SelfTest {
                 if abs(f.minY - y) > 1 { bad.append("row \(k) is at \(f.minY), the layout and the scroll say \(y)") }
             } else if y > 48 - 37, y < H - ChromeStyle.sidebarBottom { bad.append("row \(k) is on screen (y \(y)) and has no view") }
         }
-        if most > 40 { bad.append("\(most) views at one scroll position, want at most 40") }
+        if most > 40 { bad.append("too many views: \(most) at one scroll position, want at most 40") }
         let pooled = ctl.sidebar.document.subviews.count
         if pooled > 40 + 3 { bad.append("the sidebar document holds \(pooled) views after scrolling through 500 rows") }
-        finish(bad.isEmpty && violations.isEmpty, "500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll \(bad) \(violations)")
+        // Ruling M72: with the capture's 12 pins above 500 day tabs, row views (tab and group rows) stay at 40; tiles are bounded by the pin count.
+        ctl.testSeed(SidebarComposition.capture(dayTabs: 500))
+        let total = ctl.sidebar.document.frame.height, maxOffset = max(0, total - scroll.bounds.height)
+        var rowsMost = 0, viewsMost = 0
+        for (name, offset) in [("top", CGFloat(0)), ("middle", (maxOffset / 2).rounded()), ("end", maxOffset)] {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let tiles = ctl.sidebar.realizedTileCount, rowViews = ctl.sidebar.realizedCount - tiles
+            rowsMost = max(rowsMost, rowViews); viewsMost = max(viewsMost, ctl.sidebar.realizedCount)
+            if rowViews > 40 { bad.append("capture + 500 at the \(name): \(rowViews) row views, want at most 40") }
+            if ctl.sidebar.realizedCount > 40 + 12 { bad.append("capture + 500 at the \(name): \(ctl.sidebar.realizedCount) views, want at most 40 plus 12 tiles") }
+            if name == "top", ctl.frame(ofIdentifier: "sidebar.tab.400") != nil { bad.append("sidebar.tab.400 has a view at the top of the list: an unrealized row must have none") }
+            if name == "end", ctl.frame(ofIdentifier: "sidebar.tab.0") != nil { bad.append("sidebar.tab.0 has a view at the end of the list") }
+        }
+        finish(bad.isEmpty && violations.isEmpty, "500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll; with the capture's 12 pins above 500 day tabs at most \(rowsMost) row views and \(viewsMost) views in all (tiles extra) \(bad) \(violations)")
     }
 
     /// T2.5 `min-width`: the window's minimum content width is the sidebar (197) plus a card of 284 (the find pill's 260 floor and its two
     /// 12 pt margins) plus the right inset (6): what a drag on the window's edge stops at. A program's own `setFrame` is not clamped by
-    /// AppKit, so the check reads the constraint the window system enforces (and that a window of that width lays out a 284 pt card).
+    /// AppKit, so the check reads the NSWindow's `contentMinSize` and `minSize`. (The Views window's own minimum is not readable: `CefWindow::GetMinimumSize`
+    /// answers 0 whatever the delegate says; the delegate answer is the bridge's way of keeping Views from resetting the NSWindow's.) The restore of a narrow saved frame is `min-width-relaunch`.
     func minWidth() async {
         guard await ready(), let ctl, let ns = ctl.nsWindow, let host = ctl.window.chromeHost else { return }
         let want = ChromeStyle.minimumWindowWidth
         _ = await until(3, { ns.contentMinSize.width == want })
-        let min = ns.contentMinSize.width
         let layout = ChromeLayout(size: CGSize(width: want, height: host.bounds.height), cardX: ChromeStyle.sidebarWidth)
-        finish(min >= want && layout.card.width >= 284 && ns.minSize.width >= want && violations.isEmpty,
-               "the window's minimum content width is \(min) (frame \(ns.minSize.width)), want \(want); at that width the card is \(layout.card.width) wide, at least 284 \(violations)")
+        let found = (content: ns.contentMinSize.width, frame: ns.minSize.width)
+        finish(found.content >= want && found.frame >= want && layout.card.width >= 284 && violations.isEmpty,
+               "the window's minimum width is \(found.content) (content) and \(found.frame) (frame), want \(want); at that width the card is \(layout.card.width) wide, at least 284 \(violations)")
+    }
+
+    /// A saved frame 400 wide (a program's `setFrame` is not clamped, so one can be stored) opens at 487 or wider with a card of 284 or more.
+    func minWidthRelaunch() async {
+        if phase == 1 {
+            guard await ready(), let ctl, let ns = ctl.nsWindow, let writer = app.writer else { return }
+            ns.setFrame(NSRect(x: 300, y: 200, width: 400, height: 700), display: false)
+            guard await until(5, { abs(ns.frame.width - 400) <= 1 }) else { return finish(false, "phase 1: the window did not take a 400 pt frame (\(ns.frame.width))") }
+            writer.flush()
+            return finish(violations.isEmpty, "phase 1: a window of 400 pt saved, quitting \(violations)")
+        }
+        guard await until(20, { self.restoredUp(1) }), let ctl, let ns = ctl.nsWindow, let host = ctl.window.chromeHost else { return finish(false, "phase 2: no restored window") }
+        let saved = app.restored.first?.frame.width ?? 0
+        _ = await until(5, { ns.frame.width >= ChromeStyle.minimumWindowWidth })
+        _ = await until(3, { ctl.frame(ofIdentifier: "card") != nil })
+        let card = ctl.frame(ofIdentifier: "card")?.width ?? 0
+        finish(saved > 0 && saved < 487 && ns.frame.width >= ChromeStyle.minimumWindowWidth && host.bounds.width >= ChromeStyle.minimumWindowWidth && card >= 284 && violations.isEmpty,
+               "the store holds a window \(saved) wide; it opened \(ns.frame.width) wide (at least \(ChromeStyle.minimumWindowWidth)) with a card \(card) wide (at least 284) \(violations)")
     }
 }
 #endif

@@ -86,7 +86,8 @@ enum ChromeStyle {
     static let groupActiveDotColor = NSColor(hex: 0xE0E0E0)                      // P
     /// The 8 group colors in `colorIndex` order: white, green, blue, purple, amber, pink, red, orange (P: the macOS dark system palette).
     static let groupColors = [0xF2F2F7, 0x30D158, 0x0A84FF, 0xBF5AF2, 0xFFB340, 0xFF6482, 0xFF453A, 0xFF9F0A].map { NSColor(hex: UInt32($0)) }
-    static let spaceDot: CGFloat = 6, bottomIconY: CGFloat = 18                  // M dot size and icon center; B one dot, centered
+    static let spaceDot: CGFloat = 6, bottomIconY: CGFloat = 18                  // M dot size and icon center
+    static let spaceDotCenterX: CGFloat = 93, spacesChevronCenterX: CGFloat = 174   // M: dots at x 86 and 98 (hit 14 wide), chevron box x 165, 18 wide; B: the one Space takes the first dot's place
     static let spaceDotActive = NSColor(hex: 0xE8E8E8)                           // M
     // Section 8: motion
     static let showDuration: TimeInterval = 0.110

@@ -90,9 +90,8 @@ final class SidebarView: DragView {
         scroll.borderType = .noBorder
         scroll.documentView = document
         scroll.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.realize(reconfigure: false) }
-        }
+        // Selector-based: AppKit drops this observer when the view is deallocated.
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         document.addSubview(boxesView)
         divider.wantsLayer = true
         divider.layer?.backgroundColor = ChromeStyle.sidebarDivider.cgColor
@@ -105,6 +104,8 @@ final class SidebarView: DragView {
         setEntries([.divider, .newTab], selected: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func scrolled(_ note: Notification) { realize(reconfigure: false) }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -131,8 +132,9 @@ final class SidebarView: DragView {
     var rows: [TabRowView] { realized.values.compactMap { $0 as? TabRowView }.sorted { $0.frame.minY < $1.frame.minY } }
     /// How many tab rows the layout holds, with or without a view.
     var tabRowCount: Int { layout.placements.reduce(0) { if case .tab = $1.entry { $0 + 1 } else { $0 } } }
-    /// How many entries have a view (tiles, group rows and tab rows).
+    /// How many entries have a view (tiles, group rows and tab rows), and how many of them are grid tiles (bounded by the pin count, not by the window).
     var realizedCount: Int { realized.count }
+    var realizedTileCount: Int { realized.keys.filter { if case .gridTile = $0 { true } else { false } }.count }
 
     /// The layout's frame of the N-th tab row (window points, scrolled to the top).
     func tabFrame(_ ordinal: Int) -> CGRect? {
@@ -157,7 +159,9 @@ final class SidebarView: DragView {
         }
         updateScroll()
         if let selected, selected != lastSelected,
-           let p = layout.placements.first(where: { if case .tab(let t, _) = $0.entry { t == selected } else { false } }) {
+           let p = layout.placements.first(where: {
+               switch $0.entry { case .tab(let t, _), .gridTile(let t): t == selected; default: false }
+           }) {
             document.scrollToVisible(p.frame.offsetBy(dx: 0, dy: -Self.strip).insetBy(dx: 0, dy: -6))
         }
         lastSelected = selected
@@ -186,7 +190,7 @@ final class SidebarView: DragView {
             let fresh = realized[p.entry] == nil
             let view = realized[p.entry] ?? makeView(for: p.entry)
             realized[p.entry] = view
-            if fresh || reconfigure { configure(view, p) }
+            if fresh || reconfigure { view.isHidden = !configure(view, p) }
             let f = p.frame.offsetBy(dx: 0, dy: Self.lowRows ? 3 - Self.strip : -Self.strip)  // negative control: every row 3 pt low
             if view.frame != f { view.frame = f }
         }
@@ -219,8 +223,15 @@ final class SidebarView: DragView {
         return view
     }
 
-    private func configure(_ view: NSView, _ p: SidebarPlacement) {
-        guard let c = content(p.entry) else { return }
+    /// False when the entry's tab or group is gone (a scroll can realize it before the queued refresh drops it): the view is cleared and hidden.
+    @discardableResult
+    private func configure(_ view: NSView, _ p: SidebarPlacement) -> Bool {
+        guard let c = content(p.entry) else {
+            (view as? TabRowView)?.tabID = nil
+            (view as? PinnedTileView)?.tabID = nil
+            (view as? GroupRowView)?.groupID = nil
+            return false
+        }
         switch (view, p.entry, c) {
         case (let v as TabRowView, .tab(let id, let level), .tab(let title, let favicon, let selected, let dormant)):
             v.tabID = id
@@ -236,5 +247,6 @@ final class SidebarView: DragView {
             v.configure(name: name, icon: icon, colorIndex: colorIndex, collapsed: collapsed, hasActive: hasActive)
         default: break
         }
+        return true
     }
 }

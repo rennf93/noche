@@ -159,6 +159,7 @@ final class SelfTest {
             case "sidebar-columns": await sidebarColumns()
             case "sidebar-scale": await sidebarScale()
             case "min-width": await minWidth()
+            case "min-width-relaunch": await minWidthRelaunch()
             case "shortcuts-once": await shortcutsOnce()
             case "eval-async": await evalAsync()
             case "focus-return": await focusReturn()

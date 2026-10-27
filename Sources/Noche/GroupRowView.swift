@@ -26,7 +26,7 @@ final class GroupRowView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// A view taken from the pool is not under the pointer until AppKit says so.
-    func clearHover() { isHovered = false }
+    func clearHover() { isHovered = false; configured = false }  // a reused view animates nothing for another group's state
 
     func configure(name: String, icon: String?, colorIndex: Int, collapsed: Bool, hasActive: Bool) {
         let turned = configured && collapsed != isCollapsed

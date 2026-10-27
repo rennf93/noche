@@ -168,8 +168,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tabs: tabs, selected: s.selectedTabID, sidebarHidden: s.sidebarMode == "hidden", fullScreen: s.isFullScreen,
                 isZoomed: s.isZoomed, items: Dictionary(uniqueKeysWithValues: s.tabs.map { ($0.id, $0) }), groups: s.groups,
                 topOrder: s.topOrder, dayOrder: s.dayOrder, favicons: s.tabMeta.compactMapValues(\.faviconURL))
-            newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? Self.onScreen(s.frame) : startupFrame, id: s.id, restore: restore)
+            newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? Self.onScreen(Self.atLeastMinimumWidth(s.frame)) : startupFrame, id: s.id, restore: restore)
         }
+    }
+
+    /// A saved frame narrower than the window's minimum (the engine does not clamp a frame it is given) opens at the minimum, keeping its left edge.
+    static func atLeastMinimumWidth(_ f: NSRect) -> NSRect {
+#if NOCHE_TESTHOOKS
+        if BarHook.on("MINWIDTH_RESTORE") { return f }  // negative control: a narrow saved frame is restored as saved
+#endif
+        var r = f
+        r.size.width = max(r.width, ChromeStyle.minimumWindowWidth)
+        return r
     }
 
     /// A saved frame that meets no screen now (a display was unplugged) moves onto the main screen, keeping its size (cut to fit).

@@ -73,6 +73,22 @@ final class SidebarLayoutTests: XCTestCase {
         }
     }
 
+    /// Ruling M72: with the capture's pins above 500 day tabs, tab rows and group rows stay at 40 at every offset; tiles are extra (12).
+    func testRowViewsStayAtFortyWithThePinsAbove() {
+        let layout = SidebarLayout(entries: SidebarComposition.capture(dayTabs: 500).layout(), width: 197)
+        let list: CGFloat = 1436 - 48 - 42
+        var most = 0
+        for offset in stride(from: 0, to: Int(layout.contentBottom), by: 7) {
+            let top = 48 + CGFloat(offset)
+            let r = layout.realized(minY: top, maxY: top + list)
+            let tiles = r.filter { if case .gridTile = layout.placements[$0].entry { true } else { false } }.count
+            most = max(most, r.count - tiles)
+            XCTAssertLessThanOrEqual(r.count - tiles, 40, "offset \(offset)")
+            XCTAssertLessThanOrEqual(r.count, 40 + 12, "offset \(offset)")
+        }
+        XCTAssertGreaterThan(most, 30)
+    }
+
     func testRealizedOfAShortListIsEverything() {
         let layout = SidebarLayout(entries: SidebarComposition.capture().layout(), width: 197)
         XCTAssertEqual(layout.realized(minY: 48, maxY: 1394).count, 12 + 2 + 11 + 5 + 3)
