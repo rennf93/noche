@@ -24,6 +24,12 @@ final class DownloadRowView: NSView {
 #endif
     /// A complete download whose file is gone (moved, renamed or deleted): Open and Show in Finder would do nothing, so the row says so and offers Remove only.
     private(set) var fileMissing = false
+    /// A check of the file is running off the main thread (one at a time per row).
+    var checking = false
+    /// A check was asked for while one was running: that one began before the ask and may be stale, so one more runs when it ends.
+    var recheck = false
+    /// Counts the configurations and the presses that found the file gone, so a check's answer is applied only if nothing newer is known about the row.
+    private(set) var generation = 0
     var onAction: ((String, NCDownloadItem) -> Void)?
 
     override init(frame: NSRect) {
@@ -58,8 +64,34 @@ final class DownloadRowView: NSView {
         configured += 1
         Self.configuredTotal += 1
 #endif
+        // The file is checked off the main thread by the window (`checkFile`); until it answers a row of the same file keeps what it knew.
+        if item.state != .complete || item.fullPath != self.item?.fullPath { fileMissing = false }
         self.item = item
-        fileMissing = item.state == .complete && !BarHook.on("DL_NOFILECHECK") && !FileManager.default.fileExists(atPath: item.fullPath)
+        generation += 1
+#if NOCHE_TESTHOOKS
+        if BarHook.on("DL_STATALL"), item.state == .complete {  // negative control: the old behavior, a stat on the main thread at every configure
+            DownloadsWindowController.statCalls += 1
+            fileMissing = !FileManager.default.fileExists(atPath: item.fullPath)
+        }
+#endif
+        render()
+    }
+
+    /// A press that statted the file and found it gone: newer than any check still running.
+    func foundMissing() {
+        generation += 1
+        setFileMissing(true)
+    }
+
+    /// The window's answer to a file check.
+    func setFileMissing(_ missing: Bool) {
+        guard missing != fileMissing, item?.state == .complete else { return }
+        fileMissing = missing
+        render()
+    }
+
+    private func render() {
+        guard let item else { return }
         nameField.stringValue = item.suggestedName
         detailField.stringValue = fileMissing ? "File not found" : Self.detail(item)
         let live = item.state == .inProgress || item.state == .paused
@@ -125,6 +157,10 @@ final class DownloadsWindowController: NSObject {
     /// Removes every row that is not in progress or paused.
     let clearButton = NSButton(title: "Clear", target: nil, action: nil)
     private(set) var rows: [DownloadRowView] = []
+#if NOCHE_TESTHOOKS
+    /// File existence checks made for rows (each one a stat), and how many ran off the main thread.
+    static var statCalls = 0, statOffMain = 0
+#endif
     private var observer: NSObjectProtocol?
     /// `changed` can come ten times a second per live download (and once per history row at launch): the list reloads at most once per `reloadInterval`,
     /// the first change at once and the rest together at the end of the interval.
@@ -176,16 +212,21 @@ final class DownloadsWindowController: NSObject {
         // A file moved or deleted since the row was drawn shows when the person comes back to the window.
         NotificationCenter.default.addObserver(self, selector: #selector(becameKey), name: NSWindow.didBecomeKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(resized), name: NSView.frameDidChangeNotification, object: scroll)
-        reload()
+        reload(checkFiles: false)  // the window shows next (or never): `show` checks the files once
     }
 
     @objc private func resized() { layoutRows() }
     @objc private func clearFinished() { owner.clearFinished(); reload() }
-    @objc private func becameKey() { reload(refreshFiles: true) }
+    @objc private func becameKey() { if !showing { reload(refreshFiles: true) } }
+
+    /// The show already checked the files: the window becoming key because of it does not check them again.
+    private var showing = false
 
     func show() {
         reload(refreshFiles: true)
+        showing = true
         window.makeKeyAndOrderFront(nil)
+        showing = false
     }
 
     private func changed(immediately: Bool) {
@@ -201,7 +242,7 @@ final class DownloadsWindowController: NSObject {
 
     /// Rebuilds the list from the controller: a row keeps its view while its download is listed and is configured only when the item changed (the engine
     /// makes a new item object for every update). |refreshFiles| also re-checks the file of each complete row.
-    private func reload(refreshFiles: Bool = false) {
+    private func reload(refreshFiles: Bool = false, checkFiles: Bool = true) {
         lastReload = Date()
 #if NOCHE_TESTHOOKS
         reloads += 1
@@ -215,13 +256,41 @@ final class DownloadsWindowController: NSObject {
                 row.onAction = { [weak self] title, item in self?.perform(title, item) }
                 document.addSubview(row)
             }
-            if row.item !== item || BarHook.on("DL_RELOADALL") || (refreshFiles && item.state == .complete) { row.configure(item) }  // negative control: every row, every time
+            let changed = row.item !== item || BarHook.on("DL_RELOADALL")  // negative control: every row, every time
+            if changed || (refreshFiles && item.state == .complete && BarHook.on("DL_STATALL")) { row.configure(item) }
+            if (changed && checkFiles) || refreshFiles { checkFile(row) }
             row.setAccessibilityIdentifier("downloads.row.\(i)")
         }
         rows = next
         empty.isHidden = !items.isEmpty
         clearButton.isEnabled = items.contains(where: DownloadsController.isFinished)
         layoutRows()
+    }
+
+    /// Whether a complete row's file is still there, asked once per call off the main thread and applied to that row. A check that is already running began
+    /// before this ask and may be stale, so one more runs when it ends; an answer for an item or a press that is no longer the newest is dropped.
+    private func checkFile(_ row: DownloadRowView) {
+        guard let item = row.item, item.state == .complete, !BarHook.on("DL_NOFILECHECK"), !BarHook.on("DL_STATALL") else { return }
+        if row.checking { row.recheck = true; return }
+        row.checking = true
+        let path = item.fullPath, asked = row.generation
+        DispatchQueue.global(qos: .utility).async { [weak self, weak row] in
+            let exists = FileManager.default.fileExists(atPath: path)
+            let offMain = !Thread.isMainThread
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+#if NOCHE_TESTHOOKS
+                    Self.statCalls += 1
+                    if offMain { Self.statOffMain += 1 }
+#endif
+                    guard let row else { return }
+                    row.checking = false
+                    let stale = row.recheck || row.generation != asked
+                    row.recheck = false
+                    if stale { self?.checkFile(row) } else { row.setFileMissing(!exists) }
+                }
+            }
+        }
     }
 
     private func layoutRows() {
@@ -239,7 +308,8 @@ final class DownloadsWindowController: NSObject {
         case "Cancel": if !BarHook.on("DL_NOCANCEL") { owner.cancel(item) }
         case "Open", "Show in Finder":
             // The file may have gone since the row was drawn: the row says so instead of doing nothing.
-            if !FileManager.default.fileExists(atPath: item.fullPath), !BarHook.on("DL_NOFILECHECK") { reload(refreshFiles: true); return }
+            // One stat for the person's own press.
+            if !FileManager.default.fileExists(atPath: item.fullPath), !BarHook.on("DL_NOFILECHECK") { rows.first { $0.item === item }?.foundMissing(); return }
             if title == "Open" { owner.open(item) } else { owner.reveal(item) }
         case "Remove": owner.remove(item); reload()
         default: break

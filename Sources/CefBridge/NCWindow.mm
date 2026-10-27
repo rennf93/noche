@@ -49,6 +49,8 @@
 + (void)registerForKeyClaims:(NCWindow*)w;
 - (void)unloadDialogResolved:(CefRefPtr<CefBrowser>)browser leaves:(BOOL)leaves;
 - (void)unloadDialogClosed:(CefRefPtr<CefBrowser>)browser;
+- (BOOL)refusesFocusFrom:(cef_focus_source_t)source;
+- (void)browserGotFocus;
 @end
 
 @interface NCMenuItem ()
@@ -158,7 +160,8 @@ class NCClient : public CefClient,
                  public CefContextMenuHandler,
                  public CefFindHandler,
                  public CefJSDialogHandler,
-                 public CefPermissionHandler {
+                 public CefPermissionHandler,
+                 public CefFocusHandler {
  public:
   explicit NCClient(NCWindow* w) : w_(w) {}
 
@@ -170,6 +173,15 @@ class NCClient : public CefClient,
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+  CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+
+  // The page has the keys: a hand-back the host made has landed (however late the engine ran it).
+  void OnGotFocus(CefRefPtr<CefBrowser>) override { NC_CEF_CALLBACK; [w_ browserGotFocus]; }
+  // The engine asking to take the keys (a late focus task after a hand-back, a navigation): the window refuses while its command bar holds them.
+  bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource source) override {
+    NC_CEF_CALLBACK;
+    return [w_ refusesFocusFrom:source];
+  }
   // Downloads with a tab report here, the ones without through the profile's handler: both end in NCDownloads.
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return NCDownloadHandlerInstance(); }
 
@@ -358,6 +370,9 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   CGFloat _webCornerRadius;
   BOOL _webContentHidden;
   NSTimeInterval _lastFocusHandback;
+  BOOL _keysHeld, _handbackPending;
+  NSTimeInterval _lastGotFocus;
+  NSInteger _focusSystem, _focusOther, _focusRefused;
   CAShapeLayer* _mask;
   // What the layout and the mask were last built from, so the same inputs build nothing (the sidebar motion sets insets every tick).
   CefInsets _layoutInsets;
@@ -368,11 +383,15 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 @synthesize nsWindow = _nsWindow;
+@synthesize keysHeld = _keysHeld, focusHandbackPending = _handbackPending, lastGotFocus = _lastGotFocus;
 @synthesize webContentHidden = _webContentHidden, webInsets = _webInsets, webCornerRadius = _webCornerRadius;
 #ifdef NOCHE_TESTHOOKS
 - (NSInteger)testLayoutPasses { return _layoutPasses; }
 - (NSInteger)testMaskPasses { return _maskPasses; }
 - (NSInteger)testAmbiguousFocusLogs { return _ambiguousFocusLogs; }
+- (NSInteger)testFocusSystemRequests { return _focusSystem; }
+- (NSInteger)testFocusOtherRequests { return _focusOther; }
+- (NSInteger)testFocusRefused { return _focusRefused; }
 #endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
@@ -621,12 +640,43 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   if (_webContentHidden) [self setWebContentHidden:NO];
 }
 
+// OnSetFocus: YES cancels the engine's focus request. A request from the system is refused while the command bar holds the keys. The engine offers only
+// browser->SetFocus(true) to this handler; the Views request that actually moves AppKit's first responder (CefBrowserView::RequestFocus) never reaches it
+// (measured: a late RequestFocus takes the keys with no OnSetFocus call), which is why `focusHandbackPending` and OnGotFocus exist.
+- (BOOL)refusesFocusFrom:(cef_focus_source_t)source {
+  const BOOL system = source == FOCUS_SOURCE_SYSTEM;
+#ifdef NOCHE_TESTHOOKS
+  if (system) _focusSystem++; else _focusOther++;
+#endif
+  const BOOL refuse = system && _keysHeld && !NC_TEST_FLAG("NOCHE_TEST_FOCUS_NOREFUSE");  // the flag is a negative control: the engine's request always goes through
+#ifdef NOCHE_TESTHOOKS
+  if (refuse) _focusRefused++;
+#endif
+  return refuse;
+}
+
+- (void)browserGotFocus {
+  _handbackPending = NO;
+  _lastGotFocus = NSProcessInfo.processInfo.systemUptime;
+}
+
 - (void)focusActiveContent {
   if (NC_TEST_FLAG("NOCHE_TEST_NO_FOCUS")) return;  // negative control: focus stays where it is
   _lastFocusHandback = NSProcessInfo.processInfo.systemUptime;
   if (!_view) return;
-  _view->RequestFocus();
-  if (CefRefPtr<CefBrowser> b = _view->GetActiveTab()) b->GetHost()->SetFocus(true);
+  _handbackPending = YES;
+  void (^engine)(void) = ^{
+    if (!self->_view) return;
+    self->_view->RequestFocus();
+    if (CefRefPtr<CefBrowser> b = self->_view->GetActiveTab()) b->GetHost()->SetFocus(true);
+  };
+#ifdef NOCHE_TESTHOOKS
+  // Test seam: the engine's side of the hand-back lands this many milliseconds late (its own turn on a loaded machine), so a bar opened meanwhile meets it late.
+  if (const int ms = NCTestInt("NOCHE_TEST_HANDBACK_DELAY_MS")) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)ms * NSEC_PER_MSEC), dispatch_get_main_queue(), engine);
+  else engine();
+#else
+  engine();
+#endif
   // Views records the focus but leaves AppKit's first responder alone while the window is not key (hidden runs, a window
   // behind another): then the page's own responder takes it, as content would on a key window.
   // Guard: with more than one visible WebContentsViewCocoa (a docked DevTools; nothing forces DevTools into its own window,

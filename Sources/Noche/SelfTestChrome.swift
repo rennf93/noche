@@ -166,23 +166,26 @@ extension SelfTest {
         guard await ready(), let ctl else { return }
         /// Milliseconds the animation took, from its own recorded frames (`cardLog`: the first frame it drew to the one that settled), not from a wall clock
         /// around the key event: a late dispatch or a slow wake of this test no longer counts as animation time.
-        func run(viaButton: Bool = false) async -> (ms: Double, max: CGFloat) {
+        func run(hiding: Bool, viaButton: Bool = false) async -> (ms: Double, max: CGFloat, frames: Int) {
             ctl.cardLog = []
             if viaButton { click(ctl.toolbar.toggle) } else { cmdS() }
             _ = await until(1, { ctl.toggleEnd > 0 })
-            let frames = ctl.cardLog
+            let frames = hiding && BarHook.on("SB_ONEFRAME") ? Array(ctl.cardLog.suffix(1)) : ctl.cardLog  // negative control: a hide keeps its last frame only
+            // A span needs frames to span: one frame is 0 ms whatever the animation did, so fewer than 3 never count.
             var ms = Double.infinity
-            if ctl.toggleEnd > 0, let first = frames.first, let last = frames.last { ms = (last.t - first.t) * 1000 }
-            return (ms, frames.map(\.x).max() ?? 0)
+            if ctl.toggleEnd > 0, frames.count >= 3, let first = frames.first, let last = frames.last { ms = (last.t - first.t) * 1000 }
+            return (ms, frames.map(\.x).max() ?? 0, frames.count)
         }
-        let hide = await run()
+        let hide = await run(hiding: true)
         let lightsHidden = ctl.sidebar.lights.allSatisfy(\.isHidden)
         let hiddenAt = ctl.frame(ofIdentifier: "card")?.minX
-        let show = await run()
+        let show = await run(hiding: false)
         let shownAt = ctl.frame(ofIdentifier: "card")?.minX
         let overshoot = show.max - 197
-        let hideAgain = await run(viaButton: true)
+        let hideAgain = await run(hiding: true, viaButton: true)
         func f(_ v: Double) -> String { String(format: "%.0f", v) }
+        let counts = [hide.frames, show.frames, hideAgain.frames]
+        guard counts.allSatisfy({ $0 >= 3 }) else { return finish(false, "the animation logged \(counts) frames (hide, show, button hide), want at least 3 in each direction") }
         line("info", "hide \(f(hide.ms)) ms (limit 145), show \(f(show.ms)) ms (limit 125), overshoot \(String(format: "%.2f", overshoot)) pt, button hide \(f(hideAgain.ms)) ms")
         let ok = hide.ms <= 145 && lightsHidden && hiddenAt == 6 && show.ms <= 125 && shownAt == 197 && overshoot > 0.3 && overshoot <= 2.5
             && BrowserWindowController.actionCounts["toggleSidebar"] == 3 && hideAgain.ms <= 145

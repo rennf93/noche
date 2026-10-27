@@ -95,6 +95,14 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// The system uptime of the last |focusActiveContent| call (0 before the first). The engine finishes a hand-back on its own later turn, so a surface that
 /// takes the keys shortly after one (the command bar opened right after a close) uses this to tell that turn from a person moving the focus.
 @property(nonatomic, readonly) NSTimeInterval lastFocusHandback;
+/// YES while a surface of the host (the command bar) holds the keyboard: the engine's own focus requests from the system are refused (CefFocusHandler::OnSetFocus),
+/// so a late hand-back to the page cannot take the keys from it. Main thread.
+@property(nonatomic) BOOL keysHeld;
+/// YES from a |focusActiveContent| until the engine reports the page got the keys (CefFocusHandler::OnGotFocus), and the uptime of the last such report. The engine's
+/// own turn for a hand-back can land late, and the Views focus request it makes is not offered to OnSetFocus, so a surface that holds the keys waits for this
+/// report instead of a fixed time.
+@property(nonatomic, readonly) BOOL focusHandbackPending;
+@property(nonatomic, readonly) NSTimeInterval lastGotFocus;
 @property(nonatomic, readonly) NSArray<NCTab *> *tabs;           // tab strip order
 @property(nonatomic, readonly, nullable) NCTab *activeTab;
 @property(nonatomic, readonly) NSInteger devToolsCount;          // DevTools browsers open for this window's tabs
@@ -145,6 +153,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger testLayoutPasses, testMaskPasses;
 /// Test support: focusActiveContent calls that found more than one page view and left the responder alone (NOCHE_TEST_PAGE_VIEWS=N makes the count read N).
 @property(nonatomic, readonly) NSInteger testAmbiguousFocusLogs;
+/// Test support: the engine's OnSetFocus calls by source (system, other) and how many were refused.
+@property(nonatomic, readonly) NSInteger testFocusSystemRequests, testFocusOtherRequests, testFocusRefused;
 #endif
 @end
 

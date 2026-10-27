@@ -106,12 +106,22 @@ extension BrowserWindowController {
             // Every reachable bookmark of the page goes (Bookmark All Tabs and the manager can leave copies in other folders), one delete and one undo entry each.
             var ids = [id]
             if !BarHook.on("BM_ONEDUP") { ids += ((try? app.bookmarks(ofPage: bookmarkEditorPage)) ?? []).map(\.id).filter { $0 != id } }
-            for i in ids { app.deleteBookmark(i) }
+            let taken = ids.compactMap { app.deleteBookmark($0) }
+            if !taken.isEmpty, !BarHook.on("BM_NOCARDUNDO") {  // negative control: nothing is registered
+                bookmarkUndo.beginUndoGrouping()
+                // Newest delete first: a copy deleted later was renumbered after the earlier ones, so putting them back in reverse gives every row its old position.
+                bookmarkUndo.registerUndo(withTarget: self) { c in for d in taken.reversed() { c.app.restoreBookmark(d) } }
+                bookmarkUndo.setActionName("Remove Bookmark")
+                bookmarkUndo.endUndoGrouping()
+            }
         case .folder: break
         }
         bookmarkEditor.hide()
         bookmarkEditorClosed()
     }
+
+    /// Edit > Undo after the card's Remove puts back every bookmark it took, in their folders and positions (the same restore the Bookmarks window's Undo uses).
+    @objc func undo(_ sender: Any?) { bookmarkUndo.undo() }
 
     /// Done, Remove, Cancel and Escape give the keys back to the page (the name field had them).
     private func bookmarkEditorClosed() {

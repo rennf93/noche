@@ -45,6 +45,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var bookmarkEditorTab: Int?
     /// The address of the page the card was opened on: its Remove deletes every bookmark of that page (`AppDelegate.bookmarks(ofPage:)`).
     var bookmarkEditorPage = ""
+    /// What the card's Remove took, one undo action per Remove (every copy of the page comes back together).
+    let bookmarkUndo: UndoManager = { let m = UndoManager(); m.groupsByEvent = false; return m }()
     /// Site permission requests the engine waits for, oldest first; the card shows the first one of the active tab.
     var permissionQueue: [PermissionRequest] = []
     var lastFindText = ""   // the window's last search text: Cmd+F and Cmd+G open the pill with it after Escape, as Chrome does

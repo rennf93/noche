@@ -121,22 +121,31 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         // Already editing: asking again would end the editing first, and that closes an overlay.
         if view.field.currentEditor() == nil, !BarHook.on("BAR_NOFOCUS") { ns.makeFirstResponder(view.field) }
         view.field.currentEditor()?.selectAll(nil)
+        owner.window.keysHeld = true  // the engine's own focus requests are refused from here to the close, an unfocus or a click outside (CefFocusHandler)
         guardKeys()
     }
 
-    /// The engine finishes a hand-back to the page (a close's `focusActiveContent`) on its own later turn. A bar opened inside that window keeps the keys:
-    /// while the guard runs, the page taking them back puts the field first responder again. A click, an unfocus or a close ends the guard (the person decides).
+    /// The engine finishes a hand-back to the page (a close's `focusActiveContent`) on its own later turn, and that turn is not offered to the focus handler. A bar
+    /// opened inside that window keeps the keys: while the guard runs, the page taking them back puts the field first responder again. The guard runs for
+    /// `keysGuardSpan` after the hand-back, and for as long as the engine has not reported the page got the keys (OnGotFocus) up to `keysGuardCap`, then a
+    /// short tail after the report. A click, an unfocus or a close ends the guard (the person decides).
     /// A poll, not a key-value observer: AppKit does not announce a first responder change to an observer.
     private var keysGuard: Timer?
-    private static let keysGuardSpan: TimeInterval = 0.75
+    private static let keysGuardSpan: TimeInterval = 0.75, keysGuardCap: TimeInterval = 3, keysGuardTail: TimeInterval = 0.1
+
+    private func guardRuns() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime, w: NCWindow = owner.window, t = w.lastFocusHandback
+        if now < t + Self.keysGuardSpan { return true }
+        if BarHook.on("BAR_NOGOTFOCUS") { return false }  // negative control: only the fixed span
+        if w.focusHandbackPending, now < t + Self.keysGuardCap { return true }
+        return w.lastGotFocus >= t && now < w.lastGotFocus + Self.keysGuardTail
+    }
 
     private func guardKeys() {
-        guard !BarHook.on("BAR_NOKEEPKEYS"), keysGuard == nil else { return }  // negative control: the late hand-back wins
-        let until = owner.window.lastFocusHandback + Self.keysGuardSpan
-        guard ProcessInfo.processInfo.systemUptime < until else { return }
+        guard !BarHook.on("BAR_NOKEEPKEYS"), keysGuard == nil, guardRuns() else { return }  // negative control: the late hand-back wins
         let t = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.isOpen, ProcessInfo.processInfo.systemUptime < until else { self?.endKeysGuard(); return }
+                guard let self, self.isOpen, self.guardRuns() else { self?.endKeysGuard(); return }
                 if self.view.field.currentEditor() == nil { self.focusField() }
             }
         }
@@ -172,6 +181,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     func close(restoreFocus: Bool = true) {
         guard isOpen else { return }
         isOpen = false
+        owner.window.keysHeld = false
         endKeysGuard()
         stopMotion()
         if let monitor { NSEvent.removeMonitor(monitor) }
@@ -190,6 +200,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     /// The card stays; the field editor goes and the page view (when there is one) gets typing.
     func unfocusCard(restoreFocus: Bool = true) {
+        owner.window.keysHeld = false
         endKeysGuard()
         if let ns = owner.nsWindow, view.field.currentEditor() != nil { ns.makeFirstResponder(ns.contentView) }
         if restoreFocus { owner.window.focusActiveContent() }

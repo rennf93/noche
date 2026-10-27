@@ -16,6 +16,19 @@
 
 @implementation NCDownloadItem
 - (instancetype)initPrivate { return [super init]; }
+#ifdef NOCHE_TESTHOOKS
++ (NCDownloadItem*)testItemWithIdentifier:(uint32_t)identifier name:(NSString*)name path:(NSString*)path state:(NCDownloadState)state {
+  NCDownloadItem* d = [[NCDownloadItem alloc] initPrivate];
+  d.identifier = identifier;
+  d.url = [@"http://127.0.0.1/" stringByAppendingString:name];
+  d.suggestedName = name;
+  d.fullPath = path;
+  d.receivedBytes = d.totalBytes = 1024;
+  d.percent = 100;
+  d.state = state;
+  return d;
+}
+#endif
 @end
 
 @interface NCDownloads ()

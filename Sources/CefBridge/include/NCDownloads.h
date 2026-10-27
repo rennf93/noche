@@ -22,6 +22,10 @@ NC_EXPORT
 @property(nonatomic, readonly) NSInteger percent;                   // 0 to 100, -1 when unknown
 @property(nonatomic, readonly) int64_t speed;                       // bytes per second
 @property(nonatomic, readonly) NCDownloadState state;
+#ifdef NOCHE_TESTHOOKS
+/// Test support: an item that never came from the engine (the Downloads list checks put many rows in it).
++ (NCDownloadItem *)testItemWithIdentifier:(uint32_t)identifier name:(NSString *)name path:(NSString *)path state:(NCDownloadState)state NS_SWIFT_NAME(testItem(identifier:name:path:state:));
+#endif
 @end
 
 /// Every callback arrives on the main thread, from a task posted after the CEF callback that caused it.

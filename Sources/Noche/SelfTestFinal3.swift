@@ -157,6 +157,7 @@ extension SelfTest {
         try? FileManager.default.moveItem(atPath: paths[1], toPath: paths[1] + ".moved")
         dc.windowController.show()
         let rows = dc.windowController.rows
+        _ = await until(5, { rows.allSatisfy { $0.fileMissing } })  // the check runs off the main thread
         guard rows.allSatisfy({ $0.detailField.stringValue == "File not found" && $0.visibleButtons == ["Remove"] }) else {
             return finish(false, "after a delete and a rename: details \(rows.map(\.detailField.stringValue)), buttons \(rows.map(\.visibleButtons))")
         }
