@@ -174,10 +174,10 @@ extension SelfTest {
             app.selfTestFinished(ok: true)  // the quit itself: beforeExit judges what it did to the download
             return
         }
-        let givenUp = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-given-up.txt")
+        let removedId = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-removed-id.txt")
         if cancelRestored && phase == 3 {
             // Third launch: the engine announces the restored item again, and its row stays hidden (the person removed it).
-            guard let id = (try? String(contentsOf: givenUp, encoding: .utf8)).flatMap({ UInt32($0) }) else { return finish(false, "phase 2 left no given-up id") }
+            guard let id = (try? String(contentsOf: removedId, encoding: .utf8)).flatMap({ UInt32($0) }) else { return finish(false, "phase 2 left no removed-row id") }
             guard await ready() else { return }
             guard await until(20, { NCDownloads.shared.items.contains { $0.identifier == id } }) else { return finish(false, "the engine did not announce item \(id) again, so nothing proves its row stays hidden (announced \(NCDownloads.shared.items.map(\.identifier)))") }
             try? await Task.sleep(for: .milliseconds(500))
@@ -224,7 +224,7 @@ extension SelfTest {
                 guard DownloadsController.giveUps == giveUpsBefore + 1, dc.windowController.rows.isEmpty else { return finish(false, "the row left but not by the give-up (give-ups \(DownloadsController.giveUps - giveUpsBefore)): \(rowNamesNow())") }
                 let partial = folderFiles().filter { $0.hasSuffix(".crdownload") }
                 guard !partial.isEmpty else { return finish(false, "the partial file is gone (folder \(folderFiles())) though the engine was never asked to cancel") }
-                try? "\(id)".write(to: givenUp, atomically: true, encoding: .utf8)
+                try? "\(id)".write(to: removedId, atomically: true, encoding: .utf8)
                 return finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: with the engine silent, Cancel on the restored row was given up after the grace (one give-up), the partial file stays \(partial) \(violations)")
             }
             // The engine's canceled update arrives well before the grace, and nothing else ended the row.
@@ -240,7 +240,7 @@ extension SelfTest {
             }
             dc.windowController.rows[0].button("Remove")?.performClick(nil)
             guard dc.windowController.rows.isEmpty, dc.items.isEmpty else { return finish(false, "the restored row is still listed: \(rowNamesNow())") }
-            try? "\(id)".write(to: givenUp, atomically: true, encoding: .utf8)
+            try? "\(id)".write(to: removedId, atomically: true, encoding: .utf8)
             finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: Cancel on the restored row got the engine's canceled update \(Int(at.timeIntervalSince(t0) * 1000)) ms later, no give-up, a Canceled row with Remove, the partial file \(partialBefore) deleted \(violations)")
             return
         }

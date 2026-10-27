@@ -658,8 +658,10 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 }
 
 - (void)browserGotFocus {
-  // Only a report that follows the hand-back's own RequestFocus ends the wait: one that came earlier (another focus event, SetFocus's) says nothing about a
-  // request still to come.
+  // Only a report that follows the hand-back's own RequestFocus ends the wait. Measured (final fix 5 round 1): the engine sends exactly one OnGotFocus per
+  // hand-back, after the Views request lands (3 to 70 ms), never for SetFocus alone, and no earlier report has been seen; CefViewDelegate::OnFocus and OnBlur
+  // are never delivered for the browser view. So in production the app's call and the engine's request are one event and this behaves as a plain
+  // "report after the stamp"; the early-report order exists only in the test seam (`cb-reopen-reqlate`).
   if (!_requestIssued && !NC_TEST_FLAG("NOCHE_TEST_FOCUS_ANYREPORT")) return;  // the flag is a negative control: any report ends the wait
   _handbackPending = NO;
   _lastGotFocus = NSProcessInfo.processInfo.systemUptime;

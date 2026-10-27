@@ -111,11 +111,8 @@ extension BrowserWindowController {
             if !taken.isEmpty, !BarHook.on("BM_NOCARDUNDO") {  // negative control: nothing is registered
                 bookmarkUndo.beginUndoGrouping()
                 // Newest delete first: a copy deleted later was renumbered after the earlier ones, so putting them back in reverse gives every row its old position.
-                bookmarkUndo.registerUndo(withTarget: self) { c in
-                    for d in taken.reversed() where !c.app.restoreBookmark(d) {
-                        FileHandle.standardError.write(Data("NOCHE bookmark undo restore failed for \(d.id)\n".utf8))
-                    }
-                }
+                // A failed restore of one copy is logged by `restoreBookmark` itself (logBookmark "restore"); the others still come back.
+                bookmarkUndo.registerUndo(withTarget: self) { c in for d in taken.reversed() { c.app.restoreBookmark(d) } }
                 bookmarkUndo.setActionName("Remove Bookmark")
                 bookmarkUndo.endUndoGrouping()
                 bookmarkUndoRevision = app.bookmarksRevision

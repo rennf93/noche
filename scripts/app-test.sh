@@ -96,7 +96,7 @@ FAILED=0
 for CHECK in "$@"; do
   # Checks ending in -relaunch (and crash-mid-write, corrupt-store) run twice on one profile (phase 1, then 2); each phase must print its own pass line.
   PHASES=""; case "$CHECK" in *-relaunch|crash-mid-write|corrupt-store|cb-history) PHASES="1 2" ;; esac
-  case "$CHECK" in dl-restored-cancel-relaunch|dl-restored-silent-relaunch) PHASES="1 2 3" ;; esac  # the third launch shows the given-up row stays hidden
+  case "$CHECK" in dl-restored-cancel-relaunch|dl-restored-silent-relaunch) PHASES="1 2 3" ;; esac  # the third launch shows the removed row stays hidden
   # crash-mid-write runs once per kill point, store-unavailable once per variant.
   KILLS="${NOCHE_TEST_KILL_AT:-none}"; [ "$CHECK" != crash-mid-write ] || KILLS="pending in-transaction"
   [ "$CHECK" != store-unavailable ] || KILLS="file unwritable"  # the variants share the loop variable

@@ -8,7 +8,7 @@ import NocheStore
 extension SelfTest {
     // MARK: cb-reopen-reqlate
 
-    /// Only the engine's Views RequestFocus lands 1 s late; SetFocus (and whatever it reports) lands at once. A bar reopened right after the close keeps the keys
+    /// SEAM-ONLY regression (pair FOCUS_ANYREPORT too): the engine never reports early in a real run (see NCWindow.mm browserGotFocus), the seam injects the report. Only the engine's Views RequestFocus lands 1 s late; SetFocus (and whatever it reports) lands at once. A bar reopened right after the close keeps the keys
     /// when the late request comes, however the engine's reports were ordered before it.
     func cbReopenReqLate() async {
         guard await ready(), let ctl else { return }
