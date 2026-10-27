@@ -33,7 +33,7 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     private static func key(_ item: NCDownloadItem) -> String { "\(item.identifier)|\(item.url)" }
 
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) {
-        if removed.contains(Self.key(item)), item.state == .complete || item.state == .canceled { return }
+        if removed.contains(Self.key(item)), item.state != .inProgress { return }
         items.removeAll { $0.identifier == item.identifier }
         items.append(item)
         items.sort { $0.identifier > $1.identifier }  // the engine's ids grow with time
@@ -85,7 +85,21 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     func pause(_ item: NCDownloadItem) { NCDownloads.shared.pause(item.identifier) }
     func resume(_ item: NCDownloadItem) { NCDownloads.shared.resume(item.identifier) }
-    func cancel(_ item: NCDownloadItem) { NCDownloads.shared.cancel(item.identifier) }
+    /// The engine cancels what it is transferring. A download restored from the last session has nothing live to cancel: the engine then stays silent and
+    /// the row would stay for good (the observed case: Cancel on a restored paused row changes nothing), so after a moment the row is given up like a removed one.
+    static let cancelGrace = 2.0
+    func cancel(_ item: NCDownloadItem) {
+        NCDownloads.shared.cancel(item.identifier)
+        let id = item.identifier
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.cancelGrace) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !BarHook.on("DL_NOGIVEUP"), let now = self.items.first(where: { $0.identifier == id }), !Self.isFinished(now) else { return }
+                if self.removed.insert(Self.key(now)).inserted { self.removedOrder += [Self.key(now)] }
+                self.items.removeAll { $0.identifier == id }
+                NotificationCenter.default.post(name: Self.changed, object: self)
+            }
+        }
+    }
 
     func open(_ item: NCDownloadItem) {
         let url = URL(fileURLWithPath: item.fullPath)

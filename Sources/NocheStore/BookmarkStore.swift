@@ -91,16 +91,41 @@ extension Store {
         }
     }
 
+    /// What `deleteBookmark` took: enough to put the row back where it was.
+    public struct Deleted: Equatable, Sendable {
+        public let id: String
+        public let parentId: String
+        public let position: Int
+        let deletedAt: Double
+    }
+
     /// Tombstones the row and all its descendants in one transaction.
-    public func deleteBookmark(id: String) throws {
+    @discardableResult
+    public func deleteBookmark(id: String) throws -> Deleted {
         let t = now().timeIntervalSince1970
-        try db.write { db in
-            guard let parent = try Self.row(db, id).parentId else { throw BookmarkError.rootImmutable }
+        return try db.write { db in
+            let row = try Self.row(db, id)
+            guard let parent = row.parentId else { throw BookmarkError.rootImmutable }
             try db.execute(sql: """
                 WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT b.id FROM bookmark b JOIN sub ON b.parentId = sub.id)
                 UPDATE bookmark SET deletedAt = ?, updatedAt = ? WHERE id IN (SELECT id FROM sub) AND deletedAt IS NULL
                 """, arguments: [id, t, t])
             try Self.renumber(db, parent: parent, excluding: id, inserting: nil, at: 0, now: t)
+            return Deleted(id: id, parentId: parent, position: row.position, deletedAt: t)
+        }
+    }
+
+    /// Undoes `deleteBookmark`: the row and the descendants that delete took (not ones deleted earlier) come back, the row at its old position.
+    /// Throws notFound when the parent folder is gone itself (restore that first).
+    public func restoreBookmark(_ d: Deleted) throws {
+        let t = now().timeIntervalSince1970
+        try db.write { db in
+            _ = try Self.folder(db, d.parentId)
+            try db.execute(sql: """
+                WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT b.id FROM bookmark b JOIN sub ON b.parentId = sub.id)
+                UPDATE bookmark SET deletedAt = NULL, updatedAt = ? WHERE id IN (SELECT id FROM sub) AND deletedAt = ?
+                """, arguments: [d.id, t, d.deletedAt])
+            try Self.renumber(db, parent: d.parentId, excluding: d.id, inserting: d.id, at: d.position, now: t)
         }
     }
 

@@ -193,9 +193,9 @@ enum MenuTable {
             later("Focus Previous Split Pane", "view.focusPreviousSplitPane", "M1.10"),
             sep,
             menu("Show Bookmarks Bar", [
-                app("Always", "view.bookmarksBar.always", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .always }, tag: 0),
-                app("On New Tab Only", "view.bookmarksBar.newTabOnly", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .newTabOnly }, tag: 1),
-                app("Never", "view.bookmarksBar.never", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .never }, tag: 2),
+                app("Always", "view.bookmarksBar.always", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .always && !BarHook.on("BM_NOMARK") }, tag: 0),
+                app("On New Tab Only", "view.bookmarksBar.newTabOnly", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .newTabOnly && !BarHook.on("BM_NOMARK") }, tag: 1),
+                app("Never", "view.bookmarksBar.never", #selector(AppDelegate.setBookmarksBarMode(_:)), enabled: always, state: { $0.app.barMode == .never && !BarHook.on("BM_NOMARK") }, tag: 2),
                 sep,
                 app("Toggle Bookmarks Bar", "view.toggleBookmarksBar", #selector(AppDelegate.toggleBookmarksBar(_:)), enabled: always),
             ]),

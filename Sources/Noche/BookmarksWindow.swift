@@ -14,10 +14,18 @@ final class BookmarkNode: NSObject {
 final class BookmarksOutlineView: NSOutlineView {
     var onDelete: (() -> Void)?
     var onRename: (() -> Void)?
+    var onUndo: (() -> Void)?
+    var canUndo: () -> Bool = { false }
     override func keyDown(with event: NSEvent) {
         if (event.keyCode == 51 || event.keyCode == 117) && !BarHook.on("BM_NOKEY") { onDelete?() }  // Delete and Forward Delete
         else if event.keyCode == 36 || event.keyCode == 76 { onRename?() }                            // Return and Enter start renaming the selected title
         else { super.keyDown(with: event) }
+    }
+
+    /// Edit > Undo reaches the key window's first responder: with this window key that is the table, and it puts the last delete back.
+    @objc func undo(_ sender: Any?) { onUndo?() }
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        item.action == NSSelectorFromString("undo:") ? canUndo() : super.validateUserInterfaceItem(item)
     }
 }
 
@@ -70,6 +78,8 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         outline.doubleAction = #selector(openSelected)
         outline.onDelete = { [weak self] in self?.deleteSelected() }
         outline.onRename = { [weak self] in self?.beginRename() }
+        outline.onUndo = { [weak self] in self?.undoDelete() }
+        outline.canUndo = { [weak self] in !(self?.deleted.isEmpty ?? true) }
         outline.setAccessibilityIdentifier("bookmarks.list")
         let scroll = NSScrollView()
         scroll.documentView = outline
@@ -96,6 +106,7 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
     func show() {
         BrowserWindowController.note("showBookmarks")
         reload()
+        window.makeFirstResponder(outline)  // so Edit > Undo and the Delete key reach the table before the first click
         window.makeKeyAndOrderFront(nil)
     }
 
@@ -106,6 +117,7 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
     /// Rebuilds the tree from the store.
     @objc func reload() {
         guard let store = app.writer?.store else { return }
+        let keep = selected?.bookmark.id
         reloading = true
         defer { reloading = false }
         func node(_ b: Bookmark, root: Bool) -> BookmarkNode {
@@ -120,6 +132,21 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
             n.children.forEach(expand)
         }
         roots.forEach(expand)
+        // The selection follows the row, not its index: a change elsewhere can move it.
+        if let keep, !BarHook.on("BM_NOKEEPSEL"), let n = self.node(id: keep) { select(n) }
+    }
+
+    /// A change made elsewhere (another window, the Cmd+D card) reloads the rows, unless a title is being edited: that edit goes on, and the rows
+    /// are rebuilt when it ends (`controlTextDidEndEditing`).
+    func changed() {
+        if isEditing && !BarHook.on("BM_NOKEEPEDIT") { return }
+        reload()
+    }
+
+    /// A title field of this table has its field editor.
+    var isEditing: Bool {
+        guard let t = window.firstResponder as? NSTextView, t.isFieldEditor else { return false }
+        return (t.delegate as? NSView)?.isDescendant(of: outline) == true
     }
 
     /// The rows now shown, as "indent title" (test support).
@@ -127,6 +154,11 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
 
     func node(titled title: String) -> BookmarkNode? {
         func find(_ n: BookmarkNode) -> BookmarkNode? { n.bookmark.title == title ? n : n.children.lazy.compactMap(find).first }
+        return roots.lazy.compactMap(find).first
+    }
+
+    func node(id: String) -> BookmarkNode? {
+        func find(_ n: BookmarkNode) -> BookmarkNode? { n.bookmark.id == id ? n : n.children.lazy.compactMap(find).first }
         return roots.lazy.compactMap(find).first
     }
 
@@ -143,10 +175,20 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         app.openBookmark(n.bookmark, newTab: true)
     }
 
+    /// What Delete took, newest last: Edit > Undo puts the last one back (with its rows and its position).
+    private(set) var deleted: [Store.Deleted] = []
+
     @objc func deleteSelected() {
         guard let n = selected, !n.isRoot else { return }
-        if !BarHook.on("BM_NODELETE") { app.deleteBookmark(n.bookmark.id) }
+        if !BarHook.on("BM_NODELETE"), let d = app.deleteBookmark(n.bookmark.id) { deleted.append(d) }
         reload()
+    }
+
+    func undoDelete() {
+        guard let d = deleted.popLast(), !BarHook.on("BM_NOUNDO") else { return }
+        app.restoreBookmark(d)
+        reload()
+        if let n = node(id: d.id) { select(n) }
     }
 
     /// Under the selected folder, beside the selected page, or (nothing selected) in Bookmarks Bar.
@@ -163,8 +205,17 @@ final class BookmarksWindowController: NSObject, NSOutlineViewDataSource, NSOutl
         let r = outline.selectedRow
         guard r >= 0, let n = outline.item(atRow: r) as? BookmarkNode, !n.isRoot, let field = outline.view(atColumn: 0, row: r, makeIfNecessary: true) as? NSTextField else { return }
         field.isEditable = true
+#if NOCHE_TESTHOOKS
+        if !failEditStart && !BarHook.on("BM_NOEDIT") { outline.editColumn(0, row: r, with: nil, select: true) }  // the test stands in for an edit that does not start
+#else
         outline.editColumn(0, row: r, with: nil, select: true)
+#endif
+        // Editing that did not start must not leave the cell editable (a double click could then edit it).
+        if !isEditing && !BarHook.on("BM_NOCLEAR") && !BarHook.on("BM_NOEDIT") { field.isEditable = false }
     }
+#if NOCHE_TESTHOOKS
+    var failEditStart = false
+#endif
 
     @objc func titleEdited(_ field: NSTextField) {
         let r = outline.row(for: field)

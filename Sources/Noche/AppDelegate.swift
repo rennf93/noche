@@ -145,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for (k, v) in settings where (k == "quitBehavior" && ["preserve", "close"].contains(v)) || (k == "suggestRemote" && ["0", "1"].contains(v)) {
             try? store.setSetting(k, v)
         }
-        barMode = BookmarksBarMode(stored: try? store.setting(BookmarksBarMode.settingKey))
+        barMode = BarHook.on("BM_NOREAD") ? .newTabOnly : BookmarksBarMode(stored: try? store.setting(BookmarksBarMode.settingKey))  // the hook: the launch ignores the stored mode
         let w = StoreWriter(store: store)
         w.snapshot = { [weak self] id in
             guard let self, let i = self.controllers.firstIndex(where: { $0.id == id }) else { return nil }

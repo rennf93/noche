@@ -53,8 +53,11 @@ extension SelfTest {
         let removed = ((try? String(contentsOf: state, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
         guard !removed.isEmpty else { return finish(false, "phase 1 left no state") }
         guard await ready() else { return }
-        try? await Task.sleep(for: .seconds(4))  // the engine announces its restored items at startup
+        // The engine announces its restored items at startup: wait for the removed ids to be announced, so "they stay hidden" is judged on what came back.
+        let ids = removed.compactMap { $0.split(separator: ":", omittingEmptySubsequences: false).first.flatMap { UInt32($0) } }
+        let announced = await until(20, { Set(ids).isSubset(of: Set(NCDownloads.shared.items.map(\.identifier))) })
         let back = NCDownloads.shared.items.map { "\($0.identifier):\($0.suggestedName):\($0.state.rawValue)" }
+        guard announced else { return finish(false, "the engine announced only \(back) after the relaunch, not all of the removed ids \(ids): nothing proves they stay hidden") }
         line("info", "removed in phase 1: \(removed); items the engine announced after the relaunch: \(back)")
         let again = removed.filter { r in dc.items.contains { r.hasPrefix("\($0.identifier):") } }
         try? await Task.sleep(for: .milliseconds(300))
@@ -90,6 +93,33 @@ extension SelfTest {
         guard await until(15, { app.controllers.count == 2 }) else { return finish(false, "window B did not close") }
         guard app.active === a else { return finish(false, "after B closed the active window is \(which(app.active)), want A (key before B; the newest is C)") }
         finish(violations.isEmpty, "with no browser window key the active window follows the last key one (B, though C is newest), a History link opened a tab in B only, and after B closed the previous one (A) is next \(violations)")
+    }
+
+    /// Task 7a Minor 2: a History window in the Dock misses the changes made meanwhile (they are skipped while it is not visible), so it reloads when it
+    /// comes back and when it becomes key. A hidden run never miniaturizes (the Dock animation): the window is taken off screen and the window's own
+    /// notifications are posted by hand, the way window-recency posts didBecomeKey.
+    func historyDock() async {
+        guard await ready() else { return }
+        seed("http://dock.test/before", "Before the Dock", ago: 60)
+        app.showHistory(nil)
+        guard await until(5, { hist.window.isVisible }) else { return finish(false, "the History window did not show") }
+        func titles() -> [String] { hist.entries.compactMap { if case .visit(let v) = $0 { v.title } else { nil } } }
+        guard titles().contains("Before the Dock") else { return finish(false, "the window lacks the first visit (\(titles()))") }
+        func away(_ title: String, _ url: String) async -> Bool {
+            hist.window.orderOut(nil)  // what the Dock does to isVisible
+            seed(url, title, ago: 1)
+            NotificationCenter.default.post(name: HistoryWindowController.changed, object: nil)
+            try? await Task.sleep(for: .milliseconds(600))  // longer than the 0.25 s refresh: a visible window would have reloaded by now
+            return !titles().contains(title)
+        }
+        guard await away("Left in the Dock", "http://dock.test/dock") else { return finish(false, "a window that is not visible reloaded at once (\(titles())), so the check proves nothing") }
+        NotificationCenter.default.post(name: NSWindow.didDeminiaturizeNotification, object: hist.window)
+        guard await until(2, { titles().contains("Left in the Dock") }) else { return finish(false, "back from the Dock the window still lacks the visit made meanwhile (\(titles()))") }
+        guard await away("Left behind a key change", "http://dock.test/key") else { return finish(false, "a window that is not visible reloaded at once (\(titles()))") }
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: hist.window)
+        guard await until(2, { titles().contains("Left behind a key change") }) else { return finish(false, "when it became key the window still lacks the visit made meanwhile (\(titles()))") }
+        hist.window.close()
+        finish(violations.isEmpty, "changes made while the History window was off screen showed after it came back from the Dock and after it became key \(violations)")
     }
 
     /// Task 5 Minor 4: the 500-visit cap says so on its last line (search is capped too, and says so), a search reaches older visits, and a live refresh keeps

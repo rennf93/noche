@@ -70,11 +70,13 @@ extension SelfTest {
         guard barTitles().isEmpty, !recentRows().header else { return finish(false, "a fresh profile already has bookmarks: \(barTitles()) \(recentRows())") }
         guard bookmarksMenu()?.delegate === app.bookmarksMenuDelegate else { return finish(false, "the Bookmarks menu has no delegate, so its rows are never built") }
         // A key equivalent search must not rebuild the dynamic rows (menuNeedsUpdate would read the whole tree on every Cmd chord).
-        if let menu = bookmarksMenu(), let del = menu.delegate, let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
-                                                                                         windowNumber: ctl.nsWindow?.windowNumber ?? 0, context: nil, characters: "d", charactersIgnoringModifiers: "d", isARepeat: false, keyCode: 2) {
-            var t: AnyObject?, a: Selector?
-            guard del.menuHasKeyEquivalent?(menu, for: ev, target: &t, action: &a) == false else { return finish(false, "the Bookmarks menu delegate does not answer false to a key equivalent search, so each Cmd chord rebuilds the tree") }
+        guard let menu = bookmarksMenu(), let del = menu.delegate else { return finish(false, "no Bookmarks menu or delegate to ask") }
+        guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: ctl.nsWindow?.windowNumber ?? 0, context: nil, characters: "d", charactersIgnoringModifiers: "d", isARepeat: false, keyCode: 2) else {
+            return finish(false, "NSEvent.keyEvent returned nil, so the key equivalent search could not be tried (this check never skips)")
         }
+        var t: AnyObject?, a: Selector?
+        guard del.menuHasKeyEquivalent?(menu, for: ev, target: &t, action: &a) == false else { return finish(false, "the Bookmarks menu delegate does not answer false to a key equivalent search, so each Cmd chord rebuilds the tree") }
         guard cmdD() else { return finish(false, "Cmd+D reached no menu item (\(keyLog.last ?? ""))") }
         guard await until(5, { (try? store.bookmark(forURL: tab.url)) != nil }), let first = try? store.bookmark(forURL: tab.url) else {
             return finish(false, "Cmd+D did not add \(tab.url) to the bookmarks (bar: \(barTitles()))")
@@ -197,6 +199,28 @@ extension SelfTest {
         finish(violations.isEmpty, "On New Tab Only (default), Always, Never and the toggle show and hide the bar on a page and on the New Tab surface, Always pushes the page down 42 pt, the mode is stored, chips at x 12 y 54 h 30 of the card \(violations)")
     }
 
+    /// The app reads the stored bar mode at launch (AppDelegate.swift, `barMode`): phase 1 sets Always and quits, phase 2 shows the bar on a page and marks Always in the menu.
+    func bmBarRelaunch() async {
+        guard await ready(), let ctl, let win, let store, let bar = bmBar else { return }
+        guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
+        func marks() -> [String] { ["Always", "On New Tab Only", "Never"].map { t in menuItem(t).map { i in i.menu?.update(); return i.state == .on ? "on" : "off" } ?? "missing" } }
+        if phase == 1 {
+            addMark("Alpha", fixture("b.html"))
+            guard app.barMode == .newTabOnly, bar.isHidden else { return finish(false, "phase 1 does not start from the default (\(barState(ctl)))") }
+            guard fire("Always"), await until(3, { !bar.isHidden && win.webInsets.top == ChromeStyle.webTop + 42 }), (try? store.setting(BookmarksBarMode.settingKey)) == "always" else {
+                return finish(false, "Always did not show the bar and store the mode: \(barState(ctl)), stored \(String(describing: try? store.setting(BookmarksBarMode.settingKey)))")
+            }
+            return finish(violations.isEmpty, "Always is set and stored (the bar shows on a page, the page is pushed down 42 pt) \(violations)")
+        }
+        guard (try? store.setting(BookmarksBarMode.settingKey)) == "always" else { return finish(false, "phase 1 left no stored mode (\(String(describing: try? store.setting(BookmarksBarMode.settingKey))))") }
+        ctl.selectRow(0)
+        guard await until(10, { !ctl.newTabShown && win.activeTab === win.tabs.first }) else { return finish(false, "no page tab after the relaunch") }
+        guard app.barMode == .always else { return finish(false, "the app launched in mode \(app.barMode.rawValue), the stored mode is always") }
+        guard await until(3, { !bar.isHidden && win.webInsets.top == ChromeStyle.webTop + 42 }), chipTitles() == ["Alpha"] else { return finish(false, "after the relaunch on a page: \(barState(ctl)), chips \(chipTitles())") }
+        guard marks() == ["on", "off", "off"] else { return finish(false, "after the relaunch the menu marks are \(marks()), want Always on") }
+        finish(violations.isEmpty, "the relaunch read Always from the store: the bar shows on a page with its chip, the page is pushed down 42 pt, the menu marks Always \(violations)")
+    }
+
     /// A bar item navigates the current tab, Cmd+click and a middle click open background tabs, a folder chip shows its tree, an address off the allowlist opens nothing.
     func bmOpen() async {
         guard await ready(), let ctl, let win, let tab = win.activeTab, let store else { return }
@@ -256,87 +280,158 @@ extension SelfTest {
         finish(violations.isEmpty, "a click loads the bookmark in the current tab, Cmd+click and a middle click open background tabs, a folder chip and the Bookmarks menu list and open their pages, a file: bookmark opens nothing, a click on the New Tab bar leaves the surface \(violations)")
     }
 
-    /// Rename and delete in the manager reach the bar and the menu; a double click opens a page in a new tab; Delete and the Delete key work; roots stay.
+    /// Whether the command bar lists a page row for |suffix| when |text| is typed (the bar reads the store on each keystroke).
+    func barHasPage(_ text: String, ending suffix: String) async -> Bool {
+        guard await openBar() else { return false }
+        barType(text)
+        _ = await until(3, { bar?.state.rows.contains { $0.kind == .page } == true })
+        let got = bar?.state.rows.contains { $0.kind == .page && ($0.url ?? "").hasSuffix(suffix) } == true
+        press(.escape); press(.escape)
+        _ = await until(2, { !barOpen() })
+        return got
+    }
+
+    /// Rename, delete and undo in the manager reach the bar, the menu, Recent Bookmarks and the command bar; a double click opens a page in a new tab;
+    /// Delete and the Delete key work; roots stay; a reload keeps the selection and a title being edited.
     func bmManager() async {
         guard await ready(), let ctl, let win, let store else { return }
         guard await fixtureTitleReady() else { return finish(false, "the fixture title never arrived") }
         addMark("Alpha", fixture("b.html"))
         addMark("Beta", fixture("link.html"))
-        if let mine = try? store.addFolder(title: "Mine", parentId: barRoot()!.id) { addMark("Child", fixture(""), in: mine) }
+        if let mine = try? store.addFolder(title: "Mine", parentId: barRoot()!.id) { addMark("Child", fixture("child-note.html"), in: mine) }
+        addMark("Delta", fixture("b.html?delta"))
         app.setBarMode(.always)
         let tabsBefore = win.tabs.count
-        guard fire("Manage Bookmarks") else { return finish(false, "Manage Bookmarks is not an enabled menu item") }
+        // Opt+Cmd+B is a real key event through the main menu (a menu item fired by name would not prove the chord).
+        guard key("b", code: 11, [.option, .command]) else { return finish(false, "Opt+Cmd+B reached no menu item (\(keyLog.last ?? ""))") }
         let m = manager
-        guard await until(5, { m.window.isVisible }) else { return finish(false, "Manage Bookmarks did not show the Bookmarks window") }
+        guard await until(5, { m.window.isVisible }) else { return finish(false, "Opt+Cmd+B did not show the Bookmarks window (\(keyLog.last ?? ""))") }
         try? await Task.sleep(for: .milliseconds(300))
         let terms = hiddenTerms(m.window)
         guard terms.ok else { return finish(false, "the Bookmarks window can show: \(terms.text)") }
         guard win.tabs.count == tabsBefore else { return finish(false, "Manage Bookmarks opened a tab") }
-        let want = ["Bookmarks Bar", "  Alpha", "  Beta", "  Mine", "    Child", "Other Bookmarks"]
+        let want = ["Bookmarks Bar", "  Alpha", "  Beta", "  Mine", "    Child", "  Delta", "Other Bookmarks"]
         guard m.visibleTitles == want else { return finish(false, "the window lists \(m.visibleTitles), want \(want)") }
+        // Edit > Undo: Cmd+Z, off while nothing was deleted (the wiring through a key window is an owner check: a hidden window is never key).
+        guard let undoItem = menuItem("Undo"), undoItem.action == NSSelectorFromString("undo:"), undoItem.keyEquivalent == "z", undoItem.keyEquivalentModifierMask.contains(.command), m.window.makeFirstResponder(m.outline) else {
+            return finish(false, "no Edit > Undo item on Cmd+Z, or the table cannot take first responder")
+        }
+        guard !m.outline.validateUserInterfaceItem(undoItem) else { return finish(false, "Undo is on with nothing deleted") }
+        func undo() -> Bool {
+            guard m.outline.validateUserInterfaceItem(undoItem), m.window.makeFirstResponder(m.outline), let action = undoItem.action else { return false }
+            return NSApp.sendAction(action, to: m.window.firstResponder, from: undoItem)
+        }
         // A double click on Alpha opens it in a new tab.
         guard let alphaNode = m.node(titled: "Alpha") else { return finish(false, "no Alpha row") }
+        let alphaId = alphaNode.bookmark.id
         m.select(alphaNode)
         _ = m.outline.sendAction(m.outline.doubleAction, to: m.outline.target)
         guard await until(15, { win.tabs.count == tabsBefore + 1 && win.tabs.contains { $0.url.hasSuffix("/b.html") } }) else { return finish(false, "a double click on Alpha opened \(win.tabs.map(\.url))") }
         // A double click never starts editing the title (the hidden window ignores the mouse, so what is asserted is that no title cell is editable until Return asks for it).
         let alphaRow = m.outline.row(forItem: alphaNode)
-        guard let alphaCell = m.outline.view(atColumn: 0, row: alphaRow, makeIfNecessary: true) as? NSTextField, !alphaCell.isEditable, (m.window.firstResponder as? NSTextView)?.delegate !== alphaCell else {
+        guard let alphaCell = m.outline.view(atColumn: 0, row: alphaRow, makeIfNecessary: true) as? NSTextField, !alphaCell.isEditable, !m.isEditing else {
             return finish(false, "after the double click the Alpha title cell is editable or being edited")
         }
-        // Rename Alpha in the window: the bar, the menu and the store follow.
-        func rename(_ old: String, to new: String) -> Bool {
-            guard let n = m.node(titled: old) else { return false }
-            m.select(n)
-            let r = m.outline.row(forItem: n)
-            guard r >= 0, let ret = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: m.window.windowNumber,
-                                                     context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) else { return false }
+        // A change made elsewhere reloads the rows and keeps the selection by id: a bookmark added above Alpha moves its row down by one.
+        func selectedId() -> String? { (m.outline.item(atRow: m.outline.selectedRow) as? BookmarkNode)?.bookmark.id }
+        guard let elsewhere = try? store.addBookmark(title: "Elsewhere", url: fixture("b.html?elsewhere"), parentId: barRoot()!.id, index: 0) else { return finish(false, "no bookmark added elsewhere") }
+        app.bookmarksChanged()
+        guard m.visibleTitles.first(where: { $0.hasSuffix("Elsewhere") }) != nil, selectedId() == alphaId else {
+            return finish(false, "after a change elsewhere the selection is \(selectedId() ?? "none") (\(m.outline.selectedRow)), want Alpha (\(alphaId)); rows \(m.visibleTitles)")
+        }
+        // Rename Alpha in the window: Return starts a real edit of that cell (a field editor on it), the bar, the menu and the store follow.
+        func fieldOf(_ title: String) -> NSTextField? {
+            guard let n = m.node(titled: title) else { return nil }
+            return m.outline.view(atColumn: 0, row: m.outline.row(forItem: n), makeIfNecessary: true) as? NSTextField
+        }
+        func returnKey() -> Bool {
+            guard let ret = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: m.window.windowNumber,
+                                             context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) else { return false }
             m.outline.keyDown(with: ret)  // Return asks for the rename
-            guard let field = m.outline.view(atColumn: 0, row: r, makeIfNecessary: true) as? NSTextField, field.isEditable, let action = field.action else { return false }
-            field.stringValue = new
-            return field.sendAction(action, to: field.target)
+            return true
         }
-        guard rename("Alpha", to: "Alpha Renamed") else {
-            let r = m.outline.selectedRow, f = m.outline.view(atColumn: 0, row: max(r, 0), makeIfNecessary: true) as? NSTextField
-            return finish(false, "the Alpha title cell cannot be edited by Return (selected row \(r), cell \(String(describing: f.map { "editable \($0.isEditable) action \(String(describing: $0.action))" })))")
+        m.select(alphaNode)
+        guard returnKey(), let field = fieldOf("Alpha"), field.isEditable else {
+            return finish(false, "Return did not make the Alpha title cell editable (selected row \(m.outline.selectedRow))")
         }
-        guard await until(3, { chipTitles().contains("Alpha Renamed") && !chipTitles().contains("Alpha") }), treeTitles("Bookmarks Bar").contains("Alpha Renamed"), recentRows().rows.contains("Alpha Renamed"),
-              (try? store.bookmark(forURL: fixture("b.html")))?.title == "Alpha Renamed", m.visibleTitles.contains("  Alpha Renamed") else {
-            return finish(false, "after the rename: chips \(chipTitles()), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows), window \(m.visibleTitles)")
+        guard let editor = m.window.firstResponder as? NSTextView, editor.isFieldEditor, editor.delegate === field, m.isEditing else {
+            return finish(false, "after Return no field editor is editing the Alpha cell (first responder \(String(describing: m.window.firstResponder)))")
         }
-        // Delete Beta with the button: gone from the window, the bar, the menu and the store (tombstoned).
-        guard let beta = m.node(titled: "Beta") else { return finish(false, "no Beta row") }
-        m.select(beta)
+        // A change made in another window does not end the edit: the editor stays and keeps what was typed.
+        editor.string = "Alpha Ren"
+        app.renameBookmark(elsewhere.id, to: "Elsewhere too")
+        guard m.isEditing, m.window.firstResponder === editor, editor.string == "Alpha Ren" else {
+            return finish(false, "a change from another window ended the title edit (editing \(m.isEditing), text \(editor.string))")
+        }
+        // Return commits the typed title through AppKit; the rows that waited are rebuilt and show the other window's change too.
+        editor.string = "Alpha Renamed"
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        guard await until(3, { chipTitles().contains("Alpha Renamed") && !chipTitles().contains("Alpha") && !m.isEditing && m.visibleTitles.contains("  Elsewhere too") }), treeTitles("Bookmarks Bar").contains("Alpha Renamed"),
+              recentRows().rows.contains("Alpha Renamed"), (try? store.bookmark(forURL: fixture("b.html")))?.title == "Alpha Renamed", m.visibleTitles.contains("  Alpha Renamed") else {
+            return finish(false, "after the rename: chips \(chipTitles()), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows), window \(m.visibleTitles), editing \(m.isEditing)")
+        }
+        app.deleteBookmark(elsewhere.id)
+        // Editing that does not start leaves nothing editable behind (the test stands in for a start that fails).
+        guard let betaNode = m.node(titled: "Beta") else { return finish(false, "no Beta row") }
+        m.select(betaNode)
+        m.failEditStart = true
+        _ = returnKey()
+        m.failEditStart = false
+        guard let betaCell = fieldOf("Beta"), !betaCell.isEditable, !m.isEditing else { return finish(false, "Return where editing did not start left the Beta title cell editable") }
+        // Delete Beta with the button: gone from the window, the bar, the menu and the store (tombstoned); Undo puts it back where it was.
+        m.select(betaNode)
         m.deleteButton.performClick(nil)
         guard await until(3, { !chipTitles().contains("Beta") }), !m.visibleTitles.contains("  Beta"), !treeTitles("Bookmarks Bar").contains("Beta"), !recentRows().rows.contains("Beta"),
               (try? store.bookmark(forURL: fixture("link.html"))) == nil else {
             return finish(false, "after Delete: chips \(chipTitles()), window \(m.visibleTitles), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows)")
         }
-        // The Delete key removes Child (a key event handed to the table).
-        guard let child = m.node(titled: "Child") else { return finish(false, "no Child row") }
-        m.select(child)
+        guard undo() else { return finish(false, "Undo was not available after Delete") }
+        guard await until(3, { chipTitles() == ["Alpha Renamed", "Beta", "Mine", "Delta"] }), m.visibleTitles.contains("  Beta"), treeTitles("Bookmarks Bar").contains("Beta"), recentRows().rows.contains("Beta"),
+              (try? store.bookmark(forURL: fixture("link.html"))) != nil, selectedId() == betaNode.bookmark.id else {
+            return finish(false, "after Undo: chips \(chipTitles()), window \(m.visibleTitles), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows), selected \(selectedId() ?? "none")")
+        }
+        guard !m.outline.validateUserInterfaceItem(undoItem) else { return finish(false, "Undo is still on after the only delete was undone") }
+        m.select(betaNode)
+        m.deleteButton.performClick(nil)
+        guard await until(3, { !chipTitles().contains("Beta") }) else { return finish(false, "Beta did not go the second time") }
+        // The Delete key removes Delta (a key event handed to the table).
+        guard let delta = m.node(titled: "Delta") else { return finish(false, "no Delta row") }
+        m.select(delta)
         guard let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: m.window.windowNumber,
                                          context: nil, characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51) else { return finish(false, "no key event") }
         m.outline.keyDown(with: key)
-        guard m.node(titled: "Child") == nil, (try? store.bookmark(forURL: fixture(""))) == nil else { return finish(false, "the Delete key left Child (\(m.visibleTitles))") }
-        // A root cannot be deleted; New Folder adds a folder under the selected root; deleting a folder takes its chip off the bar.
+        guard m.node(titled: "Delta") == nil, (try? store.bookmark(forURL: fixture("b.html?delta"))) == nil else { return finish(false, "the Delete key left Delta (\(m.visibleTitles))") }
+        // A root cannot be deleted; New Folder adds a folder under the selected root.
         if let root = m.node(titled: "Other Bookmarks") {
             m.select(root)
             m.deleteButton.performClick(nil)
             m.folderButton.performClick(nil)
         }
         guard (try? store.bookmarkRoots().count) == 2, m.visibleTitles.last == "  New Folder" else { return finish(false, "roots \(String(describing: try? store.bookmarkRoots().count)), window \(m.visibleTitles)") }
+        // Deleting a folder that still holds a bookmark takes the folder and the bookmark off every surface: the bar, the Bookmarks menu, Recent Bookmarks and the command bar.
+        guard recentRows().rows.contains("Child"), await barHasPage("child", ending: "/child-note.html") else { return finish(false, "before the delete Child is not in Recent Bookmarks (\(recentRows().rows)) or the command bar") }
         guard let mine = m.node(titled: "Mine") else { return finish(false, "no Mine row") }
         m.select(mine)
         m.deleteButton.performClick(nil)
-        guard await until(3, { !chipTitles().contains("Mine") }), m.node(titled: "Mine") == nil, chipTitles() == ["Alpha Renamed"] else { return finish(false, "after deleting Mine the bar shows \(chipTitles())") }
+        guard await until(3, { !chipTitles().contains("Mine") }), m.node(titled: "Mine") == nil, m.node(titled: "Child") == nil, chipTitles() == ["Alpha Renamed"] else { return finish(false, "after deleting Mine the bar shows \(chipTitles()), window \(m.visibleTitles)") }
+        let gone = (try? store.bookmark(forURL: fixture("child-note.html"))) == nil, inTree = treeTitles("Bookmarks Bar").contains("Mine"), inRecent = recentRows().rows.contains("Child")
+        let inBar = await barHasPage("child", ending: "/child-note.html")
+        guard gone, !inTree, !inRecent, !inBar else {
+            return finish(false, "deleting a folder that held Child: store has it \(!gone), menu tree lists Mine \(inTree), Recent lists Child \(inRecent), command bar offers it \(inBar)")
+        }
+        // Undo brings the folder back with its bookmark, at its position.
+        guard undo() else { return finish(false, "Undo was not available after deleting Mine") }
+        let back = await until(3, { chipTitles() == ["Alpha Renamed", "Mine"] && m.visibleTitles.contains("    Child") })
+        guard back, (try? store.bookmark(forURL: fixture("child-note.html"))) != nil, treeTitles("Bookmarks Bar") == ["Alpha Renamed", "Mine"], recentRows().rows.contains("Child"), await barHasPage("child", ending: "/child-note.html") else {
+            return finish(false, "after Undo the folder is not back with Child: chips \(chipTitles()), window \(m.visibleTitles), tree \(treeTitles("Bookmarks Bar")), recent \(recentRows().rows)")
+        }
         // New Folder with nothing selected adds the folder to Bookmarks Bar.
         m.outline.deselectAll(nil)
         m.folderButton.performClick(nil)
-        guard await until(3, { chipTitles() == ["Alpha Renamed", "New Folder"] }), barTitles() == ["Alpha Renamed", "New Folder"] else { return finish(false, "New Folder with no selection left the bar as \(barTitles())") }
+        guard await until(3, { chipTitles() == ["Alpha Renamed", "Mine", "New Folder"] }), barTitles() == ["Alpha Renamed", "Mine", "New Folder"] else { return finish(false, "New Folder with no selection left the bar as \(barTitles())") }
         _ = ctl
         m.window.close()
-        finish(violations.isEmpty, "the window is hidden (\(terms.text)), lists both roots and their rows, a double click opened a tab, a rename and a delete (button and Delete key) reached the bar, the Bookmarks menu and the store, roots stayed, New Folder added a folder \(violations)")
+        finish(violations.isEmpty, "Opt+Cmd+B shows the window (\(terms.text)), it lists both roots and their rows, a double click opened a tab, a change elsewhere kept the selection by id and the title edit going, a rename ran in a real field editor, a failed edit start left no editable cell, a delete (button and Delete key) reached the bar, the menu, Recent and the store, deleting a folder with a bookmark took both off every surface, Undo brought a bookmark and a folder with its rows back at their positions, roots stayed, New Folder added a folder \(violations)")
     }
 
     /// A bookmarked page is a command bar row, also one never visited; a deleted bookmark stops appearing at once; a bookmark outranks an equal page without one.

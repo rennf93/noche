@@ -12,15 +12,22 @@ public enum SuggestionRanker {
         let tokens = q.split(whereSeparator: \.isWhitespace).map { typedWithoutSchemeAndWww(String($0)) }
 
         // A bookmark joins the history pages (one that was never visited is a page of its own) and its page's frecency counts bookmarkBonus times.
-        // The key is the address as the row shows it (`urlDisplay`: no scheme, no www., no trailing slash), so https://x.com and https://x.com/ are one page.
-        func key(_ url: String) -> String { urlDisplay(url).lowercased() }
+        // The key is `pageKey` (ruling M45), so https://x.com and https://x.com/ are one page and /Foo and /foo are two. A merged page opens its https address if any merged address is https.
+        func key(_ url: String) -> String { pageKey(url) }
+        func isHttps(_ url: String) -> Bool { url.lowercased().hasPrefix("https://") }
+        var httpsOf: [String: String] = [:]
+        for b in bookmarks where isHttps(b.url) && httpsOf[key(b.url)] == nil { httpsOf[key(b.url)] = b.url }
         let marked = Set(bookmarks.map { key($0.url) })
+        let pages = pages.map { p -> PageCandidate in
+            guard !isHttps(p.url), let https = httpsOf[key(p.url)] else { return p }
+            return PageCandidate(url: https, host: p.host, title: p.title, visitCount: p.visitCount, typedCount: p.typedCount, lastVisitAt: p.lastVisitAt)
+        }
         let known = Set(pages.map { key($0.url) })
         var listedMarks = Set<String>()
         let bookmarkPages = bookmarks.filter { !known.contains(key($0.url)) && listedMarks.insert(key($0.url)).inserted }.compactMap { b -> PageCandidate? in
             guard var host = URLComponents(string: b.url)?.host?.lowercased(), !host.isEmpty else { return nil }
             if host.hasPrefix("www.") { host.removeFirst(4) }
-            return PageCandidate(url: b.url, host: host, title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
+            return PageCandidate(url: httpsOf[key(b.url)] ?? b.url, host: host, title: b.title, visitCount: 0, typedCount: 0, lastVisitAt: b.addedAt)
         }
         var seen = Set<String>()
         let matches = (pages + bookmarkPages)

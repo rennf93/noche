@@ -204,6 +204,29 @@ final class SuggestionRankerTests: XCTestCase {
         XCTAssertEqual(pages.first?.frecency, 6)
     }
 
+    /// Ruling M45: the dedupe key drops the scheme, a leading www. and one trailing slash and lowercases the host only.
+    func testDedupeKeyKeepsPathCaseAndMergesHostCase() {
+        let rows = SuggestionRanker.rank(query: "x", pages: [page("https://x.com/Foo", host: "x.com", title: "Upper", visits: 2)], tabs: [], sites: [], remote: [], activeTabID: nil, now: now,
+                                         bookmarks: [BookmarkCandidate(url: "https://x.com/foo", title: "Lower", addedAt: now), BookmarkCandidate(url: "https://X.com/Foo", title: "Host case", addedAt: now)])
+        XCTAssertEqual(Set(rows.filter { $0.kind == .page }.compactMap(\.url)), ["https://x.com/Foo", "https://x.com/foo"])
+        XCTAssertEqual(rows.filter { $0.kind == .page }.count, 2)
+        XCTAssertEqual(pageKey("https://WWW.X.com/Foo/"), "x.com/Foo")
+        XCTAssertEqual(pageKey("http://x.com/a?Q=1#F"), "x.com/a?Q=1#F")
+        XCTAssertNotEqual(pageKey("http://x.com/?a=B"), pageKey("http://x.com/?a=b"))
+    }
+
+    /// When pages merge the row opens the https address if any merged address is https.
+    func testMergedPagesOpenHttps() {
+        func rows(history: String?, marks: [String]) -> [String?] {
+            SuggestionRanker.rank(query: "x", pages: history.map { [page($0, host: "x.com", title: "X", visits: 3)] } ?? [], tabs: [], sites: [], remote: [], activeTabID: nil, now: now,
+                                  bookmarks: marks.map { BookmarkCandidate(url: $0, title: "X", addedAt: now) }).filter { $0.kind == .page }.map(\.url)
+        }
+        XCTAssertEqual(rows(history: "http://x.com/a", marks: ["https://x.com/a"]), ["https://x.com/a"])
+        XCTAssertEqual(rows(history: "https://x.com/a", marks: ["http://x.com/a"]), ["https://x.com/a"])
+        XCTAssertEqual(rows(history: nil, marks: ["http://www.x.com/a", "https://x.com/a/"]), ["https://x.com/a/"])
+        XCTAssertEqual(rows(history: "http://x.com/a", marks: ["http://x.com/a/"]), ["http://x.com/a"])
+    }
+
     func testBookmarkedPageGainsDoubleFrecency() {
         let a = page("https://a.example/x", host: "a.example", title: "Note one", visits: 3)
         let b = page("https://b.example/x", host: "b.example", title: "Note two", visits: 4)

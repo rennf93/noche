@@ -7,11 +7,11 @@ import NocheStore
 /// command bar follow at once), and the menu actions.
 extension AppDelegate {
     @objc func bookmarkThisPage(_ s: Any?) { active?.bookmarkThisPage() }
-    @objc func manageBookmarks(_ s: Any?) { if !closing { bookmarksWindow.show() } }
+    @objc func manageBookmarks(_ s: Any?) { if !closing && !BarHook.on("BM_NOMANAGE") { bookmarksWindow.show() } }
     /// Always, On New Tab Only and Never, by tag.
     @objc func setBookmarksBarMode(_ s: NSMenuItem) { setBarMode(BookmarksBarMode.allCases[s.tag]) }
     @objc func toggleBookmarksBar(_ s: Any?) {
-        guard let a = active else { return }
+        guard let a = active, !BarHook.on("BM_NOTOGGLE") else { return }
         setBarMode(barMode.toggled(onNewTab: a.newTabShown))
     }
 
@@ -24,7 +24,7 @@ extension AppDelegate {
 
     func bookmarksChanged() {
         controllers.forEach { $0.refreshBookmarks() }
-        madeBookmarksWindow?.reload()
+        madeBookmarksWindow?.changed()
     }
 
     /// Every folder with its depth, in tree order (the Cmd+D card's popup).
@@ -52,8 +52,22 @@ extension AppDelegate {
         bookmarksChanged()
     }
 
-    func deleteBookmark(_ id: String) {
-        do { try writer?.store.deleteBookmark(id: id) } catch { logBookmark("delete", error) }
+    @discardableResult
+    func deleteBookmark(_ id: String) -> Store.Deleted? {
+        var done: Store.Deleted?
+        do {
+            // negative control: BM_ORPHAN deletes a folder's row only and leaves what it held on the bar
+            if BarHook.on("BM_ORPHAN"), let store = writer?.store, let bar = try store.bookmarkRoots().first {
+                for c in (try? store.bookmarkChildren(of: id)) ?? [] { try store.moveBookmark(id: c.id, toParent: bar.id, index: nil) }
+            }
+            done = try writer?.store.deleteBookmark(id: id)
+        } catch { logBookmark("delete", error) }
+        bookmarksChanged()
+        return done
+    }
+
+    func restoreBookmark(_ d: Store.Deleted) {
+        do { try writer?.store.restoreBookmark(d) } catch { logBookmark("restore", error) }
         bookmarksChanged()
     }
 

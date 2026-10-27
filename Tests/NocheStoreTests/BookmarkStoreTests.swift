@@ -127,6 +127,32 @@ final class BookmarkStoreTests: XCTestCase {
         try s.db.read { XCTAssertEqual(try Int.fetchOne($0, sql: "SELECT count(*) FROM bookmark WHERE deletedAt IS NOT NULL"), 3) }
     }
 
+    func testRestoreBringsBackTheSubtreeAtItsPosition() throws {
+        let (s, bar, _) = try make()
+        _ = try s.addBookmark(title: "a", url: "https://a.com", parentId: bar.id)
+        let f = try s.addFolder(title: "f", parentId: bar.id)
+        let early = try s.addBookmark(title: "early", url: "https://early.com", parentId: f.id)
+        _ = try s.addBookmark(title: "kid", url: "https://kid.com", parentId: f.id)
+        _ = try s.addBookmark(title: "c", url: "https://c.com", parentId: bar.id)
+        let gone = try s.deleteBookmark(id: early.id)  // deleted before the folder: it stays deleted when the folder returns
+        let d = try s.deleteBookmark(id: f.id)
+        XCTAssertEqual(try titles(s, bar), ["a", "c"])
+        try s.restoreBookmark(d)
+        XCTAssertEqual(try titles(s, bar), ["a", "f", "c"])
+        try dense(s, bar)
+        XCTAssertEqual(try s.bookmarkChildren(of: f.id).map(\.title), ["kid"])
+        XCTAssertNotNil(try s.bookmark(forURL: "https://kid.com"))
+        XCTAssertNil(try s.bookmark(forURL: "https://early.com"))
+        try s.restoreBookmark(gone)
+        XCTAssertEqual(try s.bookmarkChildren(of: f.id).map(\.title).sorted(), ["early", "kid"])
+        // The parent folder gone: the child cannot come back under it.
+        let kid = try XCTUnwrap(s.bookmark(forURL: "https://kid.com"))
+        let k = try s.deleteBookmark(id: kid.id)
+        _ = try s.deleteBookmark(id: f.id)
+        XCTAssertThrowsError(try s.restoreBookmark(k))
+        XCTAssertNil(try s.bookmark(forURL: "https://kid.com"))
+    }
+
     func testRecentAndForURL() throws {
         let t = LockedBox(1_000.0)
         let s = try Store.inMemory(now: { Date(timeIntervalSince1970: t.next()) })

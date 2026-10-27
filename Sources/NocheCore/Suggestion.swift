@@ -76,3 +76,16 @@ public func urlDisplay(_ url: String) -> String {
     if s.hasSuffix("/") { s = s.dropLast() }
     return String(s)
 }
+
+/// The key two addresses share when they are one page (ruling M45): no scheme, no leading "www.", one trailing "/", the host lowercased.
+/// Path, query and fragment stay as typed, so /Foo and /foo are two pages.
+public func pageKey(_ url: String) -> String {
+    var s = Substring(url)
+    if let r = s.range(of: "://") { s = s[r.upperBound...] }
+    let end = s.firstIndex { "/?#".contains($0) } ?? s.endIndex
+    var host = s[..<end].lowercased()
+    if host.hasPrefix("www.") { host.removeFirst(4) }
+    var rest = String(s[end...])
+    if rest.hasSuffix("/") { rest.removeLast() }
+    return host + rest
+}

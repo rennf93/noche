@@ -20,7 +20,7 @@ final class HistoryTableView: NSTableView {
 /// The History window (History > Show History, Cmd+Y): a native window over the store's visits, grouped by local day, newest first.
 /// A search field filters by title or address, a double click opens the page in a new tab, Delete removes the page and its visits.
 @MainActor
-final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
     unowned let app: AppDelegate
     let window: NSWindow
     let search = NSSearchField()
@@ -39,6 +39,7 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 520), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         super.init()
         window.title = "History"
+        window.delegate = self
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 240)
         window.appearance = NSAppearance(named: .darkAqua)
@@ -100,6 +101,10 @@ final class HistoryWindowController: NSObject, NSTableViewDataSource, NSTableVie
             MainActor.assumeIsolated { self?.refreshQueued = false; self?.reload() }
         }
     }
+
+    /// Changes made while the window sat in the Dock were skipped (`historyChanged` waits for a visible window): reload when it comes back or becomes key.
+    func windowDidDeminiaturize(_ notification: Notification) { if !BarHook.on("HIST_NOWAKE") { reload() } }
+    func windowDidBecomeKey(_ notification: Notification) { if !BarHook.on("HIST_NOWAKE") { reload() } }
 
     func show() {
         BrowserWindowController.note("showHistory")

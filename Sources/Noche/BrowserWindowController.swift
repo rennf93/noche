@@ -220,7 +220,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 
     func applyLayout() {
         guard installed else { return }
-        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX, barHeight: barPushesPage ? ChromeStyle.bookmarksBarHeight : 0, barShown: barVisible)
+        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX, barHeight: barPushesPage && !BarHook.on("BM_NOPUSH") ? ChromeStyle.bookmarksBarHeight : 0, barShown: barVisible)
         backdrop.card.frame = layout.card
         bookmarksBar.frame = layout.bookmarksBar
         bookmarksBar.isHidden = !barVisible

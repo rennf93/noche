@@ -159,7 +159,9 @@ extension SelfTest {
     }
 
     /// Phase 1 prints its verdict from `beforeExit` (the quit path's pause has to have landed); phase 2 resumes after the relaunch.
-    func dlQuitRelaunch() async {
+    /// |cancelRestored|: dl-restored-cancel-relaunch, the same first phase; phase 2 cancels the restored paused row (the engine's callback for it exists
+    /// only once the engine announced the item) and removes it, with no server and no Resume.
+    func dlQuitRelaunch(cancelRestored: Bool = false) async {
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
         let serverLog = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-server.log").path
         if phase == 1 {
@@ -179,6 +181,24 @@ extension SelfTest {
         guard restored.state == .paused, restored.receivedBytes > 0, restored.receivedBytes <= before else {
             return finish(false, "restored download is state \(restored.state.rawValue) with \(restored.receivedBytes) bytes (phase 1 had \(before) at exit), want paused")
         }
+        if cancelRestored {
+            app.showDownloads(nil)
+            guard await until(5, { dc.windowController.rows.first?.visibleButtons == ["Resume", "Cancel"] }) else { return finish(false, "restored row buttons \(dc.windowController.rows.first?.visibleButtons ?? [])") }
+            dc.windowController.rows[0].button("Cancel")?.performClick(nil)
+            // A restored row has a way out: the engine cancels it (a canceled row with Remove), or the app gives it up after DownloadsController.cancelGrace.
+            let engineCanceled = await until(DownloadsController.cancelGrace - 0.5, { item(restored.identifier)?.state == .canceled })
+            line("info", "Cancel on the restored paused row: the engine ended it canceled \(engineCanceled) (state now \(item(restored.identifier)?.state.rawValue ?? -1), rows \(rowNamesNow()))")
+            guard await until(DownloadsController.cancelGrace + 8, { item(restored.identifier) == nil || item(restored.identifier)?.state == .canceled }) else {
+                return finish(false, "the restored paused row has no way out: after Cancel it is still state \(item(restored.identifier)?.state.rawValue ?? -1) with buttons \(dc.windowController.rows.first?.visibleButtons ?? [])")
+            }
+            if item(restored.identifier) != nil {
+                guard await until(3, { dc.windowController.rows.first?.visibleButtons == ["Remove"] }) else { return finish(false, "the canceled restored row shows \(dc.windowController.rows.first?.visibleButtons ?? [])") }
+                dc.windowController.rows[0].button("Remove")?.performClick(nil)
+            }
+            guard dc.windowController.rows.isEmpty, dc.items.isEmpty else { return finish(false, "the restored row is still listed: \(rowNamesNow())") }
+            finish(violations.isEmpty, "relaunched with the download paused at \(restored.receivedBytes) bytes: Cancel on the restored row took it off the list (engine canceled it first: \(engineCanceled)) \(violations)")
+            return
+        }
         guard let server = await startSlowServer(size: Self.slowSize, port: port, log: serverLog) else { return finish(false, "the slow server did not come back on port \(port)") }
         slowServer = server  // stopped by beforeExit on every way out
         guard server.sha == saved[1] else { return finish(false, "the slow server's content changed (SHA-256 \(server.sha), phase 1 had \(saved[1]))") }
@@ -195,10 +215,12 @@ extension SelfTest {
                "relaunched with the download paused at \(restored.receivedBytes) bytes, Resume asked the server for the rest (requests with range start \(ranges)), SHA-256 \(crypto ?? "nil") equals the server's \(server.sha) (shasum \(tool ?? "nil")) \(violations)")
     }
 
+    private func rowNamesNow() -> [String] { dc.windowController.rows.map { $0.nameField.stringValue } }
+
     /// Phase 1's verdict, after the quit's pause: the download must be paused with bytes, and the state file gets the bytes at exit.
     func dlQuitVerdict() {
         defer { slowServer?.stop() }  // every way out, with or without a verdict
-        guard check == "dl-quit-relaunch", phase == 1, !verdictPrinted, let id = relaunchID else { return }
+        guard check == "dl-quit-relaunch" || check == "dl-restored-cancel-relaunch", phase == 1, !verdictPrinted, let id = relaunchID else { return }
         let it = item(id)
         let ok = it?.state == .paused && (it?.receivedBytes ?? 0) >= 800_000
         let state = SelfTest.downloadFolder.deletingLastPathComponent().appendingPathComponent("dl-relaunch.txt")
