@@ -86,6 +86,20 @@ public struct TabList: Equatable, Sendable {
         commit(m)
     }
 
+    /// The list a restore ends with: the saved structure over |items|, never fewer tabs than were saved. When the init refuses it
+    /// (two items share an id, or |activeID| is not live) the active tab is dropped, and when that fails too |current| is kept and
+    /// every saved tab it lacks is put in dormant, in order. |intact| is false when the structure could not be applied.
+    public static func restored(items: [TabItem], groups: [TabGroup], topOrder: [TopRef], dayOrder: [TopRef], activeID: TabID?, current: TabList) -> (list: TabList, intact: Bool) {
+        if let l = TabList(items: items, groups: groups, topOrder: topOrder, dayOrder: dayOrder, activeID: activeID) { return (l, true) }
+        if activeID != nil, let l = TabList(items: items, groups: groups, topOrder: topOrder, dayOrder: dayOrder, activeID: nil) { return (l, false) }
+        var l = current
+        for var t in items where !l.items.contains(where: { $0.id == t.id }) {
+            t.engineID = nil
+            l.insertNew(t, opener: nil, addToTop: false, activate: false)
+        }
+        return (l, false)
+    }
+
     /// An item as the list stores it: the group must exist, a pin has no group and a pinned address, an unpinned tab has neither.
     private func normalized(_ item: TabItem) -> TabItem {
         var t = item

@@ -61,6 +61,9 @@ extension BrowserWindowController {
             }
         }
         closing[active.identifier] = ProcessInfo.processInfo.systemUptime
+#if NOCHE_TESTHOOKS
+        if Self.holdNextClose { Self.holdNextClose = false; Self.heldClose = { active.close() }; return }  // pin-dormant: the close happens when the check says
+#endif
         active.close()
     }
 

@@ -107,11 +107,16 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var restoreFallback: TimeInterval = 15
     /// Test support (pin-launch-held): the restore never asks the engine for its last tab, as if it had not arrived.
     static var holdLastRestoreTab = false
+    /// Test support (pin-dormant): the next close Noche starts is held, with the tab already marked closing, until |releaseHeldClose|.
+    static var holdNextClose = false
+    static var heldClose: (() -> Void)?
+    static func releaseHeldClose() { let c = heldClose; heldClose = nil; c?() }
 #else
     static let restoreFallback: TimeInterval = 15
 #endif
     let initialFrame: NSRect
     var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
+    var lastFrame: NSRect?              // the window's frame as of the last move or resize: a window the engine closed on its own is revived there
     var faviconSeeds: [TabID: (url: String, icon: String)] = [:]   // saved icon address, used until the page reports its own
     var windowClosing = false           // close() was asked: the tabs that go with the window are not "closed tabs"
     var observers: [NSObjectProtocol] = []
@@ -144,7 +149,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             let all = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil, item: restore.items[$0.id]) }
             initialPending = all.first
             restoreRest = Array(all.dropFirst())
-            for t in restore.tabs { if let icon = restore.favicons[t.id] { faviconSeeds[t.id] = (t.url, icon) } }
+            for (id, t) in restore.items { if let icon = restore.favicons[id] { faviconSeeds[id] = (t.url, icon) } }  // the dormant ones too: they keep their icon address and show it
             // A saved window whose tabs never arrive must not stay unsaved forever: the saved structure goes onto the tabs that came, and
             // the ones that did not stay as dormant tabs at their saved addresses.
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.restoreFallback) { [weak self] in

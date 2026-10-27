@@ -20,7 +20,10 @@ extension BrowserWindowController {
                               groups: list.groups, topOrder: list.topOrder, dayOrder: list.dayOrder)
     }
 
-    func changed(geometry: Bool = false) { if !restoring { app.writer?.markDirty(window: id, geometry: geometry) } }
+    func changed(geometry: Bool = false) {
+        if geometry, let f = nsWindow?.frame, !(nsWindow?.styleMask.contains(.fullScreen) ?? false) { lastFrame = f }
+        if !restoring { app.writer?.markDirty(window: id, geometry: geometry) }
+    }
 
     /// Reopen Closed Tab: the tab keeps its id, goes to |index| (clamped) and becomes active.
     /// False when the engine could not add the tab (the caller puts it back on the closed list).

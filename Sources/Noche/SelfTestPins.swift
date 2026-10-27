@@ -75,7 +75,12 @@ extension SelfTest {
         let a = c.list.items[0]
         pinKey()
         guard await pinned(c, a.id, true) else { return finish(false, "Shift+Cmd+D did not pin") }
-        cmdW(); cmdW()  // a burst: the second Cmd+W lands on the blank tab while the pin is still closing
+        // A burst: the first close is held (the tab is closing, the engine has not closed it yet), so the second Cmd+W lands on the blank
+        // tab while the pin is still closing, on every run.
+        BrowserWindowController.holdNextClose = true
+        cmdW(); cmdW()
+        guard BrowserWindowController.heldClose != nil else { return finish(false, "the first Cmd+W was not held") }
+        BrowserWindowController.releaseHeldClose()
         guard await until(10, { c.list.items.count == 2 && win.tabs.count == 1 }) else {
             return finish(false, "Cmd+W on the only (pinned) tab left \(c.list.items.count) list items and \(win.tabs.count) engine tabs, want 2 and 1 (windows \(app.controllers.count))")
         }
@@ -100,6 +105,46 @@ extension SelfTest {
         // Cmd+1 is the first row, the pinned tile: it wakes.
         guard key("1", code: 18, menuOnly: true) else { return finish(false, "Cmd+1 was not handled") }
         guard await until(15, { self.entry(c, a.id)?.engineID != nil && c.list.activeID == a.id && win.tabs.count == 3 }) else { return finish(false, "Cmd+1 did not wake the pinned tab") }
+        // Closes that do not come through Cmd+W or the menu (a page closing itself, the engine's own, a direct tab close): the engine closes the
+        // window with its last tab and refuses a new one, so the window is made again with the pins dormant and a blank tab (AppDelegate.revive).
+        for t in win.tabs where t !== c.engineTab(entry(c, a.id)!) { t.close() }
+        guard await until(10, { win.tabs.count == 1 && c.list.items.count == 1 }) else { return finish(false, "closing the other tabs left \(c.list.items.count) items and \(win.tabs.count) engine tabs") }
+        // Every close Noche starts (the tile's context menu, a middle click, File > Close Tab) keeps the window without making a new one.
+        for (label, close) in [("the tile menu's Close", 0), ("a middle click on the tile", 1), ("File > Close Tab", 2)] {
+            switch close {
+            case 0:
+                ContextMenus.dismiss(choosing: nil)
+                guard let t = tile(0), rightClick(t) != nil, let m = await ctxMenu("tab", seconds: 3), item(m.menu, "Close")?.isEnabled == true else { return finish(false, "no enabled Close in the tile menu") }
+                ContextMenus.dismiss(choosing: item(m.menu, "Close"))
+            case 1: guard let t = tile(0), click(t, middle: true) else { return finish(false, "no middle click on the tile") }
+            default: guard fire("Close Tab") else { return finish(false, "File > Close Tab did not run") }
+            }
+            guard await until(10, { c.list.items.count == 2 && win.tabs.count == 1 && self.entry(c, a.id)?.engineID == nil }), ctl === c, app.controllers.count == 1 else {
+                return finish(false, "\(label) on the only tab: \(c.list.items.count) list items, \(win.tabs.count) engine tabs, \(app.controllers.count) windows, same controller \(ctl === c), want 2, 1, 1 and the same window")
+            }
+            guard let tl = tile(0), click(tl), await until(15, { win.tabs.count == 2 && self.entry(c, a.id)?.engineID != nil }) else { return finish(false, "the tile did not wake the pin after \(label)") }
+            for t in win.tabs where t !== c.engineTab(entry(c, a.id)!) { t.close() }
+            guard await until(10, { win.tabs.count == 1 && c.list.items.count == 1 }) else { return finish(false, "could not get back to the single pinned tab after \(label)") }
+        }
+        func revived(_ old: BrowserWindowController, _ label: String) async -> BrowserWindowController? {
+            guard await until(20, { guard let n = self.ctl, n !== old else { return false }; return n.list.items.count == 2 && n.window.tabs.count == 1 && !n.restoring && self.app.controllers.count == 1 }), let n = ctl else {
+                finish(false, "\(label): \(ctl?.list.items.count ?? -1) list items, \(ctl?.window.tabs.count ?? -1) engine tabs, \(app.controllers.count) windows, want 2, 1 and 1 in a new window"); return nil
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+            guard n.list.items.count == 2, n.window.tabs.count == 1, app.controllers.count == 1, n.id == old.id, entry(n, a.id)?.engineID == nil, entry(n, a.id)?.isPinned == true, entry(n, a.id)?.pinnedURL == a.url,
+                  n.list.activeID.flatMap({ entry(n, $0) })?.url == "about:blank" else { finish(false, "\(label): the new window is not the same window id with a dormant pin and a blank tab"); return nil }
+            return n
+        }
+        c.engineTab(entry(c, a.id)!)?.close()   // the engine's own close of the pinned tab: Noche's close path is not involved
+        guard let n1 = await revived(c, "the pinned tab closed by the engine") else { return }
+        n1.window.activeTab?.close()            // a day tab closed by the engine, the dormant pin the only other item
+        guard let n2 = await revived(n1, "the day tab closed by the engine") else { return }
+        guard let tl3 = tile(0), click(tl3), await until(15, { n2.window.tabs.count == 2 && self.entry(n2, a.id)?.engineID != nil }) else { return finish(false, "the tile did not wake the pin") }
+        for t in n2.window.tabs where t !== n2.engineTab(entry(n2, a.id)!) { t.close() }
+        guard await until(10, { n2.window.tabs.count == 1 && n2.list.items.count == 1 }), let pageTab = n2.window.activeTab else { return finish(false, "no single pinned tab for the page's own close") }
+        _ = await evaluate(pageTab, "window.close(); 1")   // the page closes itself (allowed for a tab with one history entry)
+        guard let n3 = await revived(n2, "the pinned tab closed by its own page") else { return }
+        _ = n3
         finish(violations.isEmpty, "Cmd+W on a pinned tab: the tile stays dim, the engine tab goes (a blank day tab opens first when it was the last), a click or Cmd+1 wakes the same tab at its pinned page \(violations)")
     }
 
@@ -158,9 +203,11 @@ extension SelfTest {
     /// engine tabs = unpinned + 1 for the selected pin. |held|: F never arrives and the fallback ends the restore: the pins and the group must
     /// survive, and F is still there, dormant.
     func pinLaunch(held: Bool) async {
-        let a = fixture(""), b = fixture("b.html"), l = fixture("link.html"), f = fixture("find.html")
+        let a = fixture("favicon.html"), b = fixture("b.html"), l = fixture("link.html"), f = fixture("find.html")  // A has an icon: its dormant tile must show it
         if phase == 1 {
             guard await ready(), let c = ctl, let win, let writer = app.writer else { return }
+            win.activeTab?.loadURL(a)
+            guard await until(15, { c.list.items.first.flatMap { c.engineTab($0)?.favicon } != nil }) else { return finish(false, "phase 1: A never got its favicon") }
             for u in [b, l, f] { _ = win.addTab(withURL: u, activate: false) }
             guard await until(20, { self.urls(c) == [a, b, l, f] }) else { return finish(false, "phase 1: urls \(urls(c))") }
             let ids = c.list.items.map(\.id)
@@ -188,6 +235,7 @@ extension SelfTest {
             return finish(false, "phase 2: \(win.tabs.count) engine tabs, want \(want) (unpinned \(unpinned) + active pinned \(activePinned)\(held ? " - 1 held back" : "")), engines \(c.list.items.map { $0.engineID != nil })")
         }
         guard await until(5, { self.tile(0)?.faviconView.alphaValue == ChromeStyle.dormantAlpha && self.tile(1)?.faviconView.alphaValue == 1 }) else { return finish(false, "phase 2: tile alphas \(tile(0)?.faviconView.alphaValue ?? -1), \(tile(1)?.faviconView.alphaValue ?? -1)") }
+        guard await until(10, { self.tile(0)?.showsPlaceholder == false }) else { return finish(false, "phase 2: the dormant tile of A shows the globe, want its saved favicon") }
         if held {
             guard c.list.items[3].engineID == nil, c.list.items[3].url == f else { return finish(false, "phase 2: the held-back tab is \(String(describing: c.list.items[3])), want dormant at \(f)") }
         }

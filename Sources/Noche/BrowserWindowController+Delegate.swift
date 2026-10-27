@@ -103,7 +103,10 @@ extension BrowserWindowController {
         }
         let placed = Set(saved)
         items += list.items.filter { !placed.contains($0.id) }  // tabs the engine added on its own
-        if let rebuilt = TabList(items: items, groups: r.groups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID) { list = rebuilt }
+        let rebuilt = TabList.restored(items: items, groups: r.groups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID, current: list)
+        if !rebuilt.intact { FileHandle.standardError.write(Data("NOCHE restore: the saved structure was refused; kept every saved tab, groups and order may be lost\n".utf8)) }
+        list = rebuilt.list
+        for t in list.items where t.engineID == nil { loadDormantIcon(t.id) }
     }
 
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
@@ -260,6 +263,7 @@ extension BrowserWindowController {
         madeCommandBar?.teardown()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
+        if app.revive(self) { return }
         app.controllerClosed(self)
     }
 }

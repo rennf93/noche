@@ -367,6 +367,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         finish(.loadError(code: code))
     }
 
+    /// A window the engine closed by itself (its last tab went without Noche asking: a page closing itself, a close that bypassed the window)
+    /// while pins wait in it: the engine refuses a new tab once the window is closing, so the window is made again at its last frame with
+    /// the same id, a blank day tab live and every pin dormant. False when nothing is worth keeping or the close was asked for.
+    func revive(_ c: BrowserWindowController) -> Bool {
+        if BarHook.on("PIN_NOREVIVE") || BarHook.on("PIN_NOSOON") { return false }  // negative controls (NOSOON: its close order would be rescued here)
+        guard !closing, !c.windowClosing else { return false }
+        let kept = c.list.items.filter { $0.isPinned || $0.engineID == nil }
+        guard !kept.isEmpty else { return false }
+        let blank = TabID()
+        let restore = BrowserWindowController.Restore(
+            tabs: [(blank, "about:blank")], selected: blank, sidebarHidden: c.sidebarHidden, fullScreen: false,
+            items: Dictionary(uniqueKeysWithValues: kept.map { ($0.id, $0) }), groups: c.list.groups, topOrder: c.list.topOrder, dayOrder: c.list.dayOrder,
+            favicons: c.faviconSeeds.mapValues(\.icon), order: kept.map(\.id) + [blank])
+        controllers.removeAll { $0 === c }
+        keyRecency.remove(c.id)
+        FileHandle.standardError.write(Data("NOCHE window: the engine closed a window that held pinned tabs; made it again with a blank tab\n".utf8))
+        newWindow(url: "about:blank", frame: c.lastFrame ?? c.initialFrame, id: c.id, restore: restore)
+        return true
+    }
+
     func controllerClosed(_ controller: BrowserWindowController) {
         controllers.removeAll { $0 === controller }
         keyRecency.remove(controller.id)

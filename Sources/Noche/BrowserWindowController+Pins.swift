@@ -100,7 +100,27 @@ extension BrowserWindowController {
     /// The engine tab of |id| is gone and the tab stays: it keeps its place and goes dormant at its pinned page.
     func becomeDormant(_ id: TabID, last tab: NCTab) {
         dormantIcons[id] = tab.favicon
+        if let icon = tab.faviconURL, let pinned = item(withID: id)?.pinnedURL { faviconSeeds[id] = (pinned, icon) }
         if let pinned = item(withID: id)?.pinnedURL { list.update(id, url: pinned, title: item(withID: id)?.title ?? "", isLoading: false) }
         list.setEngineID(id, nil)
     }
 }
+
+extension BrowserWindowController {
+    /// A dormant tile's icon after a relaunch: the saved icon address is fetched once (no cookies, 5 s, http or https only, 1 MB at most)
+    /// and shown until the tab wakes and the page reports its own.
+    func loadDormantIcon(_ id: TabID) {
+        if BarHook.on("PIN_NOICON") { return }  // negative control: a restored dormant tile keeps the globe
+        guard dormantIcons[id] == nil, let seed = faviconSeeds[id], let url = URL(string: seed.icon), ["http", "https"].contains(url.scheme?.lowercased()) else { return }
+        Task { [weak self] in
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.finishTasksAndInvalidate() }
+            guard let (data, response) = try? await session.data(for: URLRequest(url: url, timeoutInterval: 5)), data.count <= 1_000_000,
+                  (response as? HTTPURLResponse)?.statusCode == 200, let image = NSImage(data: data), let self else { return }
+            guard self.item(withID: id)?.engineID == nil else { return }
+            self.dormantIcons[id] = image
+            self.refresh()
+        }
+    }
+}
+

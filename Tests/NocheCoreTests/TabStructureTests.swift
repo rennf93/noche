@@ -556,4 +556,21 @@ final class TabStructureTests: XCTestCase {
         XCTAssertEqual(item(l, t[1]).engineID, 77)
         XCTAssertEqual(l.items.first?.id, t[1])
     }
+
+    func testRestoredNeverDropsSavedTabs() {
+        var (current, t) = list(2)
+        let pin = tab(9, engine: false)
+        // Two saved items share an id: the init refuses the list, and the saved pin must still be there, dormant.
+        var pinned = pin; pinned.isPinned = true; pinned.inGrid = true; pinned.pinnedURL = pin.url
+        let dup = item(current, t[0])
+        let r = TabList.restored(items: [pinned, dup, dup], groups: [], topOrder: [], dayOrder: [], activeID: t[0], current: current)
+        XCTAssertFalse(r.intact)
+        XCTAssertTrue(r.list.items.contains { $0.id == pinned.id && $0.isPinned && $0.engineID == nil })
+        XCTAssertEqual(Set(r.list.items.map(\.id)), Set([pinned.id] + t))
+        // A good structure is intact and equal to the plain init.
+        let ok = TabList.restored(items: [pinned, dup], groups: [], topOrder: [], dayOrder: [], activeID: t[0], current: current)
+        XCTAssertTrue(ok.intact)
+        XCTAssertEqual(ok.list.items.first?.id, pinned.id)
+        current = ok.list
+    }
 }
