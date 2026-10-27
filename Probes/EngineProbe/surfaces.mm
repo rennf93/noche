@@ -23,7 +23,7 @@ CefRefPtr<CefPermissionHandler> SurfPermissionHandler() { return nullptr; }
 void SurfOnLoadEnd(int, int) {}
 void SurfRelease() {}
 bool RunSurfacesCheck(NSString* c, const SurfHost& h) {
-  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-keep-quit-control", @"download-keep-quit-none", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
+  if (![@[ @"cmd-enabled", @"bubbles", @"download-restart-1", @"download-restart-2", @"download-tab-close", @"download-tab-close-start", @"download-keep-stream", @"download-keep-complete", @"download-keep-quit", @"download-keep-quit-control", @"download-keep-quit-none", @"download-restart-crash-1", @"download-restart-crash-2", @"download-control-cancel-1", @"download-control-cancel-2", @"download-control-rejected", @"download-control-noprofile", @"download-restored-cancel-1", @"download-restored-cancel-2", @"download-cancel-complete", @"download-restored-cancel-resume-2", @"ctx-ext-items", @"zoom-scope", @"chrome-pages", @"zoom-no-bubble", @"discard-p1", @"discard-p1b", @"discard-p1b-off", @"discard-p2", @"discard-p3", @"discard-api", @"discard-p5" ] containsObject:c]) return false;
   h.finish(false, @"built without NOCHE_TABS_API");
   return true;
 }
@@ -755,6 +755,81 @@ void ControlCancel2(H h) {
   S->push_back([=](Next) { Done(h, A->ok(), [NSString stringWithFormat:@"control client-cancelled: %@", A->Summary()]); });
   RunSteps(S);
 }
+// ---- patch 0011: Cancel() on a restored interrupted download, and the control (Cancel() on a completed one) ----
+// -1 is DownloadRestart1 (pause at 10 percent, quit normally). -2: the item replays as interrupted; Cancel() through its callback must give a canceled
+// update and delete the partial file within 5 s, and must not resume it (no new request to the server).
+void RestoredCancel2(H h, bool afterResume) {
+  if (!DlEnv(h)) return;
+  unsigned long long id = 0; NSString* path = nil;
+  if (!ReadState(@"id", &id, nullptr) || !ReadState(@"path", nullptr, &path)) { Done(h, false, @"no state file from launch 1 (run the -1 check first, same script run)"); return; }
+  auto A = std::make_shared<Asserts>();
+  auto ev0 = std::make_shared<size_t>(0);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) { A->Api("the replay of a restored download"); Later(6, n); });
+  S->push_back([=](Next n) {
+    for (auto& e : g_dl_events) if (e.id == (uint32_t)id) PI(@"  event %s", DlStr(e).c_str());
+    const DlEv* e = FirstNoBrowserEvent((uint32_t)id);
+    A->Check("a-restored-as-interrupted-with-partial", e && e->interrupted && !e->canceled && [NSFileManager.defaultManager fileExistsAtPath:path], [NSString stringWithFormat:@"first browser=0 event: %s; partial %@ exists: %d; files %@", e ? DlStr(*e).c_str() : "(none)", path, (int)[NSFileManager.defaultManager fileExistsAtPath:path], DirListing()]);
+    if (!g_dl_cbs.count((uint32_t)id)) { A->Check("cancel-callback-available", false, @"no OnDownloadUpdated callback for the item"); n(); return; }
+    auto waitCancel = [=] {
+      WaitFor(h, 5000, [=] { for (size_t i = *ev0; i < g_dl_events.size(); i++) if (g_dl_events[i].id == (uint32_t)id && g_dl_events[i].canceled) return true; return false; }, [=](bool got) {
+        A->Check("b-canceled-update-within-5s", got, [NSString stringWithFormat:@"events after Cancel(): %zu; last: %s", g_dl_events.size() - *ev0, g_dl_events.size() > *ev0 ? DlStr(g_dl_events.back()).c_str() : "(none)"]);
+        WaitFor(h, 5000, [=] { return ![NSFileManager.defaultManager fileExistsAtPath:path]; }, [=](bool gone) {
+          A->Check("c-partial-file-gone-within-5s", gone, [NSString stringWithFormat:@"%@ exists: %d; files %@", path, (int)!gone, DirListing()]);
+          n();
+        });
+      });
+    };
+    if (afterResume) {  // adversarial: Resume() first (the download restarts with a Range request), then Cancel() 1.5 s later
+      PI(@"calling Resume() then, 1.5 s later, Cancel()");
+      g_dl_cbs[(uint32_t)id]->Resume();
+      Later(1.5, [=] { *ev0 = g_dl_events.size(); g_dl_cbs[(uint32_t)id]->Cancel(); waitCancel(); });
+      return;
+    }
+    *ev0 = g_dl_events.size();
+    PI(@"calling Cancel() twice on the restored item's callback");
+    g_dl_cbs[(uint32_t)id]->Cancel();
+    g_dl_cbs[(uint32_t)id]->Cancel();
+    waitCancel();
+  });
+  S->push_back(Sleep(2));
+  S->push_back([=](Next) {
+    if (!afterResume) A->Check("d-no-resume-request", [ServerLogSinceStart() rangeOfString:@"/mid.bin"].location == NSNotFound, [NSString stringWithFormat:@"server log since launch start: %@", [ServerLogSinceStart() stringByReplacingOccurrencesOfString:@"\n" withString:@" | "]]);
+    if (!afterResume) A->Check("e-never-in-progress", EventsFor((uint32_t)id, 0, AnyInProgress) == 0, [NSString stringWithFormat:@"%zu in-progress events for id %llu", EventsFor((uint32_t)id, 0, AnyInProgress), id]);
+    else A->Check("e-partial-still-gone-after-2s", ![NSFileManager.defaultManager fileExistsAtPath:path], [NSString stringWithFormat:@"files %@", DirListing()]);
+    Done(h, A->ok(), [NSString stringWithFormat:@"launch 2: Cancel() on a restored interrupted download: %@", A->Summary()]);
+  });
+  RunSteps(S);
+}
+// Control: Cancel() on a completed item changes nothing (file stays, state stays complete, no canceled update).
+void CancelComplete(H h) {
+  if (!DlEnv(h)) return;
+  auto A = std::make_shared<Asserts>();
+  auto id = std::make_shared<uint32_t>(0);
+  auto S = std::make_shared<std::vector<Step>>();
+  S->push_back([=](Next n) {
+    StartMidInFirstTab(h);
+    WaitFor(h, 60000, [=] { return !g_dl_events.empty() && g_dl_events.back().complete && FileSize(MidPath()) == kMid; }, [=](bool done) {
+      if (!done) { Done(h, false, @"download did not complete in 60 s"); return; }
+      *id = g_dl_events.back().id;
+      n();
+    });
+  });
+  S->push_back([=](Next n) {
+    if (!g_dl_cbs.count(*id)) { A->Check("cancel-callback-available", false, @"no callback for the completed item"); n(); return; }
+    PI(@"calling Cancel() on the completed item id=%u", *id);
+    g_dl_cbs[*id]->Cancel();
+    Later(3, n);
+  });
+  S->push_back([=](Next) {
+    bool canceledEv = false;
+    for (auto& e : g_dl_events) if (e.id == *id && e.canceled) canceledEv = true;
+    A->Check("a-file-stays", FileSize(MidPath()) == kMid, [NSString stringWithFormat:@"files %@", DirListing()]);
+    A->Check("b-still-complete-no-canceled-update", !canceledEv && g_dl_events.back().id == *id && g_dl_events.back().complete, [NSString stringWithFormat:@"last event: %s", DlStr(g_dl_events.back()).c_str()]);
+    Done(h, A->ok(), [NSString stringWithFormat:@"control: Cancel() on a completed download: %@", A->Summary()]);
+  });
+  RunSteps(S);
+}
 // A rejected download (file:///etc/hosts requested for a page process that may not read it: DownloadRequestUtils::IsURLSafe fails and an interrupted download without WebContents is created) is cancelled at creation and never shows as in progress.
 void ControlRejected(H h) {
   if (!DlEnv(h)) return;
@@ -1433,7 +1508,7 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     @"cmd-enabled" : @0, @"bubbles" : @1, @"download-restart-1" : @2, @"download-restart-2" : @3, @"download-tab-close" : @4,
     @"ctx-ext-items" : @5, @"zoom-scope" : @6, @"chrome-pages" : @7, @"zoom-no-bubble" : @8, @"download-tab-close-start" : @9,
     @"download-restart-crash-1" : @10, @"download-restart-crash-2" : @11, @"download-control-cancel-1" : @12,
-    @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15,
+    @"download-control-cancel-2" : @13, @"download-control-rejected" : @14, @"download-control-noprofile" : @15, @"download-restored-cancel-1" : @25, @"download-restored-cancel-2" : @26, @"download-cancel-complete" : @27, @"download-restored-cancel-resume-2" : @28,
     @"download-keep-stream" : @23, @"download-keep-complete" : @24, @"discard-p1" : @16, @"discard-p1b" : @17, @"discard-p1b-off" : @21, @"discard-p2" : @18, @"discard-p3" : @19, @"discard-api" : @20, @"discard-p5" : @22 };
   NSNumber* n = table[check];
   if (!n) return false;
@@ -1464,6 +1539,10 @@ bool RunSurfacesCheck(NSString* check, const SurfHost& host) {
     case 22: CheckDiscardP5(h); break;
     case 23: KeepStream(h); break;
     case 24: KeepComplete(h); break;
+    case 25: DownloadRestart1(h, false); break;
+    case 26: RestoredCancel2(h, false); break;
+    case 28: RestoredCancel2(h, true); break;
+    case 27: CancelComplete(h); break;
     default: CheckZoomNoBubble(h); break;
   }
   return true;
