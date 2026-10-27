@@ -155,7 +155,7 @@ extension BrowserWindowController {
     }
 
     func showTabMenu(row i: Int, at point: NSPoint) {
-        guard i < list.items.count, let tab = tabs[list.items[i].engineID] else { return }
+        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
         ContextMenus.present(ContextMenus.menu(tabMenuEntries(for: tab)), kind: "tab", in: self, at: point) {}
     }
 

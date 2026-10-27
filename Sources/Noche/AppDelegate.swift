@@ -78,10 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             selfTest = SelfTest(options, app: self)
             if options.phase == 2 { url = "about:blank" }  // a relaunch with nothing to restore shows a blank tab, not the fixture
             // --selftest-setting key=value: a setting stored before the restore, until Settings (M1.8) can set it.
-            let args = CommandLine.arguments
-            if let i = args.firstIndex(of: "--selftest-setting"), i + 1 < args.count, let eq = args[i + 1].firstIndex(of: "=") {
-                storeSettings.append((String(args[i + 1][..<eq]), String(args[i + 1][args[i + 1].index(after: eq)...])))
-            }
+            storeSettings = SettingKeys.flagSettings(CommandLine.arguments)  // every flag, every key of the settings table
             searchTemplate = options.url + "search?q=%s"  // no self-test touches the network
         }
 #endif
@@ -146,9 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
         }
         guard let store = store ?? (try? Store.inMemory()) else { return }
-        for (k, v) in settings where (k == "quitBehavior" && ["preserve", "close"].contains(v)) || (k == "suggestRemote" && ["0", "1"].contains(v)) {
-            try? store.setSetting(k, v)
-        }
+        for (k, v) in settings { try? store.setSetting(k, v) }
         barMode = BarHook.on("BM_NOREAD") ? .newTabOnly : BookmarksBarMode(stored: try? store.setting(BookmarksBarMode.settingKey))  // the hook: the launch ignores the stored mode
         let w = StoreWriter(store: store)
         w.snapshot = { [weak self] id in
@@ -171,8 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             let ok = s.frame.width >= 200 && s.frame.height >= 150
             let restore = tabs.isEmpty ? nil : BrowserWindowController.Restore(
                 tabs: tabs, selected: s.selectedTabID, sidebarHidden: s.sidebarMode == "hidden", fullScreen: s.isFullScreen,
-                isZoomed: s.isZoomed, lastActive: s.tabMeta.mapValues(\.lastActiveAt),
-                favicons: s.tabMeta.compactMapValues(\.faviconURL))
+                isZoomed: s.isZoomed, items: Dictionary(uniqueKeysWithValues: s.tabs.map { ($0.id, $0) }), groups: s.groups,
+                topOrder: s.topOrder, dayOrder: s.dayOrder, favicons: s.tabMeta.compactMapValues(\.faviconURL))
             newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? Self.onScreen(s.frame) : startupFrame, id: s.id, restore: restore)
         }
     }
@@ -200,7 +195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             if c.reopen(closed.tab, at: c.id == closed.windowID ? closed.index : Int.max) { writer?.reopened(closed.tab.id) }
         } else {
             let url = closed.tab.url
-            newWindow(url: url, id: closed.windowID, restore: .init(tabs: [(closed.tab.id, url)], selected: closed.tab.id, sidebarHidden: false, fullScreen: false, lastActive: [:]))
+            var back = closed.tab
+            back.lastActiveAt = Date()   // a reopen is a use of the tab
+            newWindow(url: url, id: closed.windowID, restore: .init(tabs: [(closed.tab.id, url)], selected: closed.tab.id, sidebarHidden: false, fullScreen: false, items: [back.id: back]))
             writer?.reopened(closed.tab.id)
         }
     }

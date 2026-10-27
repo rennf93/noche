@@ -12,7 +12,7 @@ extension BrowserWindowController {
         guard installed else { return }
         if activated { reportedActive = list.activeID }
         if commandBar.isOpen, commandBar.placement == .overlay, commandBar.overlayTabID != list.activeID { commandBar.close(restoreFocus: false) }
-        guard let id = list.activeID, let item = list.items.first(where: { $0.id == id }), isBlank(item), !item.isLoading, failed[item.engineID] == nil else {
+        guard let id = list.activeID, let item = list.items.first(where: { $0.id == id }), isBlank(item), !item.isLoading, item.engineID.map({ failed[$0] == nil }) ?? true else {
             leaveNewTab()
             return
         }
@@ -72,7 +72,7 @@ extension BrowserWindowController {
     /// A tab row: the existing tab becomes active, nothing loads and no tab is added.
     func switchTo(_ id: TabID) {
         closeNext.removeAll()
-        guard let item = list.items.first(where: { $0.id == id }), let tab = tabs[item.engineID] else { return }
+        guard let item = list.items.first(where: { $0.id == id }), let tab = engineTab(item) else { return }
         window.activateTab(tab)
     }
 }

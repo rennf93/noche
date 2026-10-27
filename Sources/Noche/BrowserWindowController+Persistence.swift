@@ -11,13 +11,13 @@ extension BrowserWindowController {
         let ns = nsWindow
         let full = ns?.styleMask.contains(.fullScreen) == true
         let frame = full ? (normalFrame ?? ns?.frame ?? initialFrame) : (ns?.frame ?? initialFrame)
-        // Every tab got its lastActive when it was added, so the default is never used; a restored value is never replaced by "now".
         let meta = Dictionary(uniqueKeysWithValues: list.items.map { item -> (TabID, TabMeta) in
-            let icon = tabs[item.engineID]?.faviconURL ?? faviconSeeds[item.id].flatMap { $0.url == item.url ? $0.icon : nil }
-            return (item.id, TabMeta(faviconURL: icon, lastActiveAt: lastActive[item.id] ?? Date()))
+            let icon = engineTab(item)?.faviconURL ?? faviconSeeds[item.id].flatMap { $0.url == item.url ? $0.icon : nil }
+            return (item.id, TabMeta(faviconURL: icon))
         })
         return WindowSnapshot(id: id, frame: frame, isFullScreen: full, isZoomed: ns?.isZoomed ?? false, sidebarWidth: Double(ChromeStyle.sidebarWidth),
-                              sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: list.items, selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta)
+                              sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: list.items, selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta,
+                              groups: list.groups, topOrder: list.topOrder, dayOrder: list.dayOrder)
     }
 
     func changed(geometry: Bool = false) { if !restoring { app.writer?.markDirty(window: id, geometry: geometry) } }
@@ -28,7 +28,9 @@ extension BrowserWindowController {
     func reopen(_ item: TabItem, at index: Int) -> Bool {
         closeNext.removeAll()
         guard let tab = window.addTab(withURL: item.url, activate: true) else { return false }
-        pendingByTab[tab.identifier] = PendingTab(id: item.id, url: item.url, index: index)
+        var reopened = item
+        reopened.lastActiveAt = Date()   // a reopen is a use of the tab
+        pendingByTab[tab.identifier] = PendingTab(id: item.id, url: item.url, index: index, item: reopened)
         intendedActive = tab
         return true
     }

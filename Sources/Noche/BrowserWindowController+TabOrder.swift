@@ -8,7 +8,7 @@ extension BrowserWindowController {
     /// The window's tabs in Noche's order (the list is the order of record), then any the engine has that the list has not heard of yet
     /// (opened in the same turn), in strip order.
     func orderedTabs() -> [NCTab] {
-        let known = list.items.compactMap { tabs[$0.engineID] }
+        let known = list.items.compactMap { engineTab($0) }
         return known + window.tabs.filter { t in !known.contains { $0 === t } }
     }
 
@@ -25,7 +25,7 @@ extension BrowserWindowController {
         }
 #endif
         let items = list.items
-        guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i), let tab = tabs[items[i].engineID] else { return }
+        guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i), let tab = engineTab(items[i]) else { return }
         intendedActive = tab
         window.activateTab(tab)
     }
@@ -68,7 +68,7 @@ extension BrowserWindowController {
         closeNext.removeAll()
         guard let id = intendedActive.flatMap({ ids[$0.identifier] }) ?? list.activeID,
               let target = delta > 0 ? list.next(after: id) : list.previous(before: id),
-              let engineID = list.items.first(where: { $0.id == target })?.engineID, let tab = tabs[engineID] else { return }
+              let tab = list.items.first(where: { $0.id == target }).flatMap({ engineTab($0) }) else { return }
         intendedActive = tab
         window.activateTab(tab)
     }

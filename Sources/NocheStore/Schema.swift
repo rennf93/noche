@@ -99,6 +99,15 @@ enum Schema {
             try db.execute(sql: "ALTER TABLE page ADD COLUMN titleFolded TEXT NOT NULL DEFAULT ''")
             try db.execute(sql: "UPDATE page SET titleFolded = swiftLowercaseString(title)")
         }
+        // inGrid: a pinned tab is a grid tile (1) or a loose pinned row (0). tabGroup.isPinned names the container of a group (persistent area or day list).
+        m.registerMigration("v6-sidebar-depth") { db in
+            try db.execute(sql: """
+            ALTER TABLE tab ADD COLUMN inGrid INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE tab ADD COLUMN customTitle TEXT;
+            ALTER TABLE tab ADD COLUMN customIcon TEXT;
+            ALTER TABLE tabGroup ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0;
+            """)
+        }
         return m
     }
 

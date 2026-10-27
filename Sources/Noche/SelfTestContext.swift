@@ -110,7 +110,7 @@ extension SelfTest {
     func ctxTab() async {
         guard await ready(), let ctl, let win else { return }
         guard await openTabs(3) else { return finish(false, "extra tabs never appeared") }
-        guard let t1 = ctl.tabs[ctl.list.items[1].engineID] else { return finish(false, "no tab at row 1") }
+        guard let t1 = ctl.engineTab(ctl.list.items[1]) else { return finish(false, "no tab at row 1") }
         t1.loadURL(fixture("b.html"))
         guard await until(10, { ctl.list.items[1].url.hasSuffix("/b.html") }) else { return finish(false, "row 1 never showed b.html") }
         let active = win.activeTab

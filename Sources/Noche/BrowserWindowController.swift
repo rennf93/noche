@@ -70,14 +70,19 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// Restoring: the saved tabs are still being added to the engine, so a snapshot now would be partial (and would tombstone tabs).
     var restoring = false
     let id: UUID
-    struct PendingTab { let id: TabID; let url: String; let index: Int? }
+    /// |item| is the saved tab a restore or a reopen brings back (its stamp, and for a reopen its pin, group and titles).
+    struct PendingTab { let id: TabID; let url: String; let index: Int?; var item: TabItem? = nil }
     struct Restore {
         var tabs: [(id: TabID, url: String)]
         var selected: TabID?
         var sidebarHidden: Bool
         var fullScreen: Bool
         var isZoomed = false
-        var lastActive: [TabID: Date]
+        /// The saved window's tabs and structure; the structure goes back once every saved tab is in (|applySavedStructure|).
+        var items: [TabID: TabItem] = [:]
+        var groups: [TabGroup] = []
+        var topOrder: [TopRef] = []
+        var dayOrder: [TopRef] = []
         var favicons: [TabID: String] = [:]
     }
     /// Identity (id, address, index) for the tabs Noche itself asked the engine to add, keyed by the NCTab `addTab` returned: a reopened
@@ -93,7 +98,6 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var restoreStarted = false
     let initialFrame: NSRect
     var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
-    var lastActive: [TabID: Date] = [:]
     var faviconSeeds: [TabID: (url: String, icon: String)] = [:]   // saved icon address, used until the page reports its own
     var windowClosing = false           // close() was asked: the tabs that go with the window are not "closed tabs"
     var observers: [NSObjectProtocol] = []
@@ -123,10 +127,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         super.init()
         if let restore {
             restoring = true
-            let all = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil) }
+            let all = restore.tabs.map { PendingTab(id: $0.id, url: $0.url, index: nil, item: restore.items[$0.id]) }
             initialPending = all.first
             restoreRest = Array(all.dropFirst())
-            lastActive = restore.lastActive
             for t in restore.tabs { if let icon = restore.favicons[t.id] { faviconSeeds[t.id] = (t.url, icon) } }
             // A saved window whose tabs never arrive must not stay unsaved forever.
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in MainActor.assumeIsolated { self?.restoring = false } }
@@ -247,7 +250,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 
     func refresh() {
         guard installed else { return }
-        let entries = list.items.map { (title: list.displayTitle(of: $0.id), favicon: tabs[$0.engineID]?.favicon) }
+        let entries = list.items.map { (title: list.displayTitle(of: $0.id), favicon: engineTab($0)?.favicon) }
         sidebar.setRows(entries, selected: list.items.firstIndex { $0.id == list.activeID })
         let tab = activeTab
         toolbar.back.isEnabled = tab?.canGoBack ?? false
@@ -361,14 +364,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         board.setString(url, forType: .string)
     }
 
+    /// The engine tab of a list item; nil for a dormant tab.
+    func engineTab(_ item: TabItem) -> NCTab? { item.engineID.flatMap { tabs[$0] } }
+
     func selectRow(_ i: Int) {
         closeNext.removeAll()
-        guard i < list.items.count, let tab = tabs[list.items[i].engineID] else { return }
+        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
         window.activateTab(tab)
     }
 
     func closeRow(_ i: Int) {
-        guard i < list.items.count, let tab = tabs[list.items[i].engineID] else { return }
+        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
         closeTab(tab)
     }
 

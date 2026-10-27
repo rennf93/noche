@@ -26,9 +26,17 @@ extension BrowserWindowController {
         let before = at.flatMap { $0 > 0 && $0 < strip.count - 1 ? strip[$0 - 1] : nil }
         var added = item(for: tab)
         if let pending { added.url = pending.url }   // the saved address until the engine reports its own
+        if let saved = pending?.item {
+            added.lastActiveAt = saved.lastActiveAt   // a restored tab keeps its stamp
+            if pending?.index != nil {                 // a reopened tab keeps its pin, group and titles too
+                added.isPinned = saved.isPinned; added.inGrid = saved.inGrid; added.pinnedURL = saved.pinnedURL
+                added.groupID = saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
+            }
+        }
         list.insert(added, after: before.flatMap { ids[$0.identifier] }, activate: active)
-        if let at = pending?.index { list.move(added.id, to: at) }
-        if lastActive[added.id] == nil { lastActive[added.id] = Date() }
+        if let at = pending?.index, let placed = list.items.first(where: { $0.id == added.id }), !placed.isPinned, placed.groupID == nil {
+            list.move(added.id, to: at)
+        }
         if let restore {
             if !restoreStarted {
                 restoreStarted = true
@@ -38,6 +46,7 @@ extension BrowserWindowController {
                 restoreAdded += 1
                 if added.id == restore.selected, !active { skipActivation = added.id; window.activateTab(tab); intendedActive = tab }
                 if restoreAdded == restore.tabs.count {
+                    applySavedStructure(restore)
                     restoring = false; self.restore = nil
                     if restore.isZoomed, !restore.fullScreen { nsWindow?.zoom(nil) }
                 }
@@ -50,11 +59,23 @@ extension BrowserWindowController {
         app.tabAdded(tab)
     }
 
+    /// The saved pins, groups, titles and order go back once every saved tab is in: the tabs were added one by one as day tabs.
+    /// A window saved with none of them is left as it is.
+    func applySavedStructure(_ r: Restore) {
+        guard !r.groups.isEmpty || r.items.values.contains(where: { $0.isPinned || $0.groupID != nil || $0.customTitle != nil || $0.customIcon != nil }) else { return }
+        var items = list.items
+        for i in items.indices {
+            guard let s = r.items[items[i].id] else { continue }
+            items[i].isPinned = s.isPinned; items[i].inGrid = s.inGrid; items[i].pinnedURL = s.pinnedURL
+            items[i].groupID = s.groupID; items[i].customTitle = s.customTitle; items[i].customIcon = s.customIcon
+        }
+        if let rebuilt = TabList(items: items, groups: r.groups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID) { list = rebuilt }
+    }
+
     func window(_ window: NCWindow, didActivate tab: NCTab, previous: NCTab?) {
         if let id = ids[tab.identifier] {
             // Using a tab stamps it; the restore's own activation (and the engine re-announcing the active tab) does not.
-            if id == skipActivation { skipActivation = nil } else if list.activeID != id { lastActive[id] = Date() }
-            list.activate(id)
+            if id == skipActivation { skipActivation = nil; list.activate(id) } else if list.activeID != id { list.markActive(id, at: Date()) }
         }
         if intendedActive === tab { intendedActive = nil }
         refresh()

@@ -16,7 +16,7 @@ final class PageStoreTests: XCTestCase {
         let store = try Store.open(at: file)
         XCTAssertEqual(try store.setting("k"), "v")
         try store.db.read { db in
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded", "v6-sidebar-depth"])
             XCTAssertNotNil(try Int.fetchOne(db, sql: "SELECT count(*) FROM page"))
         }
     }

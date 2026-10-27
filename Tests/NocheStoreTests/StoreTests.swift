@@ -13,12 +13,13 @@ final class StoreTests: XCTestCase {
     private func makeStore() throws -> Store { let c = Clock(); return try Store.inMemory(now: { c.tick() }) }
 
     private func tab(_ url: String = "https://example.com", title: String = "T") -> TabItem {
-        TabItem(id: TabID(), engineID: 0, url: url, title: title, isLoading: false)
+        TabItem(id: TabID(), engineID: nil, url: url, title: title, isLoading: false)
     }
 
     private func snapshot(_ tabs: [TabItem], id: UUID = UUID(), selected: TabID? = nil) -> WindowSnapshot {
         WindowSnapshot(id: id, frame: CGRect(x: 10, y: 20, width: 800, height: 600), isFullScreen: false, isZoomed: true,
-                       sidebarWidth: 240, sidebarMode: "shown", tabs: tabs, selectedTabID: selected, zOrder: 0, tabMeta: [:])
+                       sidebarWidth: 240, sidebarMode: "shown", tabs: tabs, selectedTabID: selected, zOrder: 0, tabMeta: [:],
+                       dayOrder: tabs.map { .tab($0.id) })
     }
 
     private func positions(_ store: Store, window: UUID) throws -> [Int] {
@@ -35,7 +36,7 @@ final class StoreTests: XCTestCase {
         try store.db.read { db in
             let tables = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'"))
             for t in ["profile", "space", "window", "tabGroup", "tab", "setting", "grdb_migrations"] { XCTAssertTrue(tables.contains(t), t) }
-            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"])
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations"), ["v1", "v2", "v3", "v4", "v5-page-title-folded", "v6-sidebar-depth"])
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM profile"), 1)
             XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM space"), 1)
         }
@@ -44,11 +45,12 @@ final class StoreTests: XCTestCase {
     // 2
     func testRoundTripWithFiveTabsAndMeta() throws {
         let store = try makeStore()
-        let tabs = (0..<5).map { tab("https://e\($0).com", title: "t\($0)") }
+        var tabs = (0..<5).map { tab("https://e\($0).com", title: "t\($0)") }
+        for i in tabs.indices { tabs[i].lastActiveAt = Date(timeIntervalSince1970: 5_000 + Double(i)) }
         var snap = snapshot(tabs, selected: tabs[3].id)
         snap.zOrder = 2
         snap.tabMeta = Dictionary(uniqueKeysWithValues: tabs.enumerated().map {
-            ($1.id, TabMeta(faviconURL: $0 % 2 == 0 ? "https://e\($0).com/f.ico" : nil, lastActiveAt: Date(timeIntervalSince1970: 5_000 + Double($0))))
+            ($1.id, TabMeta(faviconURL: $0 % 2 == 0 ? "https://e\($0).com/f.ico" : nil))
         })
         try store.save(snap)
         XCTAssertEqual(try store.loadWindows(), [snap])
@@ -57,13 +59,15 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(TabList(items: loaded.tabs, activeID: loaded.selectedTabID), list)
     }
 
-    func testMissingTabMetaDefaultsToSaveTime() throws {
+    /// The tab's own lastActiveAt is stored and read back as is: the store never stamps it.
+    func testLastActiveAtIsTheTabsOwnAndMissingMetaHasNoFavicon() throws {
         let store = try makeStore()
-        let t = tab()
+        var t = tab()
+        t.lastActiveAt = Date(timeIntervalSince1970: 1_234_567)
         try store.save(snapshot([t]))
-        let meta = try store.loadWindows()[0].tabMeta[t.id]
-        XCTAssertNil(meta?.faviconURL)
-        XCTAssertGreaterThan(meta?.lastActiveAt.timeIntervalSince1970 ?? 0, 1_000_000)
+        let loaded = try store.loadWindows()[0]
+        XCTAssertNil(loaded.tabMeta[t.id]?.faviconURL)
+        XCTAssertEqual(loaded.tabs.first?.lastActiveAt, Date(timeIntervalSince1970: 1_234_567))
     }
 
     func testWindowsLoadByZOrder() throws {
@@ -129,7 +133,7 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(first.tab.id, tabs[1].id)
         XCTAssertEqual(first.windowID, snap.id)
         XCTAssertEqual(first.index, 1)
-        XCTAssertEqual(first.tab.engineID, 0)
+        XCTAssertNil(first.tab.engineID)  // a restored tab has no engine tab yet
         XCTAssertEqual(try store.popLastClosed()?.tab.id, tabs[0].id)
         XCTAssertNil(try store.popLastClosed())
         XCTAssertFalse(try store.hasClosedTabs())
@@ -340,9 +344,10 @@ final class StoreTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("noche-store-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("Store/noche.sqlite")
-        let t = tab()
+        var t = tab()
+        t.lastActiveAt = Date(timeIntervalSince1970: 7_000)
         var snap = snapshot([t], selected: t.id)
-        snap.tabMeta = [t.id: TabMeta(faviconURL: nil, lastActiveAt: Date(timeIntervalSince1970: 7_000))]
+        snap.tabMeta = [t.id: TabMeta(faviconURL: nil)]
         try Store.open(at: file).save(snap)
         XCTAssertEqual(try Store.open(at: file).loadWindows(), [snap])
     }
@@ -442,7 +447,7 @@ final class StoreTests: XCTestCase {
         }
         try pool.close()
         let store = try Store.open(at: file)
-        try store.db.read { XCTAssertEqual(try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded"]) }
+        try store.db.read { XCTAssertEqual(try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid"), ["v1", "v2", "v3", "v4", "v5-page-title-folded", "v6-sidebar-depth"]) }
         let w = try XCTUnwrap(store.loadWindows().first)
         XCTAssertEqual(w.id, win)
         XCTAssertEqual(w.tabs.map(\.url), ["https://e0.com", "https://e1.com", "https://e2.com"])
