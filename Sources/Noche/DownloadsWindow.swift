@@ -17,6 +17,13 @@ final class DownloadRowView: NSView {
         return b
     }
     private(set) var item: NCDownloadItem?
+#if NOCHE_TESTHOOKS
+    /// How many times this row was configured, and all rows together (the check that an update touches only the rows that changed).
+    private(set) var configured = 0
+    static var configuredTotal = 0
+#endif
+    /// A complete download whose file is gone (moved, renamed or deleted): Open and Show in Finder would do nothing, so the row says so and offers Remove only.
+    private(set) var fileMissing = false
     var onAction: ((String, NCDownloadItem) -> Void)?
 
     override init(frame: NSRect) {
@@ -47,9 +54,14 @@ final class DownloadRowView: NSView {
     @objc private func pressed(_ b: NSButton) { if let item { onAction?(b.title, item) } }
 
     func configure(_ item: NCDownloadItem) {
+#if NOCHE_TESTHOOKS
+        configured += 1
+        Self.configuredTotal += 1
+#endif
         self.item = item
+        fileMissing = item.state == .complete && !BarHook.on("DL_NOFILECHECK") && !FileManager.default.fileExists(atPath: item.fullPath)
         nameField.stringValue = item.suggestedName
-        detailField.stringValue = Self.detail(item)
+        detailField.stringValue = fileMissing ? "File not found" : Self.detail(item)
         let live = item.state == .inProgress || item.state == .paused
         progress.isHidden = !live
         progress.doubleValue = Double(max(0, item.percent))
@@ -58,7 +70,7 @@ final class DownloadRowView: NSView {
         let shown: Set<String> = switch item.state {
         case .inProgress: ["Pause", "Cancel"]
         case .paused, .interrupted: ["Resume", "Cancel"]
-        case .complete: ["Open", "Show in Finder", "Remove"]
+        case .complete: fileMissing ? ["Remove"] : ["Open", "Show in Finder", "Remove"]
         case .canceled: ["Remove"]
         @unknown default: []
         }
@@ -114,6 +126,14 @@ final class DownloadsWindowController: NSObject {
     let clearButton = NSButton(title: "Clear", target: nil, action: nil)
     private(set) var rows: [DownloadRowView] = []
     private var observer: NSObjectProtocol?
+    /// `changed` can come ten times a second per live download (and once per history row at launch): the list reloads at most once per `reloadInterval`,
+    /// the first change at once and the rest together at the end of the interval.
+    static let reloadInterval = 0.1
+    private var lastReload = Date.distantPast
+    private var reloadPending = false
+#if NOCHE_TESTHOOKS
+    private(set) var reloads = 0
+#endif
 
     init(owner: DownloadsController) {
         self.owner = owner
@@ -149,34 +169,56 @@ final class DownloadsWindowController: NSObject {
         document.addSubview(empty)
         window.contentView!.addSubview(scroll)
         window.center()
-        observer = NotificationCenter.default.addObserver(forName: DownloadsController.changed, object: owner, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reload() }
+        observer = NotificationCenter.default.addObserver(forName: DownloadsController.changed, object: owner, queue: .main) { [weak self] note in
+            let now = note.userInfo?[DownloadsController.nowKey] != nil
+            MainActor.assumeIsolated { self?.changed(immediately: now) }
         }
+        // A file moved or deleted since the row was drawn shows when the person comes back to the window.
+        NotificationCenter.default.addObserver(self, selector: #selector(becameKey), name: NSWindow.didBecomeKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(resized), name: NSView.frameDidChangeNotification, object: scroll)
         reload()
     }
 
     @objc private func resized() { layoutRows() }
-    @objc private func clearFinished() { owner.clearFinished() }
+    @objc private func clearFinished() { owner.clearFinished(); reload() }
+    @objc private func becameKey() { reload(refreshFiles: true) }
 
     func show() {
-        reload()
+        reload(refreshFiles: true)
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func reload() {
-        let items = owner.items
-        while rows.count > items.count { rows.removeLast().removeFromSuperview() }
-        while rows.count < items.count {
-            let row = DownloadRowView(frame: .zero)
-            row.onAction = { [weak self] title, item in self?.perform(title, item) }
-            document.addSubview(row)
-            rows.append(row)
+    private func changed(immediately: Bool) {
+        if immediately || BarHook.on("DL_NOCOALESCE") { reload(); return }  // negative control: every change reloads at once
+        guard !reloadPending else { return }
+        let wait = Self.reloadInterval - Date().timeIntervalSince(lastReload)
+        if wait <= 0 { reload(); return }
+        reloadPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+            MainActor.assumeIsolated { self?.reloadPending = false; self?.reload() }
         }
-        for (i, row) in rows.enumerated() {
-            row.configure(items[i])
+    }
+
+    /// Rebuilds the list from the controller: a row keeps its view while its download is listed and is configured only when the item changed (the engine
+    /// makes a new item object for every update). |refreshFiles| also re-checks the file of each complete row.
+    private func reload(refreshFiles: Bool = false) {
+        lastReload = Date()
+#if NOCHE_TESTHOOKS
+        reloads += 1
+#endif
+        let items = owner.items
+        var pool = Dictionary(rows.compactMap { r in r.item.map { ($0.identifier, r) } }, uniquingKeysWith: { a, _ in a })
+        let next = items.map { pool.removeValue(forKey: $0.identifier) ?? DownloadRowView(frame: .zero) }
+        for r in pool.values { r.removeFromSuperview() }
+        for (i, (row, item)) in zip(next, items).enumerated() {
+            if row.superview == nil {
+                row.onAction = { [weak self] title, item in self?.perform(title, item) }
+                document.addSubview(row)
+            }
+            if row.item !== item || BarHook.on("DL_RELOADALL") || (refreshFiles && item.state == .complete) { row.configure(item) }  // negative control: every row, every time
             row.setAccessibilityIdentifier("downloads.row.\(i)")
         }
+        rows = next
         empty.isHidden = !items.isEmpty
         clearButton.isEnabled = items.contains(where: DownloadsController.isFinished)
         layoutRows()
@@ -195,9 +237,11 @@ final class DownloadsWindowController: NSObject {
         case "Pause": owner.pause(item)
         case "Resume": owner.resume(item)
         case "Cancel": if !BarHook.on("DL_NOCANCEL") { owner.cancel(item) }
-        case "Open": owner.open(item)
-        case "Show in Finder": owner.reveal(item)
-        case "Remove": owner.remove(item)
+        case "Open", "Show in Finder":
+            // The file may have gone since the row was drawn: the row says so instead of doing nothing.
+            if !FileManager.default.fileExists(atPath: item.fullPath), !BarHook.on("DL_NOFILECHECK") { reload(refreshFiles: true); return }
+            if title == "Open" { owner.open(item) } else { owner.reveal(item) }
+        case "Remove": owner.remove(item); reload()
         default: break
         }
     }

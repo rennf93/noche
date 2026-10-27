@@ -45,8 +45,13 @@ extension SelfTest {
     func treeTitles(_ name: String) -> [String] {
         guard let m = bookmarksMenu() else { return [] }
         opened(m)
-        return m.items.first { $0.title == name && $0.identifier == MenuTable.mark }?.submenu?.items.map { $0.isSeparatorItem ? "---" : $0.title } ?? []
+        guard let sub = m.items.first(where: { $0.title == name && $0.identifier == MenuTable.mark })?.submenu else { return [] }
+        openedSub(sub)
+        return sub.items.map { $0.isSeparatorItem ? "---" : $0.title }
     }
+
+    /// A folder's submenu fills when it opens, through its own delegate (AppKit asks it just before it shows the submenu).
+    func openedSub(_ sub: NSMenu) { sub.delegate?.menuNeedsUpdate?(sub) }
 
     /// A window of the hidden run shows on the same terms as every test window: alpha 0, not key, floating, mouse ignored, the app not active.
     func hiddenTerms(_ w: NSWindow) -> (ok: Bool, text: String) {

@@ -53,6 +53,13 @@ extension AppDelegate {
         if let a = active { bringForward(a); a.openBookmark(url, newTab: newTab) } else if !closing { BrowserWindowController.note("bookmarkOpen"); newWindow(url: url) }
     }
 
+    /// Every reachable url bookmark of the page whose address has this `pageKey` (so https://x.com and https://x.com/ are one), in any folder, newest first.
+    func bookmarks(ofPage url: String) throws -> [Bookmark] {
+        guard let store = writer?.store else { return [] }
+        let key = pageKey(url)
+        return try store.urlBookmarks().filter { pageKey($0.url ?? "") == key }
+    }
+
     func renameBookmark(_ id: String, to title: String) {
         do { try writer?.store.renameBookmark(id: id, title: title) } catch { logBookmark("rename", error) }
         bookmarksChanged()
@@ -118,12 +125,12 @@ final class BookmarksMenuDelegate: NSObject, NSMenuDelegate {
             }
             for (k, r) in rows.enumerated() { r.identifier = Self.dynamic; menu.insertItem(r, at: at + 1 + k) }
         }
+        // The trees fill when each submenu opens (its own delegate), so this open reads no folder.
         let roots = (try? store.bookmarkRoots()) ?? []
         for root in roots {
             guard let sub = menu.items.first(where: { $0.title == root.title && $0.identifier == MenuTable.mark })?.submenu else { continue }
             sub.removeAllItems()
-            sub.autoenablesItems = false
-            BookmarkMenus.fill(sub, store: store, folder: root, open: open)
+            BookmarkMenus.makeLazy(sub, store: store, folder: root, open: open)
         }
     }
 }
@@ -140,7 +147,7 @@ enum BookmarkMenus {
         return item
     }
 
-    /// The children of |folder| (a folder with none shows a disabled "(Empty)").
+    /// The children of |folder| (a folder with none shows a disabled "(Empty)"). A child folder's submenu is empty until it opens.
     static func fill(_ menu: NSMenu, store: Store, folder: Bookmark, open: @escaping @MainActor (Bookmark) -> Void) {
         let children = (try? store.bookmarkChildren(of: folder.id)) ?? []
         if children.isEmpty {
@@ -148,37 +155,57 @@ enum BookmarkMenus {
             empty.isEnabled = false
             menu.addItem(empty)
         }
-        for c in children {
-            if c.kind == .folder {
-                let i = NSMenuItem(title: c.title, action: nil, keyEquivalent: "")
-                let sub = NSMenu(title: c.title)
-                sub.autoenablesItems = false
-                fill(sub, store: store, folder: c, open: open)
-                i.submenu = sub
-                menu.addItem(i)
-            } else {
-                menu.addItem(item(c, open: open))
-            }
-        }
+        for c in children { menu.addItem(row(c, store: store, open: open)) }
     }
+
+    /// A folder is a row with a submenu that fills itself when it opens; a page is an item that runs |open|.
+    private static func row(_ c: Bookmark, store: Store, open: @escaping @MainActor (Bookmark) -> Void) -> NSMenuItem {
+        guard c.kind == .folder else { return item(c, open: open) }
+        let i = NSMenuItem(title: c.title, action: nil, keyEquivalent: "")
+        let sub = NSMenu(title: c.title)
+        makeLazy(sub, store: store, folder: c, open: open)
+        i.submenu = sub
+        return i
+    }
+
+    /// |menu| (the submenu of |folder|) fills when AppKit is about to show it, through a delegate of its own that the menu keeps alive.
+    static func makeLazy(_ menu: NSMenu, store: Store, folder: Bookmark, open: @escaping @MainActor (Bookmark) -> Void) {
+        menu.autoenablesItems = false
+        let d = FolderMenuDelegate(store: store, folder: folder, open: open)
+        menu.delegate = d
+        objc_setAssociatedObject(menu, &FolderMenuDelegate.owner, d, .OBJC_ASSOCIATION_RETAIN)
+        if BarHook.on("BM_EAGER") { d.menuNeedsUpdate(menu) }  // negative control: the whole tree builds with its parent
+    }
+
+#if NOCHE_TESTHOOKS
+    /// Folders filled so far (a test reads how many a menu open filled).
+    static var fills = 0
+#endif
 
     /// The menu a folder chip shows (or, with |folder| nil, the overflow chip: the rest of the bar's rows).
     static func menu(folder: Bookmark?, rest: [Bookmark], store: Store, open: @escaping @MainActor (Bookmark) -> Void) -> NSMenu {
         let menu = NSMenu(title: folder?.title ?? "")
         menu.autoenablesItems = false
         if let folder { fill(menu, store: store, folder: folder, open: open); return menu }
-        for c in rest {
-            if c.kind == .folder {
-                let i = NSMenuItem(title: c.title, action: nil, keyEquivalent: "")
-                let sub = NSMenu(title: c.title)
-                sub.autoenablesItems = false
-                fill(sub, store: store, folder: c, open: open)
-                i.submenu = sub
-                menu.addItem(i)
-            } else {
-                menu.addItem(item(c, open: open))
-            }
-        }
+        for c in rest { menu.addItem(row(c, store: store, open: open)) }
         return menu
+    }
+}
+
+/// Fills one folder's submenu each time it opens. No row of it has a key, so a key equivalent search never rebuilds it.
+@MainActor
+final class FolderMenuDelegate: NSObject, NSMenuDelegate {
+    nonisolated(unsafe) static var owner = 0
+    private let store: Store, folder: Bookmark, open: @MainActor (Bookmark) -> Void
+    init(store: Store, folder: Bookmark, open: @escaping @MainActor (Bookmark) -> Void) { self.store = store; self.folder = folder; self.open = open }
+
+    func menuHasKeyEquivalent(_ menu: NSMenu, for event: NSEvent, target: AutoreleasingUnsafeMutablePointer<AnyObject?>, action: UnsafeMutablePointer<Selector?>) -> Bool { false }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+#if NOCHE_TESTHOOKS
+        BookmarkMenus.fills += 1
+#endif
+        menu.removeAllItems()
+        BookmarkMenus.fill(menu, store: store, folder: folder, open: open)
     }
 }

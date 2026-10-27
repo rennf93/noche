@@ -90,7 +90,7 @@ extension SelfTest {
         }
         dc.windowController.rows[0].button("Remove")?.performClick(nil)
         guard dc.windowController.rows.isEmpty else { return finish(false, "Remove left \(rowNames())") }
-        // A row given up while it runs comes back with the next progress update (it passes the rule); when its end is dropped it must go, not freeze.
+        // A row given up while it runs comes back with its next progress update, and the key is forgotten: its end lists (canceled, with Remove), it is never frozen.
         guard let second = await startSlow(tab, server: server, minBytes: 100_000) else { return }
         guard await until(5, { dc.windowController.rows.count == 1 }), let live = item(second.identifier) else { return finish(false, "no row for the second download") }
         dc.giveUp(live)
@@ -98,11 +98,12 @@ extension SelfTest {
         guard await until(10, { dc.windowController.rows.count == 1 }) else { return finish(false, "the running download did not show again with its next update") }
         NCDownloads.shared.cancel(second.identifier)
         guard await until(10, { NCDownloads.shared.items.first { $0.identifier == second.identifier }?.state == .canceled }) else { return finish(false, "the second cancel did not land in the engine") }
-        try? await Task.sleep(for: .milliseconds(500))
-        guard dc.windowController.rows.isEmpty, dc.items.isEmpty else {
-            return finish(false, "a row frozen at its last progress: rows \(rowNames()) \(dc.windowController.rows.map(\.visibleButtons)), the engine says canceled")
+        guard await until(3, { dc.windowController.rows.first?.visibleButtons == ["Remove"] }), dc.windowController.rows.count == 1 else {
+            return finish(false, "the end of a download given up while it ran did not list as canceled with Remove: rows \(rowNames()) \(dc.windowController.rows.map(\.visibleButtons))")
         }
-        finish(violations.isEmpty, "a Cancel the engine had not landed left the live row listed after the grace, the late cancel ended it canceled with Remove; a row given up while running came back with its next update and its dropped end removed it \(violations)")
+        dc.windowController.rows[0].button("Remove")?.performClick(nil)
+        guard dc.windowController.rows.isEmpty, dc.items.isEmpty else { return finish(false, "Remove left \(rowNames())") }
+        finish(violations.isEmpty, "a Cancel the engine had not landed left the live row listed after the grace, the late cancel ended it canceled with Remove; a row given up while running came back with its next update and its end listed as canceled with Remove, not frozen \(violations)")
     }
 
     /// Task 5 Minor 3 and Task 6 Minor 10: with no browser window key (a History, Bookmarks or Downloads window is key), links open in the browser window
@@ -217,7 +218,9 @@ extension SelfTest {
         app.newWindow(url: fixture("link.html"))
         guard await until(20, { loads > before && app.controllers.count == 2 }), let c = app.controllers.last, let tab = c.window.activeTab else { return finish(false, "the second window did not load") }
         guard await until(10, { page(store, host: host, path: "/link.html")?.title == "Link Page" }) else { return finish(false, "link.html was not stored with its title") }
-        try? await Task.sleep(for: .milliseconds(2300))  // the next title writes at once, the one after it waits
+        // A fresh throttle with an interval far past this check's length: W1 writes at once (nothing was written under it), and the timer can never write W2,
+        // so only the close-time flush can have.
+        c.titleThrottle = TitleThrottle(interval: 120)
         _ = await evaluate(tab, "document.title = 'W1'")
         guard await until(3, { page(store, host: host, path: "/link.html")?.title == "W1" }) else { return finish(false, "W1 was not written at once") }
         _ = await evaluate(tab, "document.title = 'W2'")

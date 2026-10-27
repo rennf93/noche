@@ -8,6 +8,8 @@ import NocheStore
 @MainActor
 final class DownloadsController: NSObject, NCDownloadsObserver {
     static let changed = Notification.Name("NocheDownloadsChanged")
+    /// In the userInfo of a change that must show at once (a removal), where the engine's progress updates may be coalesced.
+    static let nowKey = "now"
     private(set) var items: [NCDownloadItem] = []
     private var made: DownloadsWindowController?
     /// Called once when nothing is in progress any more (the quit waits for its pauses to land), or at the timeout.
@@ -19,28 +21,70 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 #endif
 
     /// The profile's store, set once it is open (before the engine announces its restored downloads).
-    var store: Store? { didSet { removed = Set(removedOrder) } }
+    var store: Store? {
+        didSet { removedList = (((try? store?.setting(Self.removedKey)) ?? nil).map { $0.split(separator: "\n").map(String.init) } ?? []); removed = Set(removedList) }
+    }
     private static let removedKey = "downloadsRemoved"
     /// Finished downloads the person removed from the list, as "engine id|address", oldest first. The engine has no call that forgets a download: it
     /// announces every download of the profile's history again at each launch (ids and names are the same as before), so the removal is kept here, in the
     /// store's `setting` table, and those announcements are dropped. The address is part of the key so that an id reused after the engine's history was
-    /// cleared does not hide a new download. Only the newest `removedLimit` are kept.
-    private var removedOrder: [String] {
-        get { ((try? store?.setting(Self.removedKey)) ?? nil).map { $0.split(separator: "\n").map(String.init) } ?? [] }
-        set { try? store?.setSetting(Self.removedKey, newValue.suffix(Self.removedLimit).joined(separator: "\n")) }
-    }
+    /// cleared does not hide a new download, and a download that starts in progress under a removed key is a new one: the key is forgotten (`forget`).
+    /// Only the newest `removedLimit` are kept, in memory and stored alike.
+    private var removedList: [String] = []
+    private(set) var removed = Set<String>()
+#if NOCHE_TESTHOOKS
+    static var removedLimit = 2000
+    /// Writes of the removed list to the store, and the ones that failed (a test makes the next writes fail with `failWrites`).
+    static var removedWrites = 0, removedFailures = 0
+    static var failWrites = false
+#else
     private static let removedLimit = 2000
-    private var removed = Set<String>()
-    private static func key(_ item: NCDownloadItem) -> String { "\(item.identifier)|\(item.url)" }
+#endif
+    static func key(_ item: NCDownloadItem) -> String { "\(item.identifier)|\(item.url)" }
+
+    /// Adds |keys| to the removed list and writes it once. A failed write is logged and the removal still holds for this run.
+    private func rememberRemoved(_ keys: [String]) {
+        let fresh = keys.filter { removed.insert($0).inserted }
+        guard !fresh.isEmpty else { return }
+        removedList = Array((removedList + fresh).suffix(Self.removedLimit))
+        if !BarHook.on("DL_NOTRIM") { removed = Set(removedList) }  // negative control: the in-memory set grows without bound
+        persistRemoved()
+    }
+
+#if NOCHE_TESTHOOKS
+    /// Test: marks a key removed without touching its row (what a removal of an earlier download with the same id and address left behind).
+    func rememberRemovedForTest(_ key: String) { rememberRemoved([key]) }
+#endif
+
+    private func forget(_ key: String) {
+        guard removed.remove(key) != nil else { return }
+        removedList.removeAll { $0 == key }
+        persistRemoved()
+    }
+
+    private func persistRemoved() {
+        guard !BarHook.on("DL_NOKEEP") else { return }  // negative control: the removal is not stored
+        let text = removedList.joined(separator: "\n")
+#if NOCHE_TESTHOOKS
+        Self.removedWrites += 1
+        if BarHook.on("DL_HIDEFAIL") { try? store?.setSetting(Self.removedKey, text); return }  // negative control: a failed write is swallowed
+        if Self.failWrites { Self.removedFailures += 1; FileHandle.standardError.write(Data("NOCHE downloads removed list not stored: simulated failure\n".utf8)); return }
+#endif
+        do { try store?.setSetting(Self.removedKey, text) } catch {
+#if NOCHE_TESTHOOKS
+            Self.removedFailures += 1
+#endif
+            FileHandle.standardError.write(Data("NOCHE downloads removed list not stored: \(error)\n".utf8))
+        }
+    }
 
     func downloads(_ downloads: NCDownloads, didUpdate item: NCDownloadItem) {
-        if removed.contains(Self.key(item)), item.state != .inProgress {
-            // The row that was listed (an update that came in progress after the give-up) goes too: its end is dropped, so it would freeze at its last progress.
-            if !BarHook.on("DL_KEEPSTALE"), items.contains(where: { $0.identifier == item.identifier }) {
-                items.removeAll { $0.identifier == item.identifier }
-                NotificationCenter.default.post(name: Self.changed, object: self)
-            }
-            return
+        // An update that comes in progress for a removed key is a new download that reuses the id and address (the engine's history was cleared), or a download
+        // given up while it still ran: forget the key, so its end lists (a finished or canceled row the person can Remove, never a row frozen at its last progress).
+        // A finished update under a removed key is the engine's old announcement of a download the person removed: dropped.
+        if removed.contains(Self.key(item)) {
+            if item.state != .inProgress { return }
+            if !BarHook.on("DL_KEEPKEY") { forget(Self.key(item)) }  // negative control: the key stays, so the end of this download is dropped
         }
         items.removeAll { $0.identifier == item.identifier }
         items.append(item)
@@ -80,15 +124,22 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
     /// Removes the row of a finished download from the list, for good (the file stays where it is, and the removal outlives a relaunch: see `removed`).
     func remove(_ item: NCDownloadItem) {
         guard Self.isFinished(item), !BarHook.on("DL_NOREMOVE") else { return }
-        if removed.insert(Self.key(item)).inserted && !BarHook.on("DL_NOKEEP") { removedOrder += [Self.key(item)] }
-        items.removeAll { $0.identifier == item.identifier }
-        NotificationCenter.default.post(name: Self.changed, object: self)
+        removeRows([item])
+    }
+
+    private func removeRows(_ rows: [NCDownloadItem]) {
+        let gone = rows.sorted { $0.identifier < $1.identifier }  // the list is oldest first, so the limit drops the oldest
+
+        if BarHook.on("DL_WRITEEACH") { for i in gone { rememberRemoved([Self.key(i)]) } } else { rememberRemoved(gone.map(Self.key)) }  // negative control: one write per row
+        let ids = Set(gone.map(\.identifier))
+        items.removeAll { ids.contains($0.identifier) }
+        NotificationCenter.default.post(name: Self.changed, object: self, userInfo: [Self.nowKey: true])  // a person's action shows at once
     }
 
     /// Removes every row that is not in progress or paused (what the window's Clear does). An interrupted download is not finished: it can resume.
     func clearFinished() {
         if BarHook.on("DL_CLEARALL") { items.removeAll(); NotificationCenter.default.post(name: Self.changed, object: self); return }  // negative control: running rows go too
-        for item in items.filter(Self.isFinished) { remove(item) }
+        removeRows(items.filter(Self.isFinished))
     }
 
     func pause(_ item: NCDownloadItem) { NCDownloads.shared.pause(item.identifier) }
@@ -115,9 +166,7 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     /// Hides the row for good (stored like a removal) without the engine's word.
     func giveUp(_ item: NCDownloadItem) {
-        if removed.insert(Self.key(item)).inserted && !BarHook.on("DL_NOKEEP") { removedOrder += [Self.key(item)] }
-        items.removeAll { $0.identifier == item.identifier }
-        NotificationCenter.default.post(name: Self.changed, object: self)
+        removeRows([item])
     }
 
     func open(_ item: NCDownloadItem) {

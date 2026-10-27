@@ -43,6 +43,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// What Bookmark All Tabs saves (the tabs when the card opened), and the tab the Cmd+D card belongs to.
     var bookmarkTabs: [(title: String, url: String)] = []
     var bookmarkEditorTab: Int?
+    /// The address of the page the card was opened on: its Remove deletes every bookmark of that page (`AppDelegate.bookmarks(ofPage:)`).
+    var bookmarkEditorPage = ""
     /// Site permission requests the engine waits for, oldest first; the card shows the first one of the active tab.
     var permissionQueue: [PermissionRequest] = []
     var lastFindText = ""   // the window's last search text: Cmd+F and Cmd+G open the pill with it after Escape, as Chrome does

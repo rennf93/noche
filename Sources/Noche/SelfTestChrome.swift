@@ -164,14 +164,16 @@ extension SelfTest {
 
     func sidebarToggle() async {
         guard await ready(), let ctl else { return }
-        /// Milliseconds from the synthesized key event (or click) to the settled frame: cmdS is synchronous, so this is exact.
+        /// Milliseconds the animation took, from its own recorded frames (`cardLog`: the first frame it drew to the one that settled), not from a wall clock
+        /// around the key event: a late dispatch or a slow wake of this test no longer counts as animation time.
         func run(viaButton: Bool = false) async -> (ms: Double, max: CGFloat) {
             ctl.cardLog = []
-            let t0 = ProcessInfo.processInfo.systemUptime
             if viaButton { click(ctl.toolbar.toggle) } else { cmdS() }
             _ = await until(1, { ctl.toggleEnd > 0 })
-            let ms = ctl.toggleEnd > 0 ? (ctl.toggleEnd - t0) * 1000 : .infinity
-            return (ms, ctl.cardLog.map(\.x).max() ?? 0)
+            let frames = ctl.cardLog
+            var ms = Double.infinity
+            if ctl.toggleEnd > 0, let first = frames.first, let last = frames.last { ms = (last.t - first.t) * 1000 }
+            return (ms, frames.map(\.x).max() ?? 0)
         }
         let hide = await run()
         let lightsHidden = ctl.sidebar.lights.allSatisfy(\.isHidden)
