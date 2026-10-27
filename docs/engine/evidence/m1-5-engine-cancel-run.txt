@@ -1,0 +1,165 @@
+# M1.5 engine run: patch 0011 (Cancel works on a restored interrupted download), CEF 156.0.19-noche.3664
+Run window (UTC): RED 2026-10-27T04:00:27Z to 04:08:26Z; build+distrib 04:31 to 04:49; GREEN and regression until 06:27:02Z. Hidden runs only. Env: NOCHE_TABS_API=1 NOCHE_ACTIONS_API=1 NOCHE_DOWNLOAD_API=1 NOCHE_DISCARD_API=1 NOCHE_CLEAR_API=1. 1-minute load recorded per launch below (each waited for load under 12; the app test lock was held for every run, build and distrib).
+Engine before (RED): cef_version=156.0.18-noche.3663+g22bc634+chromium-156.0.8078.48
+Engine after (vendor/CEF-VERSION.txt):
+source=local
+cef_version=156.0.19-noche.3664+g02b0496+chromium-156.0.8078.48
+path=/Volumes/K3Trunk/noche-engine/distrib/cef_binary_156.0.19-noche.3664+g02b0496+chromium-156.0.8078.48_macosarm64_minimal
+framework=622735024-1793075691
+fetched=2026-10-27T04:49:56Z
+CEF branch noche HEAD 02b04968e (11 patches on pin 426920c33; patch step printed 'patched: 02b04968e'). App repo base 70d015f.
+Build: log /Volumes/K3Trunk/noche-engine/logs/build-20261027T043158Z.log, 04:31:57 to 04:34:51 (2 min 54 s), rc=0, last line: The build has finished successfully.
+Distrib: log /Volumes/K3Trunk/noche-engine/logs/distrib-20261027T044853Z.log, 04:48:53 to 04:49:45 (52 s), rc=0, last line: distrib: .../cef_binary_156.0.19-noche.3664+g02b0496+chromium-156.0.8078.48_macosarm64_minimal
+
+## RED on g22bc634 (rc=1; raw PROBE output, guard/alpha/OnDownloadUpdated noise lines dropped)
+PROBE download-restored-cancel-1 info OnBeforeDownload id=138 browser=1 name=mid.bin url=http://127.0.0.1:60564/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin
+PROBE download-restored-cancel-1 info pausing at pct=11 recv=2949120
+PROBE download-restored-cancel-1 info before quit: id=138 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin t=2.3s files: mid.bin:2949120
+PROBE download-restored-cancel-1 info assert prefix-on-disk-matches-pattern PASS: first 2949120 bytes of the partial: sha e0f28c9c08423802787062a4dec771e831ba3a21175c35676c82b3570e1b0972 pattern e0f28c9c08423802787062a4dec771e831ba3a21175c35676c82b3570e1b0972
+PROBE download-restored-cancel-1 info activate calls blocked=0
+PROBE download-restored-cancel-1 pass launch 1: paused download recorded (id=138 recv=2949120), quitting with it paused; every assertion held
+PROBE download-restored-cancel-1 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-1 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 137|1|0|25165824|"noche-probe-mid.bin" 136|2|40|0| 135|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-1 info frontmost samples=20 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-1 info crash reports: none new
+PROBE download-restored-cancel-2 info assert profile-handler-api PASS: CefRequestContext::SetDownloadHandler compiled in
+PROBE download-restored-cancel-2 info   event id=138 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin t=0.2s
+PROBE download-restored-cancel-2 info assert a-restored-as-interrupted-with-partial PASS: first browser=0 event: id=138 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin t=0.2s; partial /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin ex
+PROBE download-restored-cancel-2 info calling Cancel() on the restored item's callback
+PROBE download-restored-cancel-2 info assert b-canceled-update-within-5s FAIL: events after Cancel(): 0; last: (none)
+PROBE download-restored-cancel-2 info assert c-partial-file-gone-within-5s FAIL: /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin exists: 1; files mid.bin:2949120
+PROBE download-restored-cancel-2 info assert d-no-resume-request PASS: server log since launch start: 
+PROBE download-restored-cancel-2 info assert e-never-in-progress PASS: 0 in-progress events for id 138
+PROBE download-restored-cancel-2 info activate calls blocked=0
+PROBE download-restored-cancel-2 fail launch 2: Cancel() on a restored interrupted download: 2 assertion(s) failed: b-canceled-update-within-5s, c-partial-file-gone-within-5s
+PROBE download-restored-cancel-2 fail exit-rc=1 watchdog=0
+PROBE download-restored-cancel-2 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-2 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 137|1|0|25165824|"noche-probe-mid.bin" 136|2|40|0| 135|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-2 info frontmost samples=36 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-2 info crash reports: none new
+PROBE download-cancel-complete info OnBeforeDownload id=140 browser=1 name=mid.bin url=http://127.0.0.1:60564/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin
+PROBE download-cancel-complete info calling Cancel() on the completed item id=140
+PROBE download-cancel-complete info assert a-file-stays PASS: files mid.bin:25165824
+PROBE download-cancel-complete info assert b-still-complete-no-canceled-update PASS: last event: id=140 browser=1 inProgress=0 paused=0 complete=1 canceled=0 interrupted=0 reason=0 pct=100 recv=25165824 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hIPDeYe0BA/mid.bin t=14.0s
+PROBE download-cancel-complete info activate calls blocked=0
+PROBE download-cancel-complete pass control: Cancel() on a completed download: every assertion held
+PROBE download-cancel-complete info frontmost samples=32 probe-frontmost=0 unknown=0
+PROBE download-cancel-complete info crash reports: none new
+
+RED reading: -2 fails b-canceled-update-within-5s (no update after Cancel()) and c-partial-file-gone-within-5s (partial still on disk); the control download-cancel-complete passes.
+
+## GREEN on g02b0496 (one invocation, rc=0): pair, pair again, resume variant, control
+PROBE download-restored-cancel-1 info OnBeforeDownload id=145 browser=1 name=mid.bin url=http://127.0.0.1:64390/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin
+PROBE download-restored-cancel-1 info pausing at pct=11 recv=2883584
+PROBE download-restored-cancel-1 info before quit: id=145 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=11 recv=2883584 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=2.4s files: mid.bin:2883584
+PROBE download-restored-cancel-1 info assert prefix-on-disk-matches-pattern PASS: first 2883584 bytes of the partial: sha 6b92fce360ba251106eea5378fa5ebe9acf1e93a0bf8713a3d83fe4062fc9b0e pattern 6b92fce360ba251106eea5378fa5ebe9acf1e93a0bf8713a3d83fe4062fc9b0e
+PROBE download-restored-cancel-1 info activate calls blocked=0
+PROBE download-restored-cancel-1 pass launch 1: paused download recorded (id=145 recv=2883584), quitting with it paused; every assertion held
+PROBE download-restored-cancel-1 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-1 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 144|1|0|25165824|"noche-probe-mid.bin" 143|2|40|0|"noche-probe-mid.bin" 142|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-1 info frontmost samples=20 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-1 info crash reports: none new
+PROBE download-restored-cancel-2 info assert profile-handler-api PASS: CefRequestContext::SetDownloadHandler compiled in
+PROBE download-restored-cancel-2 info   event id=145 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2883584 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=0.2s
+PROBE download-restored-cancel-2 info assert a-restored-as-interrupted-with-partial PASS: first browser=0 event: id=145 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2883584 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=0.2s; partial /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin ex
+PROBE download-restored-cancel-2 info calling Cancel() twice on the restored item's callback
+PROBE download-restored-cancel-2 info assert b-canceled-update-within-5s PASS: events after Cancel(): 1; last: id=145 browser=0 inProgress=0 paused=1 complete=0 canceled=1 interrupted=0 reason=40 pct=0 recv=0 total=25165824 path= t=7.0s
+PROBE download-restored-cancel-2 info assert c-partial-file-gone-within-5s PASS: /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin exists: 0; files (empty)
+PROBE download-restored-cancel-2 info assert d-no-resume-request PASS: server log since launch start: 
+PROBE download-restored-cancel-2 info assert e-never-in-progress PASS: 0 in-progress events for id 145
+PROBE download-restored-cancel-2 info activate calls blocked=0
+PROBE download-restored-cancel-2 pass launch 2: Cancel() on a restored interrupted download: every assertion held
+PROBE download-restored-cancel-2 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-2 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 145|2|40|0|"noche-probe-mid.bin" 144|1|0|25165824|"noche-probe-mid.bin" 143|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-2 info frontmost samples=18 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-2 info crash reports: none new
+PROBE download-restored-cancel-1 info OnBeforeDownload id=146 browser=1 name=mid.bin url=http://127.0.0.1:64390/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin
+PROBE download-restored-cancel-1 info pausing at pct=11 recv=2949120
+PROBE download-restored-cancel-1 info before quit: id=146 browser=1 inProgress=1 paused=1 complete=0 canceled=0 interrupted=0 reason=0 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=2.3s files: mid.bin:2949120
+PROBE download-restored-cancel-1 info assert prefix-on-disk-matches-pattern PASS: first 2949120 bytes of the partial: sha e0f28c9c08423802787062a4dec771e831ba3a21175c35676c82b3570e1b0972 pattern e0f28c9c08423802787062a4dec771e831ba3a21175c35676c82b3570e1b0972
+PROBE download-restored-cancel-1 info activate calls blocked=0
+PROBE download-restored-cancel-1 pass launch 1: paused download recorded (id=146 recv=2949120), quitting with it paused; every assertion held
+PROBE download-restored-cancel-1 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-1 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 145|2|40|0|"noche-probe-mid.bin" 144|1|0|25165824|"noche-probe-mid.bin" 143|2|40|0|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-1 info frontmost samples=10 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-1 info crash reports: none new
+PROBE download-restored-cancel-resume-2 info assert profile-handler-api PASS: CefRequestContext::SetDownloadHandler compiled in
+PROBE download-restored-cancel-resume-2 info   event id=146 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=0.3s
+PROBE download-restored-cancel-resume-2 info assert a-restored-as-interrupted-with-partial PASS: first browser=0 event: id=146 browser=0 inProgress=0 paused=1 complete=0 canceled=0 interrupted=1 reason=50 pct=11 recv=2949120 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=0.3s; partial /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid
+PROBE download-restored-cancel-resume-2 info calling Resume() then, 1.5 s later, Cancel()
+PROBE download-restored-cancel-resume-2 info assert b-canceled-update-within-5s PASS: events after Cancel(): 1; last: id=146 browser=0 inProgress=0 paused=0 complete=0 canceled=1 interrupted=0 reason=40 pct=0 recv=0 total=25165824 path= t=8.7s
+PROBE download-restored-cancel-resume-2 info assert c-partial-file-gone-within-5s PASS: /var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin exists: 0; files (empty)
+PROBE download-restored-cancel-resume-2 info assert e-partial-still-gone-after-2s PASS: files (empty)
+PROBE download-restored-cancel-resume-2 info activate calls blocked=0
+PROBE download-restored-cancel-resume-2 pass launch 2: Cancel() on a restored interrupted download: every assertion held
+PROBE download-restored-cancel-resume-2 info History files copied: History:753664 History-journal:0 
+PROBE download-restored-cancel-resume-2 info History downloads (id|state|interrupt_reason|received_bytes|etag, newest 3; state 1=complete 2=cancelled 3=interrupted, 0=in progress): 146|2|40|0|"noche-probe-mid.bin" 145|2|40|0|"noche-probe-mid.bin" 144|1|0|25165824|"noche-probe-mid.bin" 
+PROBE download-restored-cancel-resume-2 info frontmost samples=21 probe-frontmost=0 unknown=0
+PROBE download-restored-cancel-resume-2 info crash reports: none new
+PROBE download-cancel-complete info OnBeforeDownload id=147 browser=1 name=mid.bin url=http://127.0.0.1:64390/mid.bin continue-to=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin
+PROBE download-cancel-complete info calling Cancel() on the completed item id=147
+PROBE download-cancel-complete info assert a-file-stays PASS: files mid.bin:25165824
+PROBE download-cancel-complete info assert b-still-complete-no-canceled-update PASS: last event: id=147 browser=1 inProgress=0 paused=0 complete=1 canceled=0 interrupted=0 reason=0 pct=100 recv=25165824 total=25165824 path=/var/folders/_5/njzyx_0d7_bcftj89t_0bx8h0000gn/T/tmp.hShDVVOaQg/mid.bin t=14.7s
+PROBE download-cancel-complete info activate calls blocked=0
+PROBE download-cancel-complete pass control: Cancel() on a completed download: every assertion held
+PROBE download-cancel-complete info frontmost samples=33 probe-frontmost=0 unknown=0
+PROBE download-cancel-complete info crash reports: none new
+
+(note) An earlier GREEN invocation (kept in the scratchpad) failed only in its first -1 launch: the RED run had left restored item id 138 in the probe profile with its temp dir gone, and the probe's out-of-dir guard cancelled it. Its -2, resume and control checks passed. The invocation above ran on the then clean profile.
+
+## Regression (every probe check that does not need the live Chrome Web Store; pairs in one invocation)
+start 2026-10-27T04:53:42Z load 7.04 7.73 7.30
+- zoom-no-bubble rc=0 load=7.04 passes=1 fails=0
+- ext-loaded rc=0 load=7.14 passes=1 fails=0
+- tabs-one rc=0 load=6.60 passes=1 fails=0
+- tabs-20 rc=0 load=10.51 passes=1 fails=0
+- ext-create rc=0 load=9.65 passes=1 fails=0
+- ext-activate rc=0 load=9.72 passes=1 fails=0
+- switch-latency rc=0 load=8.61 passes=1 fails=0
+- rss-20 rc=0 load=8.89 passes=1 fails=0
+- blank-link rc=0 load=4.70 passes=1 fails=0
+- per-tab-client rc=0 load=4.84 passes=1 fails=0
+- close-non-last rc=0 load=5.49 passes=1 fails=0
+- close-last rc=0 load=8.90 passes=1 fails=0
+- close-callbacks rc=0 load=7.66 passes=1 fails=0
+- window-normal rc=0 load=6.86 passes=1 fails=0
+- cmd-enabled rc=0 load=6.57 passes=1 fails=0
+- bubbles rc=0 load=10.45 passes=1 fails=0
+- ctx-ext-items rc=0 load=10.86 passes=1 fails=0
+- zoom-scope rc=0 load=11.19 passes=1 fails=0
+- chrome-pages rc=0 load=11.64 passes=1 fails=0
+- discard-p1 rc=0 load=10.74 passes=1 fails=0
+- discard-p1b rc=0 load=7.43 passes=1 fails=0
+- discard-p1b-off rc=0 load=5.91 passes=1 fails=0
+- discard-p2 rc=0 load=5.59 passes=1 fails=0
+- discard-p3 rc=0 load=7.32 passes=1 fails=0
+- discard-api rc=0 load=5.43 passes=1 fails=0
+- discard-p5 rc=0 load=11.83 passes=1 fails=0
+- download-tab-close rc=0 load=4.86 passes=1 fails=0
+- download-tab-close-start rc=0 load=6.52 passes=1 fails=0
+- download-keep-stream rc=0 load=4.62 passes=1 fails=0
+- download-keep-complete rc=0 load=11.87 passes=1 fails=0
+- download-keep-quit rc=0 load=8.08 passes=1 fails=0
+- download-keep-quit-control rc=0 load=6.50 passes=1 fails=0
+- download-control-rejected rc=0 load=9.77 passes=1 fails=0
+- download-control-noprofile rc=0 load=6.64 passes=1 fails=0
+- profile-dirs rc=0 load=5.92 passes=1 fails=0
+- profile-storage rc=0 load=5.40 passes=1 fails=0
+- profile-ext rc=0 load=5.41 passes=1 fails=0
+- profile-close rc=0 load=7.92 passes=1 fails=0
+- profile-clear rc=0 load=10.24 passes=1 fails=0
+- profile-delete rc=0 load=8.01 passes=1 fails=0
+- profile-clear-callbacks rc=0 load=11.75 passes=1 fails=0
+- download-restart-1 download-restart-2 rc=0 load=11.98 passes=2 fails=0
+- download-restart-crash-1 download-restart-crash-2 rc=0 load=10.53 passes=2 fails=0
+- download-control-cancel-1 download-control-cancel-2 rc=0 load=11.40 passes=2 fails=0
+- profile-cookie profile-cookie-2 rc=0 load=11.06 passes=2 fails=0
+- profile-incognito profile-incognito-2 rc=0 load=11.85 passes=2 fails=0
+- profile-delete profile-delete-2 rc=0 load=10.15 passes=2 fails=0
+end 2026-10-27T06:27:02Z
+All rc=0, every check printed pass, no check that passed in m1-5/m1-6/m1-7/m1-4 engine runs fails now. Raw per-check outputs: scratchpad eng/reg-<check>.txt.
+
+## Groups not run
+- store-stock, store-ua, store-brand, store-ua-brand, install-no-window: need the live Chrome Web Store.
+- profile-upgrade: needs the seeded old-engine profile (scripts/seed-old-profile.sh, 3659 distrib), not part of this change.
+- rss-20-hybrid, switch-latency-ab*, tabs-bare*, raf-*, actions-list, popup-*, badge-observer, close-active-previous: not in the probe-engine.sh header's list for this series.

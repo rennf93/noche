@@ -1,0 +1,54 @@
+From da9ab1dd6523980270dadbfc1aeed1dca1c52634 Mon Sep 17 00:00:00 2001
+From: Renn F <rennf93@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 05:00:14 +0100
+Subject: [PATCH] views: cancel restored interrupted downloads
+
+A download paused at quit comes back on the next launch as INTERRUPTED
+(patch 0008). CefDownloadItemCallback::Cancel() only cancelled IN_PROGRESS
+items, so Cancel on such a restored item did nothing: the partial file stayed
+on disk and no CANCELLED update arrived. DoCancel now also accepts INTERRUPTED
+items; DownloadItemImpl::Cancel(true) turns an interrupted item into CANCELLED
+and deletes its partial file. Completed and cancelled items are still left
+alone. Comment-only change to the Cancel() doc in cef_download_handler.h, no
+API change.
+---
+ include/cef_download_handler.h                   | 4 +++-
+ libcef/browser/download_manager_delegate_impl.cc | 7 ++++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/include/cef_download_handler.h b/include/cef_download_handler.h
+index 008376df9..63839121b 100644
+--- a/include/cef_download_handler.h
++++ b/include/cef_download_handler.h
+@@ -65,7 +65,9 @@ class CefBeforeDownloadCallback : public virtual CefBaseRefCounted {
+ class CefDownloadItemCallback : public virtual CefBaseRefCounted {
+  public:
+   ///
+-  /// Call to cancel the download.
++  /// Call to cancel the download. An in-progress or interrupted download (for
++  /// example one restored after a restart) is cancelled and its partial file
++  /// deleted; a completed or already cancelled download is left alone.
+   ///
+   /*--cef()--*/
+   virtual void Cancel() = 0;
+diff --git a/libcef/browser/download_manager_delegate_impl.cc b/libcef/browser/download_manager_delegate_impl.cc
+index e4a640fb3..6f8cd1df5 100644
+--- a/libcef/browser/download_manager_delegate_impl.cc
++++ b/libcef/browser/download_manager_delegate_impl.cc
+@@ -269,7 +269,12 @@ class CefDownloadItemCallbackImpl : public CefDownloadItemCallback {
+ 
+     if (manager_) {
+       DownloadItem* item = manager_->GetDownload(download_id_);
+-      if (item && item->GetState() == DownloadItem::IN_PROGRESS) {
++      // Noche: an item restored as INTERRUPTED (paused at quit) can be
++      // cancelled too; DownloadItemImpl::Cancel(true) moves it to CANCELLED
++      // and deletes the partial file. A completed or cancelled item is left
++      // alone.
++      if (item && (item->GetState() == DownloadItem::IN_PROGRESS ||
++                   item->GetState() == DownloadItem::INTERRUPTED)) {
+         item->Cancel(true);
+       }
+     }
+-- 
+2.56.0
+
