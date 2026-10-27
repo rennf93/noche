@@ -55,16 +55,32 @@ enum ContextMenus {
     static func env(_ name: String) -> Bool { ProcessInfo.processInfo.environment[name] == "1" }
 #endif
 
+    /// The menu whose tracking loop is running (test builds: the one held in `pending`), nil when none is.
+    private(set) static var tracked: NSMenu?
+    static var tracking: Bool { tracked != nil }
+    /// Ends an open menu as a click outside would; the tracking loop returns on its own turn, so a caller that must run clear of it waits for `tracking` to end.
+    static func cancelOpen() {
+#if NOCHE_TESTHOOKS
+        if env("NOCHE_TEST_QUIT_KEEPMENU") { return }  // negative control: the quit leaves the menu open
+        dismiss(choosing: nil)
+#else
+        tracked?.cancelTracking()
+#endif
+    }
+
     /// Shows |menu| at |point| (window base coordinates) and calls |done| when the tracking ends, whether an item ran or not.
     static func present(_ menu: NSMenu, kind: String, model: [NCMenuItem]? = nil, in c: BrowserWindowController, at point: NSPoint, done: @escaping () -> Void) {
 #if NOCHE_TESTHOOKS
         shown += 1
         if let old = pending { pending = nil; old.finish() }  // a menu replaced by the next one ends first, never dropped
-        pending = Pending(kind: kind, menu: menu, model: model, point: point, finish: done)
+        tracked = menu
+        pending = Pending(kind: kind, menu: menu, model: model, point: point, finish: { tracked = nil; done() })
         return
 #else
         guard let host = c.window.chromeHost else { return done() }
+        tracked = menu
         menu.popUp(positioning: nil, at: host.convert(point, from: nil), in: host)
+        tracked = nil
         done()
 #endif
     }

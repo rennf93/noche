@@ -403,6 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !closing else { return }
         closing = true
         finished = true
+        ContextMenus.cancelOpen()  // a quit during menu tracking (Dock Quit, logout) ends the menu first
         if BarHook.on("QUIT_EARLY") { freezeSession() }  // negative control: the session is taken before the pause wait, as it was
         // A paused download survives the quit and resumes at the next launch (engine patch 0008); a running one would be canceled. The engine applies
         // the pause on its own turn and the shutdown below would end the process first, so the windows close once every pause landed (3 s at most).
@@ -457,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard !exiting else { return }
         exiting = true
         // OnBeforeClose runs inside CEF teardown; shut down from a clean stack.
-        DispatchQueue.main.async { [self] in
+        shutDownOnClearStack(until: ProcessInfo.processInfo.systemUptime + 3) { [self] in
 #if NOCHE_TESTHOOKS
             selfTest?.beforeExit(watchdogFired: watchdogFired)
             let code = exitCodeOverride ?? exitCode
@@ -466,6 +467,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #endif
             NCEngine.shutdown()
             exit(code)
+        }
+    }
+
+    /// Runs |body| from the main queue once no menu tracking is on the stack: a block queued inside NSMenu's nested loop runs within a Chromium task, and CefShutdown there aborts.
+    /// A menu that does not end within the bound (|deadline|, uptime) is left behind and the shutdown goes on.
+    private func shutDownOnClearStack(until deadline: TimeInterval, _ body: @escaping () -> Void) {
+        DispatchQueue.main.async { [self] in
+            if ContextMenus.tracking, ProcessInfo.processInfo.systemUptime < deadline {
+                ContextMenus.cancelOpen()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.shutDownOnClearStack(until: deadline, body) }
+            } else { body() }
         }
     }
 }

@@ -41,6 +41,7 @@ final class SelfTest {
     var keyLog: [String] = []
     var lastExtensionReply = ""
     var tabsAtQuit = 0
+    var menuOpenedAtQuit = false
     var permissionRequests: [(mask: NCPermissionMask, origin: String, topOrigin: String, id: UInt64)] = []
     /// The MIDI sysex check may Allow a request whose mask is Other only; every other Allow of a test run is a violation.
     var allowOther = false
@@ -81,6 +82,12 @@ final class SelfTest {
             line(ok ? "pass" : "fail", "2 windows (10 and 5 tabs), quit menu action, exit without the shutdown watchdog (tabs=\(tabsAtQuit) didCloseTab=\(closedTabs) windowDidClose=\(windowsClosed) watchdog=\(watchdogFired) \(violations) \(zombies))")
             if !ok { app.exitCodeOverride = 1 }
         }
+        if check == "quit-with-context-menu", !verdictPrinted {
+            // Before NCEngine.shutdown: no menu tracking may be running (a shutdown inside it runs inside a Chromium task and aborts).
+            let ok = menuOpenedAtQuit && !ContextMenus.tracking && !watchdogFired && violations.isEmpty && zombies.isEmpty
+            line(ok ? "pass" : "fail", "a page context menu open, quit menu action, no menu tracking when the engine shutdown starts (opened=\(menuOpenedAtQuit) tracking=\(ContextMenus.tracking) watchdog=\(watchdogFired) \(violations) \(zombies))")
+            if !ok { app.exitCodeOverride = 1 }
+        }
         if check == "quit-100", !verdictPrinted {
             let created = NCWindow.devToolsCreated(), ended = NCWindow.devToolsClosed()
             let ok = tabsAtQuit == 100 && closedTabs == 100 && windowsClosed == 2 && created == 1 && ended == created && !watchdogFired && violations.isEmpty && zombies.isEmpty
@@ -118,6 +125,7 @@ final class SelfTest {
             case "close-last": await closeLast()
             case "quit-many": await quitMany()
             case "quit-early": await quitEarly()
+            case "quit-with-context-menu": await quitWithContextMenu()
             case "quit-100": await quit100()
             case "web-insets": await webInsets()
             case "layout": await layout()

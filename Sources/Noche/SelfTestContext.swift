@@ -107,6 +107,15 @@ extension SelfTest {
         finish(violations.isEmpty && ownWindows() == 1, "page menu equals Chromium's model (\(want.count) rows, labels Back, Forward, Reload ...), Reload reloaded, probe item 49000 ran onClicked with active tab \(clicked), and across \(ContextMenus.shown) menus shown the engine's callback got exactly one answer each (\(continues) Continue, \(cancels) Cancel, counted in the bridge) \(violations)")
     }
 
+    /// A quit that arrives while a page menu is open (Dock Quit, logout): the menu ends first and the engine shutdown starts with no tracking.
+    func quitWithContextMenu() async {
+        guard await ready(), let tab = win?.activeTab else { return }
+        guard let p = await pageRightClick(tab), ContextMenus.tracking, p.kind == "page" else { return finish(false, "no page menu open to quit under") }
+        menuOpenedAtQuit = true
+        line("info", "page menu open (tracking=\(ContextMenus.tracking)), sending the Quit menu action")
+        quitViaMenu()
+    }
+
     func ctxTab() async {
         guard await ready(), let ctl, let win else { return }
         guard await openTabs(3) else { return finish(false, "extra tabs never appeared") }
