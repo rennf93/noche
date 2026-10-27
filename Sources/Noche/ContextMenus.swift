@@ -12,6 +12,7 @@ struct CtxEntry {
     var checked = false
     var milestone: String?
     var submenu = false           // a submenu header (its items arrive with the feature)
+    var children: [CtxEntry]?     // a live submenu's items; the header is enabled by |enabled|
     var separator = false
     static let sep = CtxEntry(title: "", separator: true)
     static func later(_ title: String, _ milestone: String, id: String? = nil, submenu: Bool = false, checked: Bool = false) -> CtxEntry {
@@ -151,7 +152,10 @@ enum ContextMenus {
             item.target = target
             key(item, e.id)
             item.state = e.checked ? .on : .off
-            if e.submenu {
+            if let children = e.children {
+                item.submenu = ContextMenus.menu(children)
+                item.action = nil
+            } else if e.submenu {
                 item.submenu = NSMenu(title: e.title)
                 item.action = nil
             }
@@ -160,7 +164,7 @@ enum ContextMenus {
             if run == nil, env("NOCHE_TEST_CTX_TABENABLE") { run = {} }  // negative control: a later-milestone item is enabled
 #endif
             if let run { item.representedObject = Run { run() } }
-            item.isEnabled = run != nil && e.enabled && !e.submenu
+            item.isEnabled = e.children != nil ? e.enabled : run != nil && e.enabled && !e.submenu
             menu.addItem(item)
         }
         return menu
@@ -179,8 +183,9 @@ extension BrowserWindowController {
     }
 
     func showTabMenu(row i: Int, at point: NSPoint) {
-        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
-        ContextMenus.present(ContextMenus.menu(tabMenuEntries(for: tab)), kind: "tab", in: self, at: point) {}
+        guard i < list.items.count else { return }
+        let t = list.items[i]
+        ContextMenus.present(ContextMenus.menu(tabMenuEntries(for: t)), kind: "tab", in: self, at: point) {}
     }
 
     func showSidebarMenu(at point: NSPoint) {
@@ -196,19 +201,34 @@ extension BrowserWindowController {
         return CtxEntry(title: e.title, id: id, run: run, enabled: e.enabled(ctx), checked: e.state?(ctx) ?? false)
     }
 
-    func tabMenuEntries(for tab: NCTab) -> [CtxEntry] {
+    /// The tab row's menu. A dormant tab has no engine tab: Duplicate and Copy Link use its address, and Close is disabled (it is closed).
+    func tabMenuEntries(for t: TabItem) -> [CtxEntry] {
         typealias E = CtxEntry
-        let duplicate = E(title: "Duplicate", id: "tabs.duplicateTab") { [weak self, weak tab] in self?.duplicateTab(of: tab) }
-        let copyLink = E(title: "Copy Link", id: "edit.copyURL") { [weak self, weak tab] in self?.copyURL(of: tab) }
-        let close = E(title: "Close", id: "file.closeTab") { [weak self, weak tab] in if let tab { self?.closeTab(tab) } }
-        // Every tab is unpinned until M1.6, so the first row is Pin (Unpin takes its place on a pinned tab).
+        let id = t.id
+        let tab = engineTab(t)
+        let pin = E(title: t.isPinned ? "Unpin" : "Pin", id: "tabs.pinTab") { [weak self] in self?.togglePin(of: id) }
+        let duplicate = E(title: "Duplicate", id: "tabs.duplicateTab") { [weak self, weak tab] in
+            if let tab { self?.duplicateTab(of: tab) } else { self?.openInNewTab(t.pinnedURL ?? t.url, note: "duplicateTab") }
+        }
+        let copyLink = E(title: "Copy Link", id: "edit.copyURL") { [weak self, weak tab] in
+            if let tab { self?.copyURL(of: tab) } else { self?.copyText(t.url, note: "copyURL") }
+        }
+        let close = E(title: "Close", id: "file.closeTab", run: { [weak self, weak tab] in if let tab { self?.closeTab(tab) } }, enabled: tab != nil)
+        // Edit Pinned Page (spec section 2): Use Current Page as Pinned Page and Reset to Pinned Page act only off the pinned page.
+        let off = offPinnedPage(t)
+        let editPinned: E = t.isPinned
+            ? E(title: "Edit Pinned Page", run: {}, children: [
+                E(title: "Use Current Page as Pinned Page", run: { [weak self] in self?.usePinnedPage(id) }, enabled: off),
+                E(title: "Reset to Pinned Page", run: { [weak self] in self?.resetToPinned(id) }, enabled: off),
+                E(title: "Copy Pinned URL", run: { [weak self] in self?.copyPinnedURL(id) })])
+            : .later("Edit Pinned Page", "M1.6", submenu: true)
         var middle: [E] = [duplicate, .later("New Group with Tab", "M1.6", id: "tabs.newGroupWithTabs"), .later("Move to Group", "M1.6", submenu: true),
                            .later("Move to Profile", "M1.7", submenu: true), .sep, copyLink]
 #if NOCHE_TESTHOOKS
         if ContextMenus.env("NOCHE_TEST_CTX_TABORDER") { middle[0] = copyLink; middle[5] = duplicate }  // negative control: Copy Link and Duplicate trade places
 #endif
-        return [.later("Pin", "M1.6"), .sep, .later("Chat With This Tab", "M2"), .later("Open as Split", "M1.10"), .sep] + middle
-            + [.sep, .later("Rename...", "M1.6"), .later("Change Icon...", "M1.6"), .later("Edit Pinned Page", "M1.6", submenu: true), .sep, close]
+        return [pin, .sep, .later("Chat With This Tab", "M2"), .later("Open as Split", "M1.10"), .sep] + middle
+            + [.sep, .later("Rename...", "M1.6"), .later("Change Icon...", "M1.6"), editPinned, .sep, close]
     }
 
     func sidebarMenuEntries() -> [CtxEntry] {

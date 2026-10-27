@@ -74,6 +74,8 @@ enum ChromeStyle {
     static let tileFaviconSize: CGFloat = 20                                     // M
     static let tileLoadingGap: CGFloat = 3, tileLoadingWidth: CGFloat = 2        // P: a 180 degree arc around the favicon
     static let dormantAlpha: CGFloat = 0.45                                      // P
+    static let resetGlyphSize: CGFloat = 12, resetGlyphInset: CGFloat = 4        // P: the return glyph of a pinned tab off its pinned page, shown on hover
+    static let resetGlyphColor = NSColor.white.withAlphaComponent(0.7)           // P
     static let groupFont = NSFont.systemFont(ofSize: 13, weight: .semibold)      // M
     static let groupIconSize: CGFloat = 14                                       // M
     static let groupChevronSize: CGFloat = 8, groupChevronGap: CGFloat = 8       // M gap, P size

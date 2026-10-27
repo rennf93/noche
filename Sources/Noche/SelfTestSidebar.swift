@@ -34,6 +34,10 @@ extension SelfTest {
         let box = bar.spaceDotFrame.offsetBy(dx: 0, dy: barY)
         if !near(box, 90, barY + 15, 6, 6) { bad.append("space dot \(box), want (90, \(barY + 15), 6, 6)") }
         if abs(bar.chevronCenter.x - 174) > 1 || abs(bar.chevronCenter.y - 18) > 1 { bad.append("chevron center \(bar.chevronCenter), want (174, 18)") }
+        // The same dot and chevron as drawn (pixels of the rendered bar), not as the constants say.
+        let drawn = drawnBottomBar(bar)
+        if let d = drawn.dot, abs(d.x - 93) <= 1, abs(d.y - 18) <= 1 {} else { bad.append("drawn space dot center \(drawn.dot.map { "\($0)" } ?? "none"), want (93, 18)") }
+        if let v = drawn.chevron, abs(v.x - 174) <= 1.5, abs(v.y - 18) <= 1.5 {} else { bad.append("drawn chevron center \(drawn.chevron.map { "\($0)" } ?? "none"), want (174, 18)") }
         if ctl.frame(ofIdentifier: "sidebar.tab.10") != nil { bad.append("sidebar.tab.10 exists: the composition has 10 tab rows") }
         let views = ctl.sidebar.realizedCount
         if views != 12 + 10 + 11 { bad.append("\(views) views for 33 entries") }
@@ -119,7 +123,8 @@ extension SelfTest {
             let tiles = ctl.sidebar.realizedTileCount, rowViews = ctl.sidebar.realizedCount - tiles
             rowsMost = max(rowsMost, rowViews); viewsMost = max(viewsMost, ctl.sidebar.realizedCount)
             if rowViews > 40 { bad.append("capture + 500 at the \(name): \(rowViews) row views, want at most 40") }
-            if ctl.sidebar.realizedCount > 40 + 12 { bad.append("capture + 500 at the \(name): \(ctl.sidebar.realizedCount) views, want at most 40 plus 12 tiles") }
+            if ctl.sidebar.realizedCount > 40 + tiles { bad.append("capture + 500 at the \(name): \(ctl.sidebar.realizedCount) views, want at most 40 plus the \(tiles) realized tiles") }
+            if tiles > 12 { bad.append("capture + 500 at the \(name): \(tiles) tiles, the composition has 12 pins") }
             if name == "top", ctl.frame(ofIdentifier: "sidebar.tab.400") != nil { bad.append("sidebar.tab.400 has a view at the top of the list: an unrealized row must have none") }
             if name == "end", ctl.frame(ofIdentifier: "sidebar.tab.0") != nil { bad.append("sidebar.tab.0 has a view at the end of the list") }
         }
@@ -129,7 +134,7 @@ extension SelfTest {
     /// T2.5 `min-width`: the window's minimum content width is the sidebar (197) plus a card of 284 (the find pill's 260 floor and its two
     /// 12 pt margins) plus the right inset (6): what a drag on the window's edge stops at. A program's own `setFrame` is not clamped by
     /// AppKit, so the check reads the NSWindow's `contentMinSize` and `minSize`. (The Views window's own minimum is not readable: `CefWindow::GetMinimumSize`
-    /// answers 0 whatever the delegate says; the delegate answer is the bridge's way of keeping Views from resetting the NSWindow's.) The restore of a narrow saved frame is `min-width-relaunch`.
+    /// answers 0 whatever the delegate says, so the bridge no longer answers it.) The restore of a narrow saved frame is `min-width-relaunch`.
     func minWidth() async {
         guard await ready(), let ctl, let ns = ctl.nsWindow, let host = ctl.window.chromeHost else { return }
         let want = ChromeStyle.minimumWindowWidth

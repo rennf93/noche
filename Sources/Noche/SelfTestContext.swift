@@ -137,12 +137,12 @@ extension SelfTest {
         let want = ["Pin", "---", "Chat With This Tab", "Open as Split", "---", "Duplicate", "New Group with Tab", "Move to Group", "Move to Profile", "---",
                     "Copy Link", "---", "Rename...", "Change Icon...", "Edit Pinned Page", "---", "Close"]
         guard titles(m.menu) == want else { return finish(false, "tab menu \(titles(m.menu)), want \(want)") }
-        guard enabledTitles(m.menu) == ["Duplicate", "Copy Link", "Close"] else { return finish(false, "enabled items \(enabledTitles(m.menu)), want Duplicate, Copy Link, Close") }
+        guard enabledTitles(m.menu) == ["Pin", "Duplicate", "Copy Link", "Close"] else { return finish(false, "enabled items \(enabledTitles(m.menu)), want Pin, Duplicate, Copy Link, Close") }
         guard sameKey(item(m.menu, "Copy Link"), menuItem("Copy URL")), sameKey(item(m.menu, "Close"), menuItem("Close Tab")),
               sameKey(item(m.menu, "New Group with Tab"), menuItem("New Group with Tab")) else { return finish(false, "key equivalents differ from the menu bar's") }
         guard win.activeTab === active else { return finish(false, "a right click changed the selection") }
         BrowserWindowController.actionCounts = [:]
-        ContextMenus.dismiss(choosing: item(m.menu, "Pin"))  // a disabled item does nothing
+        ContextMenus.dismiss(choosing: item(m.menu, "Rename..."))  // a disabled item does nothing
         guard BrowserWindowController.actionCounts.isEmpty, rowCount == 3 else { return finish(false, "a disabled item acted: \(BrowserWindowController.actionCounts)") }
         // Control-click on a row is a right click: the menu is requested and the tab is not selected.
         ContextMenus.dismiss(choosing: nil)
@@ -168,7 +168,7 @@ extension SelfTest {
         ContextMenus.dismiss(choosing: item(x.menu, "Close"))
         guard await until(10, { rowCount == 3 && !win.tabs.contains { $0 === t1 } }) else { return finish(false, "Close left \(rowCount) rows, tab still there: \(win.tabs.contains { $0 === t1 })") }
         guard win.activeTab === activeNow, violations.isEmpty else { return finish(false, "Close changed the selection or \(violations)") }
-        finish(true, "tab row menu in the section 3 order with Duplicate, Copy Link and Close enabled and the rest disabled, keys equal the menu bar's, a right click does not select, Copy Link and Duplicate and Close act on the right-clicked tab \(violations)")
+        finish(true, "tab row menu in the section 3 order with Pin, Duplicate, Copy Link and Close enabled and the rest disabled, keys equal the menu bar's, a right click does not select, Copy Link and Duplicate and Close act on the right-clicked tab \(violations)")
     }
 
     func ctxSidebar() async {

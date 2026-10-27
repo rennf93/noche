@@ -25,9 +25,8 @@ extension BrowserWindowController {
         }
 #endif
         let items = list.items
-        guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i), let tab = engineTab(items[i]) else { return }
-        intendedActive = tab
-        window.activateTab(tab)
+        guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i) else { return }
+        activate(items[i])
     }
 
     func isClosing(_ tab: NCTab) -> Bool {
@@ -53,9 +52,13 @@ extension BrowserWindowController {
     func closeActiveTab() {
         note("closeTab")
         guard let active = survivor(from: intendedActive ?? activeTab) else { return }
-        let open = orderedTabs().filter { !isClosing($0) }
-        if let i = open.firstIndex(where: { $0 === active }) {
-            closeNext[active.identifier] = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
+        if let blank = keepEngineTab(closing: active) {
+            closeNext[active.identifier] = blank
+        } else {
+            let open = orderedTabs().filter { !isClosing($0) }
+            if let i = open.firstIndex(where: { $0 === active }) {
+                closeNext[active.identifier] = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
+            }
         }
         closing[active.identifier] = ProcessInfo.processInfo.systemUptime
         active.close()
@@ -68,9 +71,8 @@ extension BrowserWindowController {
         closeNext.removeAll()
         guard let id = intendedActive.flatMap({ ids[$0.identifier] }) ?? list.activeID,
               let target = delta > 0 ? list.next(after: id) : list.previous(before: id),
-              let tab = list.items.first(where: { $0.id == target }).flatMap({ engineTab($0) }) else { return }
-        intendedActive = tab
-        window.activateTab(tab)
+              let t = item(withID: target) else { return }
+        activate(t)
     }
 
     /// IDC_MOVE_TAB_NEXT and _PREVIOUS: the active tab one step along the list (the order of record); at an end nothing happens.

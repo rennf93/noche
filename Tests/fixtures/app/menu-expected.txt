@@ -136,7 +136,7 @@ Tabs|Next Tab|]|shift+cmd|1
 Tabs|Previous Tab|[|shift+cmd|1
 Tabs|---|||-
 Tabs|Search Tabs...|a|shift+cmd|0
-Tabs|Pin|d|shift+cmd|0
+Tabs|Pin|d|shift+cmd|1
 Tabs|Duplicate|||1
 Tabs|---|||-
 Tabs|New Group with Tab|n|ctrl+cmd|0

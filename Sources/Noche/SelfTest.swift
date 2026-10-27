@@ -18,7 +18,7 @@ final class SelfTest {
     static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
 
     /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
-    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" }
+    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") }
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -55,6 +55,8 @@ final class SelfTest {
         url = options.url
         phase = options.phase
         self.app = app
+        // pin-launch-held restores with its last tab withheld and the fallback at 3 s instead of 15.
+        if options.check == "pin-launch-held", options.phase == 2 { BrowserWindowController.holdLastRestoreTab = true; BrowserWindowController.restoreFallback = 3 }
     }
 
     // MARK: events from AppDelegate
@@ -158,6 +160,13 @@ final class SelfTest {
             case "sidebar-geometry": await sidebarGeometry()
             case "sidebar-columns": await sidebarColumns()
             case "sidebar-scale": await sidebarScale()
+            case "pin-toggle": await pinToggle()
+            case "pin-dormant": await pinDormant()
+            case "pin-reset": await pinReset()
+            case "pin-launch": await pinLaunch(held: false)
+            case "pin-launch-held": await pinLaunch(held: true)
+            case "reopen-container": await reopenContainer()
+            case "pin-reveal": await pinReveal()
             case "min-width": await minWidth()
             case "min-width-relaunch": await minWidthRelaunch()
             case "shortcuts-once": await shortcutsOnce()

@@ -509,4 +509,51 @@ final class TabStructureTests: XCTestCase {
         XCTAssertEqual(Set(placed), live)
         XCTAssertEqual(placed.count, live.count)
     }
+
+    // MARK: container-relative index (T3.5)
+
+    func testContainerIndexIsRelativeToItsContainerNotTheFlatList() {
+        var (l, t) = list(5)
+        l.pin(t[0])
+        let g = l.createGroup(with: t[1])!
+        // items: pin, group child, then the day tabs; the day list is [group, t2, t3, t4].
+        XCTAssertEqual(l.items.firstIndex { $0.id == t[3] }, 3)
+        XCTAssertEqual(l.containerIndex(of: t[3]), 2)
+        XCTAssertEqual(l.containerIndex(of: t[4]), 3)
+        XCTAssertEqual(l.containerIndex(of: t[0]), 0)  // the grid
+        XCTAssertEqual(l.containerIndex(of: t[1]), 0)  // inside the group
+        XCTAssertEqual(l.containerIndex(of: TabID()), nil)
+        _ = g
+    }
+
+    func testReopenAtContainerIndexPutsTheTabBackBetweenItsNeighbours() {
+        var (l, t) = list(5)
+        l.pin(t[0])
+        l.createGroup(with: t[1])
+        let before = ids(l)
+        let closed = item(l, t[3]), at = l.containerIndex(of: t[3])!
+        _ = l.remove(t[3])
+        l.insertNew(closed, opener: nil, addToTop: false, activate: false)
+        l.move(t[3], to: at)
+        XCTAssertEqual(ids(l), before)
+        // The flat index (3) would have put it after t4.
+        var wrong = l
+        _ = wrong.remove(t[3])
+        wrong.insertNew(closed, opener: nil, addToTop: false, activate: false)
+        wrong.move(t[3], to: 3)
+        XCTAssertNotEqual(ids(wrong), before)
+    }
+
+    func testDormantTabsKeepTheirPlaceAndAreNeverTheCloseSuccessor() {
+        var (l, t) = list(4)
+        l.pin(t[1])
+        l.setEngineID(t[1], nil)   // Cmd+W on a pinned tab
+        XCTAssertEqual(item(l, t[1]).engineID, nil)
+        XCTAssertTrue(item(l, t[1]).isPinned)
+        l.markActive(t[0], at: t0)
+        XCTAssertEqual(l.remove(t[0]), t[2])  // not the dormant pin above
+        l.setEngineID(t[1], 77)               // a click wakes it, same id and place
+        XCTAssertEqual(item(l, t[1]).engineID, 77)
+        XCTAssertEqual(l.items.first?.id, t[1])
+    }
 }

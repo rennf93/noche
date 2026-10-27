@@ -25,7 +25,7 @@ final class SidebarBottomBar: DragView {
 
     override func draw(_ dirtyRect: NSRect) {
         ChromeStyle.spaceDotActive.setFill()
-        NSBezierPath(ovalIn: spaceDotFrame).fill()
+        NSBezierPath(ovalIn: BarHook.on("SB_BARDRAW") ? spaceDotFrame.offsetBy(dx: 4, dy: 0) : spaceDotFrame).fill()  // the hook: the dot is drawn 4 pt right of where the geometry says
         if let chevron = ChromeStyle.symbol("chevron.down", size: 10, color: ChromeStyle.sidebarIcon) {
             let s = chevron.size
             chevron.draw(in: NSRect(x: chevronCenter.x - s.width / 2, y: chevronCenter.y - s.height / 2, width: s.width, height: s.height))

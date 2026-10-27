@@ -16,8 +16,8 @@ final class TrafficLightView: NSView {
 
 /// What a realized row shows; the controller builds it for the entries on screen only.
 enum SidebarContent {
-    case tab(title: String, favicon: NSImage?, selected: Bool, dormant: Bool)
-    case tile(title: String, favicon: NSImage?, selected: Bool, dormant: Bool, loading: Bool)
+    case tab(title: String, favicon: NSImage?, selected: Bool, dormant: Bool, canReset: Bool)
+    case tile(title: String, favicon: NSImage?, selected: Bool, dormant: Bool, loading: Bool, canReset: Bool)
     case group(name: String, icon: String?, colorIndex: Int, collapsed: Bool, hasActive: Bool)
 }
 
@@ -44,7 +44,7 @@ final class GroupBoxesView: NSView {
 final class SidebarView: DragView {
     static let strip: CGFloat = 48
     // Negative controls, read once: the environment is a dictionary built on every read.
-    private static let fixedWidth = BarHook.on("SB_FIXEDWIDTH"), unvirtual = BarHook.on("SB_UNVIRTUAL"), lowRows = BarHook.on("SB_GEOMETRY")
+    private static let fixedWidth = BarHook.on("SB_FIXEDWIDTH"), unvirtual = BarHook.on("SB_UNVIRTUAL"), lowRows = BarHook.on("SB_GEOMETRY"), noReveal = BarHook.on("SB_NOREVEAL")
     let lights: [TrafficLightView] = ChromeStyle.trafficColors.map { color in
         let v = TrafficLightView(frame: .zero)
         v.color = color
@@ -67,6 +67,7 @@ final class SidebarView: DragView {
     var onSelect: ((TabID) -> Void)?
     var onClose: ((TabID) -> Void)?
     var onTabMenu: ((TabID, NSPoint) -> Void)?      // the tab, click in window coordinates
+    var onReset: ((TabID) -> Void)?                 // the return glyph of a pinned tab off its pinned page
     var onToggleGroup: ((GroupID) -> Void)?
     var onEmptyMenu: ((NSPoint) -> Void)?
 
@@ -158,7 +159,7 @@ final class SidebarView: DragView {
             }
         }
         updateScroll()
-        if let selected, selected != lastSelected,
+        if let selected, selected != lastSelected, !Self.noReveal,
            let p = layout.placements.first(where: {
                switch $0.entry { case .tab(let t, _), .gridTile(let t): t == selected; default: false }
            }) {
@@ -205,6 +206,7 @@ final class SidebarView: DragView {
             v.onSelect = { [weak self, weak v] in if let id = v?.tabID { self?.onSelect?(id) } }
             v.onClose = { [weak self, weak v] in if let id = v?.tabID { self?.onClose?(id) } }
             v.onContextMenu = { [weak self, weak v] p in if let id = v?.tabID { self?.onTabMenu?(id, p) } }
+            v.onReset = { [weak self, weak v] in if let id = v?.tabID { self?.onReset?(id) } }
             view = v
         case .group:
             let v = spareGroups.popLast() ?? GroupRowView(frame: .zero)
@@ -217,6 +219,7 @@ final class SidebarView: DragView {
             v.onSelect = { [weak self, weak v] in if let id = v?.tabID { self?.onSelect?(id) } }
             v.onClose = { [weak self, weak v] in if let id = v?.tabID { self?.onClose?(id) } }
             v.onContextMenu = { [weak self, weak v] p in if let id = v?.tabID { self?.onTabMenu?(id, p) } }
+            v.onReset = { [weak self, weak v] in if let id = v?.tabID { self?.onReset?(id) } }
             view = v
         }
         document.addSubview(view)
@@ -233,14 +236,14 @@ final class SidebarView: DragView {
             return false
         }
         switch (view, p.entry, c) {
-        case (let v as TabRowView, .tab(let id, let level), .tab(let title, let favicon, let selected, let dormant)):
+        case (let v as TabRowView, .tab(let id, let level), .tab(let title, let favicon, let selected, let dormant, let canReset)):
             v.tabID = id
             v.setAccessibilityIdentifier("sidebar.tab.\(p.ordinal)")
-            v.configure(title: title, favicon: favicon, selected: selected, level: level, dormant: dormant)
-        case (let v as PinnedTileView, .gridTile(let id), .tile(let title, let favicon, let selected, let dormant, let loading)):
+            v.configure(title: title, favicon: favicon, selected: selected, level: level, dormant: dormant, canReset: canReset)
+        case (let v as PinnedTileView, .gridTile(let id), .tile(let title, let favicon, let selected, let dormant, let loading, let canReset)):
             v.tabID = id
             v.setAccessibilityIdentifier("sidebar.pin.\(p.ordinal)")
-            v.configure(title: title, favicon: favicon, selected: selected, dormant: dormant, loading: loading)
+            v.configure(title: title, favicon: favicon, selected: selected, dormant: dormant, loading: loading, canReset: canReset)
         case (let v as GroupRowView, .group(let g), .group(let name, let icon, let colorIndex, let collapsed, let hasActive)):
             v.groupID = g
             v.setAccessibilityIdentifier("sidebar.group.\(p.ordinal)")

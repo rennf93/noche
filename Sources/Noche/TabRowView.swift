@@ -10,6 +10,14 @@ final class TabRowView: NSView {
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
     var onContextMenu: ((NSPoint) -> Void)?   // the click in window coordinates
+    var onReset: (() -> Void)?                // the return glyph was clicked: back to the pinned page
+    /// A pinned row off its pinned page: hovering it shows the return glyph at its right edge.
+    private(set) var canReset = false
+    var showsResetGlyph: Bool { canReset && isHovered }
+    var resetGlyphRect: NSRect {
+        let s = ChromeStyle.resetGlyphSize
+        return NSRect(x: bounds.maxX - s - ChromeStyle.resetGlyphInset - 4, y: (bounds.height - s) / 2, width: s, height: s)
+    }
     var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
     let fade = CAGradientLayer()
@@ -57,16 +65,19 @@ final class TabRowView: NSView {
         fade.locations = [0, NSNumber(value: Double(max(0, w - ChromeStyle.titleFade) / w)), 1]
     }
 
-    private var shown: (title: String, favicon: NSImage?, selected: Bool, level: Int, dormant: Bool)?
+    private var shown: (title: String, favicon: NSImage?, selected: Bool, level: Int, dormant: Bool, canReset: Bool)?
     private static let placeholder = ChromeStyle.symbol("globe", size: 14, color: ChromeStyle.newTabColor)
 
     /// A refresh configures every realized row; one whose content did not change does nothing.
     /// A view taken from the pool is not under the pointer until AppKit says so.
     func clearHover() { isHovered = false }
+    /// The pointer entering or leaving (the checks call it: a hidden window gets no tracking events).
+    func hover(_ on: Bool) { isHovered = on }
 
-    func configure(title: String, favicon: NSImage?, selected: Bool, level: Int = 0, dormant: Bool = false) {
-        if let s = shown, s.title == title, s.favicon === favicon, s.selected == selected, s.level == level, s.dormant == dormant { return }
-        shown = (title, favicon, selected, level, dormant)
+    func configure(title: String, favicon: NSImage?, selected: Bool, level: Int = 0, dormant: Bool = false, canReset: Bool = false) {
+        if let s = shown, s.title == title, s.favicon === favicon, s.selected == selected, s.level == level, s.dormant == dormant, s.canReset == canReset { return }
+        shown = (title, favicon, selected, level, dormant, canReset)
+        if canReset != self.canReset { self.canReset = canReset; needsDisplay = true }
         if level != self.level { self.level = level; needsLayout = true }
         alphaValue = dormant ? ChromeStyle.dormantAlpha : 1
         titleField.stringValue = title
@@ -88,6 +99,9 @@ final class TabRowView: NSView {
             ChromeStyle.rowHover.setFill()
             path.fill()
         }
+        if showsResetGlyph, let g = ChromeStyle.symbol("arrow.uturn.backward", size: ChromeStyle.resetGlyphSize - 2, color: ChromeStyle.resetGlyphColor) {
+            g.draw(in: resetGlyphRect)
+        }
     }
 
     /// The row takes every click inside it, whatever subview is under the point.
@@ -96,6 +110,7 @@ final class TabRowView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
+        if showsResetGlyph, resetGlyphRect.contains(convert(event.locationInWindow, from: nil)) { onReset?(); return }
         onSelect?()
     }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click

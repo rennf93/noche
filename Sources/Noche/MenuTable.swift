@@ -19,6 +19,7 @@ struct MenuEntry {
     var viaResponder = false          // nil target: the responder chain (the page, the field editor, NSApp or the window) answers
     var enabled: Rule = { $0.window != nil }
     var state: Rule?                  // checkmark
+    var titleRule: (@MainActor (MenuContext) -> String)?   // a title that follows state (Pin and Unpin), set when the item validates
     var submenu: [MenuEntry]?
     var separator = false
     var tag = 0
@@ -70,8 +71,9 @@ enum MenuTable {
     /// Find and Print act on a page: not on the New Tab surface, where the page is hidden.
     private static let pageShown: E.Rule = { $0.window.map { !$0.newTabShown || BarHook.on("FIND_NTENABLED") } ?? false }  // the hook is a negative control
     /// A working item whose target is the AppDelegate.
-    private static func app(_ title: String, _ id: String?, _ action: Selector, enabled: @escaping E.Rule = hasWindow, state: E.Rule? = nil, tag: Int = 0) -> E {
-        E(title: title, id: id, action: action, enabled: enabled, state: state, tag: tag)
+    private static func app(_ title: String, _ id: String?, _ action: Selector, enabled: @escaping E.Rule = hasWindow, state: E.Rule? = nil, tag: Int = 0,
+                            titleRule: (@MainActor (MenuContext) -> String)? = nil) -> E {
+        E(title: title, id: id, action: action, enabled: enabled, state: state, titleRule: titleRule, tag: tag)
     }
     /// A standard system action on the responder chain (the field editor or the page, NSApp, the window).
     private static func std(_ title: String, _ action: Selector, _ id: String? = nil) -> E { E(title: title, id: id, action: action, viaResponder: true) }
@@ -220,7 +222,8 @@ enum MenuTable {
             app("Previous Tab", "tabs.previousTab", #selector(AppDelegate.previousTab(_:))),
             sep,
             later("Search Tabs...", "tabs.searchTabs", "M1.6"),
-            later("Pin", "tabs.pinTab", "M1.6"),
+            app("Pin", "tabs.pinTab", #selector(AppDelegate.pinTab(_:)), enabled: { $0.window?.list.activeID != nil },
+                titleRule: { $0.window?.activeIsPinned == true ? "Unpin" : "Pin" }),  // the table's title is the default; validation sets the live one
             app("Duplicate", "tabs.duplicateTab", #selector(AppDelegate.duplicateTab(_:))),
             sep,
             later("New Group with Tab", "tabs.newGroupWithTabs", "M1.6"),

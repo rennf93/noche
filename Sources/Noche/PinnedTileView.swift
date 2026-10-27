@@ -9,7 +9,16 @@ final class PinnedTileView: NSView {
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
     var onContextMenu: ((NSPoint) -> Void)?   // the click in window coordinates
+    var onReset: (() -> Void)?                // the return glyph was clicked: back to the pinned page
     private(set) var showsPlaceholder = true
+    /// The tab is not on its pinned page (|url| differs from |pinnedURL|): hovering the tile shows the return glyph.
+    private(set) var canReset = false
+    var showsResetGlyph: Bool { canReset && isHovered }
+    /// Where the glyph sits, top right of the tile.
+    var resetGlyphRect: NSRect {
+        let s = ChromeStyle.resetGlyphSize
+        return NSRect(x: bounds.maxX - s - ChromeStyle.resetGlyphInset, y: ChromeStyle.resetGlyphInset, width: s, height: s)
+    }
     private var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isLoading = false { didSet { if isLoading != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
@@ -33,10 +42,13 @@ final class PinnedTileView: NSView {
 
     /// A view taken from the pool is not under the pointer until AppKit says so.
     func clearHover() { isHovered = false }
+    /// The pointer entering or leaving (the checks call it: a hidden window gets no tracking events).
+    func hover(_ on: Bool) { isHovered = on }
 
     private static let placeholder = ChromeStyle.symbol("globe", size: 14, color: ChromeStyle.newTabColor)
 
-    func configure(title: String, favicon: NSImage?, selected: Bool, dormant: Bool, loading: Bool) {
+    func configure(title: String, favicon: NSImage?, selected: Bool, dormant: Bool, loading: Bool, canReset: Bool = false) {
+        if canReset != self.canReset { self.canReset = canReset }
         showsPlaceholder = favicon == nil
         faviconView.image = favicon ?? Self.placeholder
         faviconView.alphaValue = dormant ? ChromeStyle.dormantAlpha : 1
@@ -59,6 +71,9 @@ final class PinnedTileView: NSView {
             ChromeStyle.tileSelectedStroke.setStroke()
             inner.stroke()
         }
+        if showsResetGlyph, let g = ChromeStyle.symbol("arrow.uturn.backward", size: ChromeStyle.resetGlyphSize - 2, color: ChromeStyle.resetGlyphColor) {
+            g.draw(in: resetGlyphRect)
+        }
         if isLoading {
             let c = NSPoint(x: bounds.midX, y: bounds.midY)
             let arc = NSBezierPath()
@@ -74,6 +89,7 @@ final class PinnedTileView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
+        if showsResetGlyph, resetGlyphRect.contains(convert(event.locationInWindow, from: nil)) { onReset?(); return }
         onSelect?()
     }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click

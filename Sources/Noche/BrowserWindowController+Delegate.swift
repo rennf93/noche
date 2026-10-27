@@ -19,6 +19,19 @@ extension BrowserWindowController {
         if !firstAdded, pending == nil { pending = initialPending; initialPending = nil }
         firstAdded = true
         if let pending { ids[tab.identifier] = pending.id }
+        // A dormant tab waking (a click, Cmd+1, a reset), or a restored tab that came after the fallback: the tab is in the list already
+        // and takes the engine tab, keeping its place.
+        if let pending, let t = item(withID: pending.id) {
+            list.setEngineID(t.id, tab.identifier)
+            list.update(t.id, url: pending.url, title: t.title, isLoading: tab.isLoading)
+            if active { list.markActive(t.id, at: Date()) }
+            dormantIcons[t.id] = nil
+            refresh()
+            changed()
+            syncNewTab(activated: active)
+            app.tabAdded(tab)
+            return
+        }
         // The new tab goes right after the tab before it in the engine's strip (a popup after its opener); one the engine appended goes
         // last in the list, which can differ from the strip after a reopen put a tab in the middle.
         let strip = window.tabs
@@ -34,22 +47,21 @@ extension BrowserWindowController {
             }
         }
         list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: false, activate: active)
-        if let at = pending?.index, let placed = list.items.first(where: { $0.id == added.id }), !placed.isPinned, placed.groupID == nil {
-            list.move(added.id, to: at)
-        }
+        if let at = pending?.index { list.move(added.id, to: at) }  // the index is inside the tab's own container (|containerIndex|)
         if let restore {
             if !restoreStarted {
                 restoreStarted = true
-                for p in restoreRest { if let t = window.addTab(withURL: p.url, activate: false) { pendingByTab[t.identifier] = p } }
+                for (n, p) in restoreRest.enumerated() {
+#if NOCHE_TESTHOOKS
+                    if Self.holdLastRestoreTab, n == restoreRest.count - 1 { continue }  // pin-launch-held: this tab never arrives
+#endif
+                    if let t = window.addTab(withURL: p.url, activate: false) { pendingByTab[t.identifier] = p }
+                }
             }
             if let pending, pending.index == nil {
                 restoreAdded += 1
                 if added.id == restore.selected, !active { skipActivation = added.id; window.activateTab(tab); intendedActive = tab }
-                if restoreAdded == restore.tabs.count {
-                    applySavedStructure(restore)
-                    restoring = false; self.restore = nil
-                    if restore.isZoomed, !restore.fullScreen { nsWindow?.zoom(nil) }
-                }
+                if restoreAdded == restore.tabs.count { finishRestore() }
             }
         }
         refresh()
@@ -59,16 +71,38 @@ extension BrowserWindowController {
         app.tabAdded(tab)
     }
 
-    /// The saved pins, groups, titles and order go back once every saved tab is in: the tabs were added one by one as day tabs.
-    /// A window saved with none of them is left as it is.
+    /// Every saved tab is in, or the wait ran out: the saved structure goes onto the list and the restore ends.
+    func finishRestore() {
+        guard let r = restore else { return }
+        if !BarHook.on("RESTORE_FLAT") { applySavedStructure(r) }  // negative control: the tabs stay the day tabs they were added as
+        restoring = false
+        restore = nil
+        if r.isZoomed, !r.fullScreen { nsWindow?.zoom(nil) }
+    }
+
+    /// The saved pins, groups, titles and order go back once every saved tab is in: the tabs were added one by one as day tabs. A saved tab
+    /// that got no engine tab (a pinned one, which restores dormant, or one that never arrived) is put in as a dormant tab at its saved
+    /// address. A window saved with none of them, and every tab in, is left as it is.
     func applySavedStructure(_ r: Restore) {
-        guard !r.groups.isEmpty || r.items.values.contains(where: { $0.isPinned || $0.groupID != nil || $0.customTitle != nil || $0.customIcon != nil }) else { return }
-        var items = list.items
-        for i in items.indices {
-            guard let s = r.items[items[i].id] else { continue }
-            items[i].isPinned = s.isPinned; items[i].inGrid = s.inGrid; items[i].pinnedURL = s.pinnedURL
-            items[i].groupID = s.groupID; items[i].customTitle = s.customTitle; items[i].customIcon = s.customIcon
+        let saved = r.order.isEmpty ? r.tabs.map(\.id) : r.order
+        let live = Dictionary(uniqueKeysWithValues: list.items.map { ($0.id, $0) })
+        let structured = !r.groups.isEmpty || r.items.values.contains(where: { $0.isPinned || $0.groupID != nil || $0.customTitle != nil || $0.customIcon != nil })
+        guard structured || saved.contains(where: { live[$0] == nil && r.items[$0] != nil }) else { return }
+        var items: [TabItem] = []
+        for id in saved {
+            if var t = live[id] {
+                if let s = r.items[id] {
+                    t.isPinned = s.isPinned; t.inGrid = s.inGrid; t.pinnedURL = s.pinnedURL
+                    t.groupID = s.groupID; t.customTitle = s.customTitle; t.customIcon = s.customIcon
+                }
+                items.append(t)
+            } else if var s = r.items[id] {
+                s.engineID = nil; s.isLoading = false
+                items.append(s)
+            }
         }
+        let placed = Set(saved)
+        items += list.items.filter { !placed.contains($0.id) }  // tabs the engine added on its own
         if let rebuilt = TabList(items: items, groups: r.groups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID) { list = rebuilt }
     }
 
@@ -87,9 +121,18 @@ extension BrowserWindowController {
     func window(_ window: NCWindow, didClose tab: NCTab) {
         let successor = closeNext.removeValue(forKey: tab.identifier)
         var gone: (item: TabItem, index: Int)?
+        var dormant = false
         if let id = ids[tab.identifier], let i = list.items.firstIndex(where: { $0.id == id }) {
-            gone = (list.items[i], i)
-            _ = list.remove(id)
+            let t = list.items[i]
+            gone = (t, BarHook.on("REOPEN_FLAT") ? i : (list.containerIndex(of: id) ?? i))  // negative control: the flat position, as before
+            if goesDormant(t) {
+                dormant = true
+                becomeDormant(id, last: tab)
+                // The selection moves on as in |remove|, without stamping the tab it lands on.
+                if list.activeID == id, let next = survivor(from: successor), let nid = ids[next.identifier] { list.activate(nid) }
+            } else {
+                _ = list.remove(id)
+            }
         }
         tabs[tab.identifier] = nil
         ids[tab.identifier] = nil
@@ -106,7 +149,7 @@ extension BrowserWindowController {
         if let next = survivor(from: successor) { intendedActive = next; window.activateTab(next) }
         refresh()
         // The tab closed alone (Cmd+W, its close button, the page): it goes on the closed list. Closing with its window or at quit does not.
-        if let gone, !windowClosing, !app.closing { app.writer?.closed(tab: gone.item, window: id, index: gone.index) }
+        if let gone, !dormant, !windowClosing, !app.closing { app.writer?.closed(tab: gone.item, window: id, index: gone.index) }
         app.tabClosed(tab)
     }
 

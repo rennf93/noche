@@ -302,6 +302,15 @@ public struct TabList: Equatable, Sendable {
         return moved
     }
 
+    /// Where the tab sits inside its own container (the grid, the persistent area, the day list or its group): the |index| of
+    /// |move(_:to:)|, which the flat |items| position is not. Nil for an unknown id.
+    public func containerIndex(of id: TabID) -> Int? {
+        switch model().position(of: id) {
+        case .grid(let i)?, .persistent(let i)?, .day(let i)?, .group(_, let i)?: i
+        case nil: nil
+        }
+    }
+
     /// Moves a tab to |index| (clamped) inside the container it is in; the active tab does not change. An unknown id is a no-op.
     public mutating func move(_ id: TabID, to index: Int) {
         guard let at = model().position(of: id) else { return }

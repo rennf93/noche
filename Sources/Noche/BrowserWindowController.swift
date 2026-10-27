@@ -86,6 +86,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         var topOrder: [TopRef] = []
         var dayOrder: [TopRef] = []
         var favicons: [TabID: String] = [:]
+        /// Every saved tab in saved order (|tabs| are the ones that get an engine tab; the others, the pinned ones, restore dormant). Empty: |tabs|.
+        var order: [TabID] = []
     }
     /// Identity (id, address, index) for the tabs Noche itself asked the engine to add, keyed by the NCTab `addTab` returned: a reopened
     /// tab and the restored tabs after the first keep their saved identity, and a tab the engine adds on its own (Cmd+T through Chrome,
@@ -98,6 +100,16 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var restore: Restore?
     var restoreAdded = 0
     var restoreStarted = false
+    /// The last favicon of a tab that went dormant: shown until it wakes (not stored, so a relaunch shows the placeholder).
+    var dormantIcons: [TabID: NSImage] = [:]
+    /// How long a restore waits for its tabs before it applies the saved structure to the ones that arrived.
+#if NOCHE_TESTHOOKS
+    static var restoreFallback: TimeInterval = 15
+    /// Test support (pin-launch-held): the restore never asks the engine for its last tab, as if it had not arrived.
+    static var holdLastRestoreTab = false
+#else
+    static let restoreFallback: TimeInterval = 15
+#endif
     let initialFrame: NSRect
     var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
     var faviconSeeds: [TabID: (url: String, icon: String)] = [:]   // saved icon address, used until the page reports its own
@@ -133,8 +145,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             initialPending = all.first
             restoreRest = Array(all.dropFirst())
             for t in restore.tabs { if let icon = restore.favicons[t.id] { faviconSeeds[t.id] = (t.url, icon) } }
-            // A saved window whose tabs never arrive must not stay unsaved forever.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in MainActor.assumeIsolated { self?.restoring = false } }
+            // A saved window whose tabs never arrive must not stay unsaved forever: the saved structure goes onto the tabs that came, and
+            // the ones that did not stay as dormant tabs at their saved addresses.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.restoreFallback) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.restore != nil else { return }
+                    if BarHook.on("FALLBACK_BARE") { self.restoring = false; return }  // negative control: the old fallback, no saved structure
+                    self.finishRestore()
+                    self.refresh()
+                    self.changed()
+                }
+            }
         }
         window = NCWindow(url: url, frame: frame, mode: app.hidden ? .hidden : .normal, delegate: self)
         window.webInsets = ChromeLayout(size: frame.size, cardX: cardX, barHeight: app.barMode.visible(onNewTab: false) ? ChromeStyle.bookmarksBarHeight : 0).webInsets
@@ -216,6 +237,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.content = { [weak self] entry in self?.sidebarContent(for: entry) }
         sidebar.onSelect = { [weak self] id in self?.row(of: id).map { self?.selectRow($0) } }
         sidebar.onClose = { [weak self] id in self?.row(of: id).map { self?.closeRow($0) } }
+        sidebar.onReset = { [weak self] id in self?.resetToPinned(id) }
         sidebar.onTabMenu = { [weak self] id, p in self?.row(of: id).map { self?.showTabMenu(row: $0, at: p) } }
         sidebar.onToggleGroup = { [weak self] g in self?.toggleGroup(g) }
         sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
@@ -380,9 +402,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     func engineTab(_ item: TabItem) -> NCTab? { item.engineID.flatMap { tabs[$0] } }
 
     func selectRow(_ i: Int) {
-        closeNext.removeAll()
-        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
-        window.activateTab(tab)
+        guard i < list.items.count else { return }
+        activate(list.items[i])
     }
 
     func closeRow(_ i: Int) {

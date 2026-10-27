@@ -162,12 +162,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func restoreWindows(startupURL: String, startupFrame: NSRect) {
         guard !restored.isEmpty else { newWindow(url: startupURL, frame: startupFrame); return }
         for s in restored {
-            let tabs = s.tabs.map { (id: $0.id, url: $0.url.isEmpty ? "about:blank" : $0.url) }
+            // Pinned tabs restore dormant (12 pins cost nothing until clicked); the selected tab always gets an engine tab, pinned or not, and
+            // a window of pins only still opens one (the first).
+            var launch = BarHook.on("PIN_ALLLIVE") ? s.tabs : s.tabs.filter { !$0.isPinned || $0.id == s.selectedTabID }  // the hook: every tab restores live
+            if launch.isEmpty { launch = Array(s.tabs.prefix(1)) }
+            let tabs = launch.map { (id: $0.id, url: $0.url.isEmpty ? "about:blank" : $0.url) }
             let ok = s.frame.width >= 200 && s.frame.height >= 150
             let restore = tabs.isEmpty ? nil : BrowserWindowController.Restore(
                 tabs: tabs, selected: s.selectedTabID, sidebarHidden: s.sidebarMode == "hidden", fullScreen: s.isFullScreen,
                 isZoomed: s.isZoomed, items: Dictionary(uniqueKeysWithValues: s.tabs.map { ($0.id, $0) }), groups: s.groups,
-                topOrder: s.topOrder, dayOrder: s.dayOrder, favicons: s.tabMeta.compactMapValues(\.faviconURL))
+                topOrder: s.topOrder, dayOrder: s.dayOrder, favicons: s.tabMeta.compactMapValues(\.faviconURL), order: s.tabs.map(\.id))
             newWindow(url: tabs.first?.url ?? "about:blank", frame: ok ? Self.onScreen(Self.atLeastMinimumWidth(s.frame)) : startupFrame, id: s.id, restore: restore)
         }
     }
@@ -272,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func inspectElements(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_INSPECT", note: "inspectElements") }
     @objc func javaScriptConsole(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_CONSOLE", note: "javaScriptConsole") }
     @objc func duplicateTab(_ s: Any?) { active?.duplicateTab() }
+    @objc func pinTab(_ s: Any?) { active?.togglePin() }
     /// History and Downloads are Noche's own windows.
     @objc func showHistory(_ s: Any?) { if !closing { history.show() } }
     @objc func showDownloads(_ s: Any?) { if !closing { downloads.show() } }
@@ -311,6 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let rule = (item.representedObject as? MainMenu.Rule)?.entry else { return true }
         let ctx = MenuContext(app: self, window: active)
         if let state = rule.state { item.state = state(ctx) ? .on : .off }
+        if let title = rule.titleRule { item.title = title(ctx) }
         return rule.enabled(ctx)
     }
 
