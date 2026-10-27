@@ -141,6 +141,10 @@ final class SelfTest {
             case "menu-actions": await menuActions()
             case "sidebar-toggle": await sidebarToggle()
             case "sidebar-scroll": await sidebarScroll()
+            case "sidebar-geometry": await sidebarGeometry()
+            case "sidebar-columns": await sidebarColumns()
+            case "sidebar-scale": await sidebarScale()
+            case "min-width": await minWidth()
             case "shortcuts-once": await shortcutsOnce()
             case "eval-async": await evalAsync()
             case "focus-return": await focusReturn()
@@ -267,7 +271,7 @@ final class SelfTest {
     var ctl: BrowserWindowController? { app.controllers.first }
     var win: NCWindow? { ctl?.window }
     var selected: Int? { ctl.flatMap { c in c.list.items.firstIndex { $0.id == c.list.activeID } } }
-    var rowCount: Int { ctl?.sidebar.rows.count ?? 0 }
+    var rowCount: Int { ctl?.sidebar.tabRowCount ?? 0 }
     func fixture(_ path: String) -> String { url + path }
 
     /// The window is up, its chrome installed and the first page loaded.

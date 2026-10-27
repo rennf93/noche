@@ -84,6 +84,9 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// Web view rect inside the window (top, left, bottom, right), window points. Applied as the window box layout's inside border;
 /// setting it again re-applies the layout.
 @property(nonatomic) NSEdgeInsets webInsets;
+/// The narrowest and shortest the window can be made (points; the window is frameless, so frame and content are the same size).
+/// Zero in a dimension: no limit. Handed to the Views window as its minimum size and to the NSWindow's content minimum.
+@property(nonatomic) NSSize minimumContentSize;
 @property(nonatomic) CGFloat webCornerRadius;                     // bottom corners of the web view mask (0: no mask), re-applied on every bounds change
 /// YES hides the page view (the tab stays alive and its renderer keeps running) so what is behind the web rect shows through;
 /// NO shows it again at the same insets and mask. Window-wide, and reset by the bridge: any switch of the active tab

@@ -40,7 +40,7 @@ public enum DropTarget: Equatable, Sendable {
 }
 
 /// The sidebar's rows in order: grid tiles, the persistent area, the divider, the New Tab row, the day list.
-public enum SidebarEntry: Equatable, Sendable {
+public enum SidebarEntry: Hashable, Sendable {
     case gridTile(TabID)
     case tab(TabID, level: Int)
     case group(GroupID)

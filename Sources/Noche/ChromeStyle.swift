@@ -45,12 +45,7 @@ enum ChromeStyle {
     static let trafficColors = [NSColor(hex: 0xFF5F57), NSColor(hex: 0xFEBC2E), NSColor(hex: 0x28C840)]
     static let rowX: CGFloat = 6
     static let rowWidth: CGFloat = 185
-    static let newTabY: CGFloat = 54
-    static let newTabHeight: CGFloat = 39
     static let newTabColor = NSColor(hex: 0x8A8A8A)
-    static let firstRowY: CGFloat = 93
-    static let rowPitch: CGFloat = 37
-    static let rowHeight: CGFloat = 37
     static let faviconX: CGFloat = 14
     static let faviconSize: CGFloat = 18
     static let titleX: CGFloat = 37
@@ -67,6 +62,32 @@ enum ChromeStyle {
     static let downloadRingTrack = NSColor.white.withAlphaComponent(0.15)
     static let downloadRing = NSColor(hex: 0xE0E0E0)
     static let sidebarBottom: CGFloat = 42               // the bottom row: the scrolling list ends above it
+    // M1.6 sidebar (note 1.1 to 1.4; the row geometry is SidebarMetrics in NocheCore). M or T where captured or tokenized, P and B are builder calls
+    // (docs/app/README.md "M1.6 sidebar").
+    static let sidebarDivider = NSColor.white.withAlphaComponent(0.10)           // M: #383c42 on #22272d, not the token's 15%
+    static let tileRadius: CGFloat = 10                                          // M
+    static let tileFill = NSColor.white.withAlphaComponent(0.10)                 // T TabDockItemRestingBackground
+    static let tileBorder = NSColor.white.withAlphaComponent(0x24 / 255.0)       // T TabDockItemRestingStroke
+    static let tileHoverFill = NSColor.white.withAlphaComponent(0x29 / 255.0)    // P (T TabBackgroundHovered)
+    static let tileSelectedStroke = NSColor.white.withAlphaComponent(0x73 / 255.0)  // P (T TabDockItemDefaultSelectionStroke)
+    static let tileSelectedWidth: CGFloat = 1.5                                  // P
+    static let tileFaviconSize: CGFloat = 20                                     // M
+    static let tileLoadingGap: CGFloat = 3, tileLoadingWidth: CGFloat = 2        // P: a 180 degree arc around the favicon
+    static let dormantAlpha: CGFloat = 0.45                                      // P
+    static let groupFont = NSFont.systemFont(ofSize: 13, weight: .semibold)      // M
+    static let groupIconSize: CGFloat = 14                                       // M
+    static let groupChevronSize: CGFloat = 8, groupChevronGap: CGFloat = 8       // M gap, P size
+    static let groupChevron = NSColor(hex: 0x8A8A8A)                             // P
+    static let groupChevronDuration: TimeInterval = 0.120                        // P
+    static let groupIndent: CGFloat = 14                                         // P: a child row's favicon and title
+    static let groupOutline = NSColor.white.withAlphaComponent(0.10)             // T TabGroupSidebarStroke
+    static let groupFill = NSColor.white.withAlphaComponent(0.05)                // P: TabGroupNeutralBackground at 50%
+    static let groupActiveDot: CGFloat = 4                                       // P
+    static let groupActiveDotColor = NSColor(hex: 0xE0E0E0)                      // P
+    /// The 8 group colors in `colorIndex` order: white, green, blue, purple, amber, pink, red, orange (P: the macOS dark system palette).
+    static let groupColors = [0xF2F2F7, 0x30D158, 0x0A84FF, 0xBF5AF2, 0xFFB340, 0xFF6482, 0xFF453A, 0xFF9F0A].map { NSColor(hex: UInt32($0)) }
+    static let spaceDot: CGFloat = 6, bottomIconY: CGFloat = 18                  // M dot size and icon center; B one dot, centered
+    static let spaceDotActive = NSColor(hex: 0xE8E8E8)                           // M
     // Section 8: motion
     static let showDuration: TimeInterval = 0.110
     static let hideDuration: TimeInterval = 0.125
@@ -83,8 +104,6 @@ enum ChromeStyle {
             return true
         }
     }
-
-    static func rowY(_ index: Int) -> CGFloat { firstRowY + rowPitch * CGFloat(index) }
 
     // M1.3 command bar (noche-private/specs/research/m1-3-command-bar.md section 1; geometry itself is CommandBarLayout)
     static let barFill = NSColor(hex: 0x282828)
@@ -113,6 +132,8 @@ enum ChromeStyle {
     static let findTop: CGFloat = 8, findRight: CGFloat = 12     // inside the card, below the divider, from the card's right edge
     static let zoomWidth: CGFloat = 56, zoomHeight: CGFloat = 26
     static let permissionWidth: CGFloat = 340, permissionHeight: CGFloat = 96
+    /// The narrowest window (M27): the sidebar, a card as wide as the find pill's floor with its two margins, and the right inset.
+    static let minimumWindowWidth: CGFloat = sidebarWidth + findMinWidth + 2 * findRight + inset
     static let permissionTop: CGFloat = 8, permissionLeft: CGFloat = 12   // inside the card, below the divider, from the card's left edge
     static let zoomRight: CGFloat = 12                           // from the toolbar's right edge (the extension area will sit right of it)
 

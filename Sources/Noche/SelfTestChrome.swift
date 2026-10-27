@@ -84,8 +84,11 @@ extension SelfTest {
         } else {
             expect("sidebar", 0, 0, 197, H)
             for (i, id) in ["window.close", "window.minimize", "window.zoom"].enumerated() { expect(id, [17, 40, 63][i], 19, 16, 16) }
-            expect("sidebar.newTab", 6, 54, 185, 39)
-            for i in 0..<tabs { expect("sidebar.tab.\(i)", 6, 93 + 37 * CGFloat(i), 185, 37) }
+            // No pin and no group: the persistent area is empty, so the divider sits 6 pt under the list top (54), the New Tab row 4 pt under
+            // the divider (note 1.1, New Tab below the divider) and the day tabs follow it.
+            expect("sidebar.divider", 12, 60, 175, 1)
+            expect("sidebar.newTab", 6, 65, 185, 39)
+            for i in 0..<tabs { expect("sidebar.tab.\(i)", 6, 104 + 37 * CGFloat(i), 185, 37) }
         }
         expect("card", cx, 6, cw, H - 12)
         expect("toolbar", cx, 6, cw, 42)
@@ -155,7 +158,7 @@ extension SelfTest {
             let w = Double(f.bounds.width)
             if let stop = row.fade.locations?[safe: 1]?.doubleValue, abs(stop - (w - 20) / w) > 0.001 { bad.append("row \(i) fade starts at \(stop), want \((w - 20) / w)") }
             else if row.fade.locations?[safe: 1] == nil { bad.append("row \(i) has no fade stops") }
-            let want = CGRect(x: 6, y: 93 + 37 * CGFloat(i), width: 185, height: 37)
+            let want = CGRect(x: 6, y: 104 + 37 * CGFloat(i), width: 185, height: 37)
             if ctl.frame(ofIdentifier: "sidebar.tab.\(i)").map({ !near($0, want.minX, want.minY, want.width, want.height) }) ?? true { bad.append("row \(i) frame is not \(want)") }
             if !row.showsPlaceholder { bad.append("row \(i) has no placeholder although the page has no favicon") }
         }
@@ -206,11 +209,12 @@ extension SelfTest {
                 guard await until(30, { rowCount == 40 && win.tabs.count == 40 }) else { return finish(false, "40 rows never appeared (rows=\(rowCount))") }
             }
             toTop()
-            guard await until(5, { ctl.frame(ofIdentifier: "sidebar.tab.0")?.minY == 93 }) else { return finish(false, "list not at the top: \(String(describing: ctl.frame(ofIdentifier: "sidebar.tab.0")))") }
+            guard await until(5, { ctl.frame(ofIdentifier: "sidebar.tab.0")?.minY == 104 }) else { return finish(false, "list not at the top: \(String(describing: ctl.frame(ofIdentifier: "sidebar.tab.0")))") }
             // Select tab 1 by clicking its row (it is on screen), then Shift+Cmd+[ wraps to tab 40.
             guard click(ctl.sidebar.rows[0]), await until(5, { selected == 0 }) else { return finish(false, "could not click row 0 at height \(height)") }
             previousTab()
             guard await until(5, { selected == 39 }) else { return finish(false, "Shift+Cmd+[ from tab 1 selected \(selected.map(String.init) ?? "nil") at height \(height)") }
+            _ = await until(5, { ctl.frame(ofIdentifier: "sidebar.tab.39").map { $0.maxY <= height - ChromeStyle.sidebarBottom } ?? false })  // the refresh scrolls the selection into view
             let r39 = ctl.frame(ofIdentifier: "sidebar.tab.39")
             let visible = ctl.frame(ofIdentifier: "sidebar")
             let inside = r39.map { $0.minY >= 48 && $0.maxY <= (visible?.maxY ?? 0) } ?? false
@@ -220,10 +224,12 @@ extension SelfTest {
             if !p { bad.append("h\(Int(height)): row pitch is not 37") }
             // Row 39 (tab 39) is out of reach at the top, and a click reaches it once scrolled to.
             toTop()
-            let hiddenAtTop = (ctl.frame(ofIdentifier: "sidebar.tab.38")?.maxY ?? 0) > height - 0.5
+            // Row 39 has no view while it is far from the screen; its place is the layout's (the list is virtualized).
+            let hiddenAtTop = (ctl.sidebar.tabFrame(38)?.maxY ?? 0) > height - ChromeStyle.sidebarBottom - 0.5
             if !hiddenAtTop { bad.append("h\(Int(height)): row 39 is not out of reach at the top") }
-            ctl.sidebar.document.scrollToVisible(ctl.sidebar.rows[39].frame)
-            let clicked = click(ctl.sidebar.rows[38])
+            if let f = ctl.sidebar.tabFrame(39) { ctl.sidebar.document.scrollToVisible(f.offsetBy(dx: 0, dy: -SidebarView.strip)) }
+            let row39 = ctl.sidebar.rows.first { $0.accessibilityIdentifier() == "sidebar.tab.38" }
+            let clicked = row39.map { click($0) } ?? false
             let ok = clicked ? await until(5, { selected == 38 }) : false
             if !ok { bad.append("h\(Int(height)): clicking row 39 after scrolling to it: hit=\(clicked) selected=\(selected.map(String.init) ?? "nil")") }
             seen.append("h\(Int(height)): row 40 at y \(r39.map { "\($0.minY)-\($0.maxY)" } ?? "nil") of \(Int(visible?.maxY ?? 0))")

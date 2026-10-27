@@ -1,4 +1,5 @@
 import AppKit
+import NocheCore
 
 /// One tab row (live-ui.md section 3): favicon, title that fades out instead of an ellipsis, hover and selected fills.
 final class TabRowView: NSView {
@@ -12,6 +13,8 @@ final class TabRowView: NSView {
     var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
     let fade = CAGradientLayer()
+    var tabID: TabID?
+    private var level = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -45,18 +48,30 @@ final class TabRowView: NSView {
     override func layout() {
         super.layout()
         let y: CGFloat = 10
-        faviconView.frame = NSRect(x: ChromeStyle.faviconX - ChromeStyle.rowX, y: y, width: ChromeStyle.faviconSize, height: ChromeStyle.faviconSize)
-        let tx = ChromeStyle.titleX - ChromeStyle.rowX
+        let indent = ChromeStyle.groupIndent * CGFloat(level)
+        faviconView.frame = NSRect(x: ChromeStyle.faviconX - ChromeStyle.rowX + indent, y: y, width: ChromeStyle.faviconSize, height: ChromeStyle.faviconSize)
+        let tx = ChromeStyle.titleX - ChromeStyle.rowX + indent
         titleField.frame = NSRect(x: tx, y: y, width: bounds.width - tx, height: 18)
         fade.frame = titleField.bounds
         let w = max(titleField.bounds.width, 1)
         fade.locations = [0, NSNumber(value: Double(max(0, w - ChromeStyle.titleFade) / w)), 1]
     }
 
-    func configure(title: String, favicon: NSImage?, selected: Bool) {
+    private var shown: (title: String, favicon: NSImage?, selected: Bool, level: Int, dormant: Bool)?
+    private static let placeholder = ChromeStyle.symbol("globe", size: 14, color: ChromeStyle.newTabColor)
+
+    /// A refresh configures every realized row; one whose content did not change does nothing.
+    /// A view taken from the pool is not under the pointer until AppKit says so.
+    func clearHover() { isHovered = false }
+
+    func configure(title: String, favicon: NSImage?, selected: Bool, level: Int = 0, dormant: Bool = false) {
+        if let s = shown, s.title == title, s.favicon === favicon, s.selected == selected, s.level == level, s.dormant == dormant { return }
+        shown = (title, favicon, selected, level, dormant)
+        if level != self.level { self.level = level; needsLayout = true }
+        alphaValue = dormant ? ChromeStyle.dormantAlpha : 1
         titleField.stringValue = title
         showsPlaceholder = favicon == nil
-        faviconView.image = favicon ?? ChromeStyle.symbol("globe", size: 14, color: ChromeStyle.newTabColor)
+        faviconView.image = favicon ?? Self.placeholder
         isSelected = selected
         setAccessibilityLabel(title)
         setAccessibilitySelected(selected)

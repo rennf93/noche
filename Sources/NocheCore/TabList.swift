@@ -510,6 +510,10 @@ public struct TabList: Equatable, Sendable {
 
     public func displayTitle(of id: TabID) -> String {
         guard let t = items.first(where: { $0.id == id }) else { return "New Tab" }
+        return Self.displayTitle(for: t)
+    }
+
+    public static func displayTitle(for t: TabItem) -> String {
         if let c = t.customTitle, !c.isEmpty { return c }
         guard t.url != "about:blank" else { return "New Tab" }
         if !t.title.isEmpty { return t.title }

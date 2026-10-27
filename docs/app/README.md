@@ -33,7 +33,7 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 | quit-many | 15 loaded tabs in 2 windows (10 and 5): the Quit menu action ends with 15 `didCloseTab`, 2 `windowDidClose`, no shutdown watchdog |
 | quit-100 | 100 loaded tabs in 2 windows (60 and 40) plus one DevTools, closed 100 ms apart so the quit outlasts a fixed 5 s watchdog: clean exit, 100 `didCloseTab`, 2 `windowDidClose`, the DevTools ended, no watchdog line, no crash report. The app's own limit for it is 90 s |
 | web-insets | the page view covers its inset rect, square top corners and rounded bottom corners (mask), and setting the same insets again rebuilds neither the layout nor the mask |
-| layout | window, sidebar, traffic lights, rows, card, toolbar buttons, address field, divider, page view and corner mask are within 1 pt of the design geometry in both sidebar states, plus 3 pixel samples (divider, toolbar, selected row) within 3 per channel of the same color through the same pipeline |
+| layout | (M1.6: with no pin or group the divider is at y 60, the New Tab row below it at 65 and the tab rows from 104) window, sidebar, traffic lights, rows, card, toolbar buttons, address field, divider, page view and corner mask are within 1 pt of the design geometry in both sidebar states, plus 3 pixel samples (divider, toolbar, selected row) within 3 per channel of the same color through the same pipeline |
 | tabs-keys | Cmd+T three times (4 rows, newest active), next and previous tab wrap, Cmd+W closes the selected row and selects the row below, a row click selects, the New Tab row adds a tab, a middle click closes a row; each shortcut acts exactly once. Cmd+1 to Cmd+9 and the tab moves are in `tab-chords` and `move-tab-relaunch` (M1.2) |
 | tabs-rapid | 20 Cmd+T then 20 Cmd+W leaves 1 row, 1 engine tab (the first one) and an extension tab count of 1 |
 | close-beforeunload | on a page that cancels its beforeunload, Cmd+W with the dialog answered Stay (test hook on the JS dialog callback) keeps the tab and keeps it selected, and a second Cmd+W answered Leave closes it and selects the other tab |
@@ -44,7 +44,7 @@ Regression gate (the screen-lock state and load go in the evidence header): `swi
 | load-error | a typed address of a closed port shows the failed host in the row title and the address field, Back returns to the page. The error page itself is not asserted |
 | load-error-link | a link on a normal fixture page to a closed port shows the failed host in the row title and address, Cmd+L seeds the field with the failed URL, Back returns to the page and clears the failure |
 | sidebar-toggle | Cmd+S hides and shows the sidebar, and the toolbar button hides it again, within the motion limits (see Deviations; measured from the animation's own recorded frames, first to settled; fewer than 3 frames in a direction fail with the count; negative pair `NOCHE_TEST_SB_ONEFRAME=1`), with the traffic lights hidden and the show overshoot between 0.3 and 2.5 pt |
-| sidebar-scroll | with 40 tabs at window heights 1436 and 800, Shift+Cmd+[ from tab 1 wraps to tab 40 and its row is fully visible, the row pitch stays 37, a row scrolled into view takes the click |
+| sidebar-scroll | with 40 tabs at window heights 1436 and 800, Shift+Cmd+[ from tab 1 wraps to tab 40 and its row is fully visible, the row pitch stays 37, a row scrolled into view takes the click (a row far from the screen has no view: its place is read from the layout, M1.6) |
 | shortcuts-once | each of 46 rows (shortcuts acting once, plus resolution rows) holds with no repeated Chrome command: reload, force reload, zoom in, out and actual size, Copy URL, back, forward, Cmd+L, address editing, Cmd+S, Cmd+T, next, previous, Cmd+W, and (M1.4 task 2, from the menu table) Copy URL as Markdown (a page titled `a\b] c` at an address ending `/q)x` puts `[a\\b\] c](.../q%29x)` on the pasteboard), Print, Cmd+F, Cmd+G and Shift+Cmd+G (each one Noche action, no Chrome command twice), Inspect Elements, JavaScript Console, Show History (Noche's own History window, no new tab, closed again; the engine's own `IDC_SHOW_HISTORY` is answered by the same window, negative `NOCHE_TEST_HIST_NOCMD=1`) and Downloads (Noche's own window, no new tab, closed again), Close All Tabs (3 tabs become one blank tab), then Cmd+N, close window and Opt+Cmd+I; an unclaimed Cmd+K reaches the page (it used to fall to AppKit's loose matching, which fires Close All Tabs). The exact modifier matching is shown by those counts and by the NOEXACT negative control. Print, Inspect Elements and JavaScript Console are counted but not run (`BrowserWindowController.suppressChrome`: a hidden run must not raise a print or DevTools window), and the engine-claimed chords go through `NSApp.sendEvent` like a real press: Shift+Cmd+C (Copy URL) and Opt+Shift+Cmd+C (Copy URL as Markdown) each run once with exactly one bridge claim and no DevTools window created, while Opt+Cmd+C and Cmd+9 are not claimed (see "Claimed chords"); Cmd+C is not claimed (no Noche action, and the page gets the keydown through AppKit's fall-through); shifted punctuation resolves through `ShortcutMenu.item(for:)` with synthetic US-layout events in both real shapes (Shift kept in charactersIgnoringModifiers, or folded), independent of the machine's layout: Cmd+; (Check Document Now, never Show Spelling), Cmd+: , Cmd++, Ctrl++, Ctrl+Shift+', Ctrl+Shift+[, Shift+Cmd+] and Shift+Cmd+[; Ctrl+Cmd+F resolves to Enter Full Screen (resolved only, never performed: a real fullscreen takes the screen; negative `NOCHE_TEST_NO_FSKEY=1`) |
 | focus-return | an AppKit text field takes first responder (its field editor), then `focusActiveContent` makes the page's own view the first responder again; the same again with a DevTools window open, with no activation or alpha guard counted during the call; with the candidate count forced to 2 (`NOCHE_TEST_PAGE_VIEWS`) the responder stays on the field and one ambiguous-focus line is counted (the line itself goes to stderr, which the script does not capture); the NO_FOCUS and NO_AMBIGUOUS_GUARD negative controls fail it |
 | newtab-surface | `webContentHidden` YES removes the page view from view while the window keeps one tab and a JS evaluation in that hidden tab still returns; NO shows the view again at the exact previous rect with the corner mask; hiding then activating or opening another tab shows the page again (bridge rule: any active-tab switch clears the flag; the caller sets it again) and JS works in both tabs; the NO_HIDE and NO_UNHIDE negative controls fail it |
@@ -156,12 +156,45 @@ Menu calls: Focus Previous Split Pane is Ctrl+Shift+[ (section 1 maps the N-tild
 
 Chords swallowed until their milestone: a key whose item is present and disabled is taken by the menu and does nothing (the same as Chrome's reserved chords), so a page gets no Cmd+E, Shift+Cmd+D and the like until the item is enabled. Later-milestone chords: Cmd+, (M1.8); Opt+Cmd+T, Opt+Cmd+K, Shift+Cmd+S, Shift+Cmd+A, Shift+Cmd+D, Ctrl+Cmd+N (M1.6); Shift+Cmd+N (M1.7); Cmd+E, Ctrl+Cmd+E (M2); Ctrl++, Ctrl+Shift+' and Ctrl+Shift+[ (M1.10); Shift+Cmd+B, Cmd+D and Opt+Cmd+B arrived in M1.5 and act now. menu-disabled counts 26 disabled keyed items in a hidden one-tab window: those 13, Go Back, Go Forward and Reopen Closed Tab (no history yet), and 10 that are enabled in a real key window (edit commands, Hide Noche, Check Document Now, Minimize).
 
+## M1.6 sidebar (three zones, virtualized)
+
+The sidebar is the pinned grid, the persistent area (loose pinned rows and pinned groups), a divider, the New Tab row and the day list (note 1.1). `SidebarLayout` (NocheCore) places every entry of `TabList.layout()` in window points; `SidebarView` gives a view only to the entries on screen plus an overscan of `max(1, (40 - visible) / 2)` on each side (the amendment's `max(2, ...)` would give 41 views when 37 rows show at the 1436 pt test height, so the floor is 1 and the bound of 40 holds), reusing views from a pool. `sidebar.tab.N` is the N-th tab row in layout order, `sidebar.pin.N` the N-th grid tile and `sidebar.group.N` the N-th group row; a row far from the screen has no view. `refresh()` is queued once per run-loop turn (`refreshNow()` is the synchronous form).
+
+Checks (each has a negative pair in `scripts/app-test.sh`):
+
+| Check | What it asserts |
+|---|---|
+| sidebar-geometry | the capture composition (12 pins, 2 loose rows, 11 collapsed groups, 5 loose rows, divider, New Tab, 3 day tabs, seeded through `testSeed`) is within 1 pt of table 1.1 and 1.2 at width 197, 33 views for 33 entries and the download button 42 pt above the bottom; negative `NOCHE_TEST_SB_GEOMETRY=1` (every row 3 pt low) |
+| sidebar-columns | the 12 pins sit in 4 columns at width 197, 3 at width 150 and 4 again; negative `NOCHE_TEST_SB_FIXEDWIDTH=1` (a resize does not reflow); the pure `PinnedGrid.columns(150) == 3` is a unit test too |
+| sidebar-scale | 500 tabs: a refresh (title update, tab added, tab removed; 120 of them) takes under 4 ms at the 95th percentile, at most 40 views at any scroll position and in the document after a full scroll, a scrolled-to row is where the layout says; negative `NOCHE_TEST_SB_UNVIRTUAL=1` (a view per entry) |
+| min-width | the window's minimum content width is 487 pt (sidebar 197, card 284 = the find pill's 260 floor and its two 12 pt margins, right inset 6) in AppKit's `contentMinSize` and the Views window's minimum size, set through `NCWindow.minimumContentSize`; a program's own `setFrame` is not clamped by AppKit, so the check reads the constraint a drag stops at; negative `NOCHE_TEST_MINWIDTH_OFF=1` |
+
+Builder calls (P and B values in `ChromeStyle`; M and T values are the captures and design tokens):
+
+| Constant | Value | Basis |
+|---|---|---|
+| `SidebarMetrics.dividerGap`, `newTabGap` | 6 pt above the divider (from the last persistent row), 4 pt below it | M for the capture (894 to 900 to 905); P for an empty persistent area (the divider then sits 6 pt under the list top) |
+| `SidebarMetrics.groupGap` | 3 pt before a group that follows a tab row | M (266 to 269); T1.3 |
+| `SidebarMetrics.bottomPad` | 12 pt | P (note 1.4) |
+| `ChromeStyle.tileHoverFill`, `tileSelectedStroke`, `tileSelectedWidth` | white 16%, white 45%, 1.5 pt | P from tokens (note 1.2) |
+| `ChromeStyle.tileLoadingGap`, `tileLoadingWidth` | a 180 degree arc 3 pt outside the favicon, 2 pt wide (drawn, not animated) | P |
+| `ChromeStyle.dormantAlpha` | 0.45 | P (T2.7), a dormant tab's row, tile favicon |
+| `ChromeStyle.groupChevron`, `groupChevronSize`, `groupChevronDuration` | #8A8A8A, 8 pt, 120 ms turn | P |
+| `ChromeStyle.groupIndent` | 14 pt (child favicon x 28, title x 51) | P |
+| `ChromeStyle.groupOutline`, `groupFill` | white 10% 1 pt outline, white 5% fill around an expanded group | P (T TabGroupSidebarStroke) |
+| `ChromeStyle.groupActiveDot`, `groupActiveDotColor` | 4 pt, #E0E0E0, on a collapsed group holding the active tab | P |
+| `ChromeStyle.groupColors` | white #F2F2F7, green #30D158, blue #0A84FF, purple #BF5AF2, amber #FFB340, pink #FF6482, red #FF453A, orange #FF9F0A | P (macOS dark system palette) |
+| `ChromeStyle.spaceDot`, `spaceDotActive`, `bottomIconY` | 6 pt dot #E8E8E8, icon center 18 pt into the bottom row; one dot, centered, and the Spaces chevron are drawn and inert | M size and color, B placement |
+| `ChromeStyle.minimumWindowWidth` | 487 pt | M27 |
+
+Known limits: the expanded group outline is a box under the rows (no drop highlight yet, Task 5); the loading arc does not spin.
+
 ## Builder calls and rulings
 
 Calls the design left open:
 
 - Traffic lights are drawn circles in the sidebar and hide with it.
-- With no pinned items the tab list starts at y 54, where the pinned grid would.
+- With no pinned items and no groups the divider sits at y 60 (6 pt under the list top, 54), the New Tab row at 65 and the day tabs from 104 (M1.6: the New Tab row is below the divider, table 1.1).
 - The last tab closes the window.
 - Google is the default search (`https://www.google.com/search?q=%s`).
 - No close button on row hover, as captured.

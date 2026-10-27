@@ -33,7 +33,7 @@ extension BrowserWindowController {
                 added.groupID = saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
             }
         }
-        list.insert(added, after: before.flatMap { ids[$0.identifier] }, activate: active)
+        list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: false, activate: active)
         if let at = pending?.index, let placed = list.items.first(where: { $0.id == added.id }), !placed.isPinned, placed.groupID == nil {
             list.move(added.id, to: at)
         }

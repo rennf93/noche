@@ -69,6 +69,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var sidebarHidden = false
     /// Restoring: the saved tabs are still being added to the engine, so a snapshot now would be partial (and would tombstone tabs).
     var restoring = false
+    /// A refresh is queued for this run-loop turn: every change in the turn shares one.
+    var refreshQueued = false
     let id: UUID
     /// |item| is the saved tab a restore or a reopen brings back (its stamp, and for a reopen its pin, group and titles).
     struct PendingTab { let id: TabID; let url: String; let index: Int?; var item: TabItem? = nil }
@@ -137,6 +139,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         window = NCWindow(url: url, frame: frame, mode: app.hidden ? .hidden : .normal, delegate: self)
         window.webInsets = ChromeLayout(size: frame.size, cardX: cardX, barHeight: app.barMode.visible(onNewTab: false) ? ChromeStyle.bookmarksBarHeight : 0).webInsets
         window.webCornerRadius = ChromeStyle.cardRadius
+        window.minimumContentSize = NSSize(width: ChromeStyle.minimumWindowWidth, height: 0)
     }
 
     var nsWindow: NSWindow? { window.nsWindow }
@@ -210,9 +213,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
             MainActor.assumeIsolated { self?.sidebar.downloadButton.progress = self?.app.downloads.ring }
         })
         sidebar.downloadButton.progress = app.downloads.ring
-        sidebar.onSelect = { [weak self] i in self?.selectRow(i) }
-        sidebar.onClose = { [weak self] i in self?.closeRow(i) }
-        sidebar.onTabMenu = { [weak self] i, p in self?.showTabMenu(row: i, at: p) }
+        sidebar.content = { [weak self] entry in self?.sidebarContent(for: entry) }
+        sidebar.onSelect = { [weak self] id in self?.row(of: id).map { self?.selectRow($0) } }
+        sidebar.onClose = { [weak self] id in self?.row(of: id).map { self?.closeRow($0) } }
+        sidebar.onTabMenu = { [weak self] id, p in self?.row(of: id).map { self?.showTabMenu(row: $0, at: p) } }
+        sidebar.onToggleGroup = { [weak self] g in self?.toggleGroup(g) }
         sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
         toolbar.toggle.onClick = { [weak self] in self?.toggleSidebar() }
         toolbar.back.onClick = { [weak self] in self?.goBack() }
@@ -220,7 +225,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         toolbar.reload.onClick = { [weak self] in self?.reload() }
         toolbar.address.onClick = { [weak self] in self?.focusAddress() }
         applyLayout()
-        refresh()
+        refreshNow()
         if focusWhenInstalled { focusWhenInstalled = false; focusAddress() }
         if restore?.sidebarHidden == true { toggleSidebar() }
         // A hidden test window never takes a Space.
@@ -248,10 +253,17 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 
     func shownURL(_ tab: NCTab) -> String { failed[tab.identifier]?.url ?? tab.url }
 
+    /// Asks for a refresh: every change in one run-loop turn (a burst of title and load updates) is one `refreshNow`.
     func refresh() {
+        guard installed, !refreshQueued else { return }
+        refreshQueued = true
+        DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.refreshNow() } }
+    }
+
+    func refreshNow() {
+        refreshQueued = false
         guard installed else { return }
-        let entries = list.items.map { (title: list.displayTitle(of: $0.id), favicon: engineTab($0)?.favicon) }
-        sidebar.setRows(entries, selected: list.items.firstIndex { $0.id == list.activeID })
+        sidebar.setEntries(list.layout(), selected: list.activeID)
         let tab = activeTab
         toolbar.back.isEnabled = tab?.canGoBack ?? false
         toolbar.forward.isEnabled = tab?.canGoForward ?? false

@@ -20,6 +20,7 @@
 
 @interface NCWindow ()
 - (CefRect)cefInitialBounds;
+- (CefSize)cefMinimumSize;
 - (void)applyMask;
 - (NSArray<NSView*>*)visiblePageViews;
 - (void)showWebContent;
@@ -341,6 +342,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   void OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect&) override { NC_CEF_CALLBACK; [w_ applyMask]; }
   bool IsFrameless(CefRefPtr<CefWindow>) override { return true; }  // Noche draws the chrome (M1.1 Task 4)
   CefRect GetInitialBounds(CefRefPtr<CefWindow>) override { return [w_ cefInitialBounds]; }
+  CefSize GetMinimumSize(CefRefPtr<CefView>) override { return [w_ cefMinimumSize]; }
   cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
 
  private:
@@ -368,6 +370,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
   BOOL _firstEmitted, _closeRequested;
   NSEdgeInsets _webInsets;
   CGFloat _webCornerRadius;
+  NSSize _minimumContentSize;
   BOOL _webContentHidden;
   NSTimeInterval _lastFocusHandback;
   BOOL _keysHeld, _handbackPending, _requestIssued;
@@ -622,6 +625,18 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 
 // MARK: web view rect and corner mask
 
+- (CefSize)cefMinimumSize {
+  return CefSize((int)lround(_minimumContentSize.width), (int)lround(_minimumContentSize.height));
+}
+
+- (NSSize)minimumContentSize { return _minimumContentSize; }
+
+- (void)setMinimumContentSize:(NSSize)size {
+  if (NC_TEST_FLAG("NOCHE_TEST_MINWIDTH_OFF")) return;  // negative control: no minimum
+  _minimumContentSize = size;
+  _nsWindow.contentMinSize = size;
+}
+
 - (void)setWebInsets:(NSEdgeInsets)insets {
   _webInsets = insets;
   [self applyLayout];
@@ -864,6 +879,7 @@ static void CollectVisible(NSView* v, NSString* cls, NSMutableArray<NSView*>* ou
   } else {
     w->Show();
   }
+  _nsWindow.contentMinSize = _minimumContentSize;
   [self applyLayout];
   if (_closeRequested) [self close];
 }
