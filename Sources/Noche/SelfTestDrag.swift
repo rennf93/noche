@@ -210,7 +210,34 @@ extension SelfTest {
             sb.dragEnded(dropped: took)
             guard op == [], !took, sb.dropIndicator == nil, c.list == before else { return finish(false, "a folder dropped on \(label) was answered \(op) and \(took): it must snap back and change nothing") }
         }
-        finish(violations.isEmpty, "every 2.1 gesture through the destination: reorder in the day list with a 2 pt line and 3 taps for 3 slot changes (the first slot silent), the middle of a closed folder joins at its end and opens it (header outlined), an open folder outlined whole, a child row joins at its place (indented line), a folder tab out to the day list, a tab into the grid (41 x 41 ghost, pinned with its address), a tile under the divider unpinned and into the list a loose row, a folder moved both ways with its tabs, and refused on a folder, a child and the grid \(violations)")
+
+        line("info", "step: Close on an unpinned row with no engine tab (a dormant tile dragged under the divider) removes it like a closed tab; a pinned dormant tile stays")
+        var dormant = fx.list
+        for t in fx.g { dormant.setEngineID(t, nil) }
+        c.testSeed(dormant)
+        c.restoring = false  // the window saves again, so the close below is written to the store (it is the seeded list that is saved, in a profile every check wipes)
+        defer { c.restoring = true }
+        app.writer?.flush()
+        func storedIDs() -> Set<TabID> { Set(((try? app.writer?.store.loadWindows()) ?? []).first { $0.id == c.id }?.tabs.map(\.id) ?? []) }
+        for t in [fx.g[0], fx.g[1]] {
+            guard drag(.tab(t), [mid(frame(.gridTile(t))), mid(frame(.newTab))]) else { return finish(false, "the drop of a dormant tile under the divider was refused") }
+        }
+        guard let out0 = c.item(withID: fx.g[0]), let out1 = c.item(withID: fx.g[1]), out0.engineID == nil, out1.engineID == nil, !out0.isPinned, !out1.isPinned,
+              let row0 = sb.rows.first(where: { $0.tabID == fx.g[0] }) else { return finish(false, "no unpinned dormant rows under the divider") }
+        guard storedIDs().contains(fx.g[0]) else { return finish(false, "the dormant row is not in the store before it is closed") }
+        row0.onClose?()  // the row's close button
+        guard c.item(withID: fx.g[0]) == nil, !storedIDs().contains(fx.g[0]), app.writer?.peekClosed()?.tab.id == fx.g[0] else {
+            return finish(false, "the close button of an unpinned dormant row left it in the list (\(c.item(withID: fx.g[0]) != nil)), in the store (\(storedIDs().contains(fx.g[0]))) or off the reopen list (\(String(describing: app.writer?.peekClosed()?.tab.title)))")
+        }
+        guard let menu = await tabMenu(c, fx.g[1]), item(menu.menu, "Close")?.isEnabled == true else { return finish(false, "Close is not enabled in the menu of an unpinned dormant row") }
+        choose(menu.menu, "Close")
+        guard c.item(withID: fx.g[1]) == nil, !storedIDs().contains(fx.g[1]), app.writer?.peekClosed()?.tab.id == fx.g[1], !c.list.dayOrder.contains(.tab(fx.g[1])) else {
+            return finish(false, "the menu's Close on an unpinned dormant row left it in the list (\(c.item(withID: fx.g[1]) != nil)), in the store (\(storedIDs().contains(fx.g[1]))) or off the reopen list")
+        }
+        c.closeRow(c.list.items.firstIndex { $0.id == fx.g[2] }!)
+        guard c.item(withID: fx.g[2])?.isPinned == true, storedIDs().contains(fx.g[2]) else { return finish(false, "Close removed a pinned dormant tile") }
+        guard let tileClose = c.item(withID: fx.g[2]).flatMap({ c.tabMenuEntries(for: $0) })?.first(where: { $0.title == "Close" }), !tileClose.enabled else { return finish(false, "Close is enabled in the menu of a pinned dormant tile") }
+        finish(violations.isEmpty, "every 2.1 gesture through the destination: reorder in the day list with a 2 pt line and 3 taps for 3 slot changes (the first slot silent), the middle of a closed folder joins at its end and opens it (header outlined), an open folder outlined whole, a child row joins at its place (indented line), a folder tab out to the day list, a tab into the grid (41 x 41 ghost, pinned with its address), a tile under the divider unpinned and into the list a loose row, a folder moved both ways with its tabs, and refused on a folder, a child and the grid; Close on an unpinned dormant row (button and menu) removes it and puts it on the reopen list, a pinned dormant tile stays \(violations)")
     }
 
     // MARK: drag-autoexpand
@@ -234,6 +261,9 @@ extension SelfTest {
         guard await until(3, { !closed() }) else { return finish(false, "the folder stayed closed after hovering its middle for 3 s") }
         guard frame(.tab(fx.c[0], level: 1)).minY > 0, sb.layout.boxes.contains(where: { $0.group == fx.C }) else { return finish(false, "the opened folder shows no children in the layout") }
         guard sb.rows.contains(where: { $0.tabID == fx.d[0] }) else { return finish(false, "the dragged row lost its view when the layout changed") }
+        guard sb.dropIndicator != nil, sb.document.subviews.last === sb.indicatorView else {
+            return finish(false, "after the folder opened the rows realized for its children are above the drop indicator: the top view is \(String(describing: sb.document.subviews.last)), the indicator \(String(describing: sb.dropIndicator))")
+        }
 
         line("info", "step: cancelling the drag closes it again")
         sb.dragEnded(dropped: false)
@@ -358,6 +388,15 @@ extension SelfTest {
         c.refreshNow()
         guard c.list == before else { return finish(false, "the refused drops changed the list") }
 
+        line("info", "step: a payload naming a tab or group that is not in the list is refused")
+        for ghost in [DragItem.tab(TabID()), .group(GroupID())] {
+            sb.dragBegan(item)
+            let gop = over(ghost, at(d0, 4))
+            let gtook = release(ghost, at(d0, 4))
+            guard gop == [], !gtook, sb.dropIndicator == nil, c.list == before else { return finish(false, "a payload for \(ghost) (same window, not in the list) was answered \(gop) and \(gtook), indicator \(String(describing: sb.dropIndicator)): it must be refused") }
+            sb.dragEnded(dropped: false)
+        }
+
         line("info", "step: a scrolled-out dragged row keeps its view and the realized rows stay within 40 (500 tabs)")
         guard host.bounds.height >= 1400 else { return finish(false, "the window is \(host.bounds.height) pt high, the 40 view bound is for 1436") }
         let items = (0..<500).map { TabItem(id: TabID(), engineID: $0, url: "https://site\($0).example/", title: "Tab \($0)", isLoading: false) }
@@ -383,7 +422,7 @@ extension SelfTest {
         guard missing.isEmpty else { return finish(false, "while dragging a row scrolled out: \(missing)") }
         scrollTo(0)
         guard !sb.rows.contains(where: { $0.tabID == dragged }) else { return finish(false, "after the drag the row far from the screen still has a view") }
-        finish(violations.isEmpty, "a press moving under 3 pt starts no drag, one moving 3 pt starts one (a group's click lands on release, a drag makes none); Escape and a drop outside leave the list and clear the indicator, another window's drag is refused (no indicator, no drop, the same drag from this window answered move); with 500 tabs the dragged row keeps its view through scrolls to the top, the end and back with at most \(most) row views (bound 40), and loses it after the drag \(violations)")
+        finish(violations.isEmpty, "a press moving under 3 pt starts no drag, one moving 3 pt starts one (a group's click lands on release, a drag makes none); Escape and a drop outside leave the list and clear the indicator, another window's drag and a payload for a tab or group that is gone are refused (no indicator, no drop, the same drag from this window answered move); with 500 tabs the dragged row keeps its view through scrolls to the top, the end and back with at most \(most) row views (bound 40), and loses it after the drag \(violations)")
     }
 
     // MARK: drag-property
@@ -464,6 +503,28 @@ extension SelfTest {
         let rows = ["tile reordered in the grid", "tab pinned into the grid", "tile unpinned under the divider", "tile into the list as a loose row", "day row reordered", "loose row reordered",
                     "tab pinned as a loose row", "joined a folder at its end", "joined a folder at a child's place", "folder tab out to the day list", "folder tab out to the persistent area", "folder moved as one item", "refused"]
         guard let miss = rows.first(where: { (seen[$0] ?? 0) == 0 }) else {
+            line("info", "step: a drop with the pointer on the middle half of the item's own row leaves the list unchanged (no oracle but the list itself)")
+            var own = 0
+            for p in sb.layout.placements {
+                let item: DragItem
+                switch p.entry {
+                case .tab(let t, _), .gridTile(let t): item = .tab(t)
+                case .group(let g): item = .group(g)
+                default: continue
+                }
+                for dy in [-p.frame.height / 4, 0, p.frame.height / 4 - 0.5] {
+                    c.testSeed(base)
+                    let at = CGPoint(x: p.frame.midX, y: p.frame.midY + dy)
+                    sb.dragBegan(item)
+                    let op = over(item, at)
+                    let took = release(item, at)
+                    sb.dragEnded(dropped: took)
+                    c.refreshNow()
+                    guard c.list == base else { return finish(false, "dropping \(p.entry) on the middle of its own row (\(dy) from the middle, answered \(op) and \(took)) changed the list") }
+                    own += 1
+                }
+            }
+            c.testSeed(base)
             line("info", "step: the same through the destination (pasteboard, pointer, indicator, drop), every item at a coarser grid")
             var through = 0
             for item in items {
@@ -481,9 +542,109 @@ extension SelfTest {
                 if !bad.isEmpty { break }
             }
             guard bad.isEmpty else { return finish(false, "through the destination: \(bad)") }
-            return finish(through > 100 && violations.isEmpty, "the tab and group counts are unchanged and the item lands where the resolver said for \(seen.values.reduce(0, +)) pointer positions over \(items.count) items (every 2.1 row reached: \(seen.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })), and \(through) more through the destination \(violations)")
+            return finish(through > 100 && violations.isEmpty, "the tab and group counts are unchanged and the item lands where the resolver said for \(seen.values.reduce(0, +)) pointer positions over \(items.count) items (every 2.1 row reached: \(seen.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" })), and \(through) more through the destination; \(own) drops on the middle of the item's own row left the list unchanged \(violations)")
         }
         finish(false, "the sweep never reached the row \"\(miss)\" (\(seen))")
+    }
+
+    // MARK: drag-relaunch
+
+    private func label(_ url: String) -> String { url.firstIndex(of: "?").map { String(url[url.index(after: $0)...]) } ?? "a" }
+
+    /// The list's shape as one string: the grid tiles, the persistent area and the day list (a pinned item ends in ^, a group shows ^ when pinned, - when
+    /// closed and + when open, then its tabs).
+    private func shape(_ items: [TabItem], _ groups: [TabGroup], _ top: [TopRef], _ day: [TopRef]) -> String {
+        func name(_ t: TabItem) -> String { label(t.url) + (t.isPinned ? "^" : "") }
+        func ref(_ r: TopRef) -> String {
+            switch r {
+            case .tab(let id): return items.first { $0.id == id }.map(name) ?? "?"
+            case .group(let g):
+                let grp = groups.first { $0.id == g }
+                return "G" + (grp?.isPinned == true ? "^" : "") + (grp?.isCollapsed == true ? "-" : "+") + "[" + items.filter { $0.groupID == g }.map(name).joined(separator: " ") + "]"
+            }
+        }
+        return "grid=[\(items.filter { $0.isPinned && $0.inGrid }.map(name).joined(separator: " "))] top=[\(top.map(ref).joined(separator: " "))] day=[\(day.map(ref).joined(separator: " "))]"
+    }
+
+    private func listShape(_ c: BrowserWindowController) -> String { shape(c.list.items, c.list.groups, c.list.topOrder, c.list.dayOrder) }
+
+    /// The shape of what the store holds for the window now, with no flush: what the debounced save wrote.
+    private func storedShape(_ c: BrowserWindowController) -> String? {
+        ((try? app.writer?.store.loadWindows()) ?? []).first { $0.id == c.id }.map { shape($0.tabs, $0.groups, $0.topOrder, $0.dayOrder) }
+    }
+
+    private func storedOpen(_ c: BrowserWindowController, _ g: GroupID) -> Bool? {
+        ((try? app.writer?.store.loadWindows()) ?? []).first { $0.id == c.id }?.groups.first { $0.id == g }.map { !$0.isCollapsed }
+    }
+
+    /// Review Important 2 and Minor 1: a drop is saved. A real window (not `testSeed`, which stops saving) with a tile, loose tabs and a folder takes one
+    /// `performDrop` each of a reorder, a join, a pin into the grid, a tile unpinned under the divider and a folder moved to the persistent area; after each
+    /// one the store (read with no flush, so only the debounced save counts) holds the list, then a folder opened by the hover and closed by a drop elsewhere,
+    /// and one closed by a cancel after another change saved it open. Phase 2, after the relaunch: the same shape in the list and in the store.
+    func dragRelaunch() async {
+        let want = "grid=[b^] top=[G^-[d e c]] day=[a f]"
+        if phase == 2 {
+            guard await until(30, { self.restoredUp(1) }), let c = ctl else { return finish(false, "phase 2: no restored window") }
+            guard await until(20, { c.list.items.count == 6 }) else { return finish(false, "phase 2: \(c.list.items.count) tabs, want 6") }
+            guard await until(20, { self.listShape(c) == want }) else { return finish(false, "phase 2: the restored list is \(listShape(c)), want \(want)") }  // the pages report their own addresses as they load
+            guard storedShape(c) == want else { return finish(false, "phase 2: the store holds \(String(describing: storedShape(c))), want \(want)") }
+            return finish(violations.isEmpty, "phase 2: \(want) survived the relaunch, in the list and in the store \(violations)")
+        }
+        guard await ready(), let c = ctl, let win else { return }
+        let sb = c.sidebar
+        for n in ["b", "c", "d", "e", "f"] { _ = win.addTab(withURL: fixture("b.html?\(n)"), activate: false) }
+        guard await until(20, { c.list.items.count == 6 && c.list.items.allSatisfy { !$0.isLoading && !$0.title.isEmpty } }) else { return finish(false, "phase 1: the tabs never loaded: \(c.list.items.map { "\($0.url) \($0.isLoading)" })") }
+        func id(_ l: String) -> TabID { c.list.items.first { label($0.url) == l }!.id }
+        let (a, b, cc, d, e, f) = (id("a"), id("b"), id("c"), id("d"), id("e"), id("f"))
+        c.togglePin(of: a)
+        c.newGroupWithTab(d)
+        guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, c.sidebar.groupRow(g).map({ $0.renameField.cancel(); return true }) == true else { return finish(false, "phase 1: no group") }
+        c.moveToGroup(e, g)
+        let start = "grid=[a^] top=[] day=[b c G+[d e] f]"
+        guard listShape(c) == start else { return finish(false, "phase 1: the starting list is \(listShape(c)), want \(start)") }
+        try? await Task.sleep(for: .seconds(1))  // the setup's own saves and the pages' last updates are over: only a drop can change the store now
+        guard await until(5, { self.storedShape(c) == start }) else { return finish(false, "phase 1: the store holds \(String(describing: storedShape(c))) for the starting list \(start)") }
+        let ops: [(String, DragItem, DropTarget, String)] = [
+            ("a reorder (f to the top of the day list)", .tab(f), .day(0), "grid=[a^] top=[] day=[f b c G+[d e]]"),
+            ("a join (c to the end of the folder)", .tab(cc), .group(g, Int.max), "grid=[a^] top=[] day=[f b G+[d e c]]"),
+            ("a pin into the grid (b at slot 1)", .tab(b), .grid(1), "grid=[a^ b^] top=[] day=[f G+[d e c]]"),
+            ("a tile unpinned under the divider (a at day 1)", .tab(a), .day(1), "grid=[b^] top=[] day=[f a G+[d e c]]"),
+            ("a folder moved to the persistent area", .group(g), .persistent(0), "grid=[b^] top=[G^+[d e c]] day=[f a]")]
+        for (name, item, target, shapeWanted) in ops {
+            line("info", "step: \(name)")
+            guard c.performDrop(item, to: target) else { return finish(false, "phase 1: \(name) was refused") }
+            guard listShape(c) == shapeWanted else { return finish(false, "phase 1: after \(name) the list is \(listShape(c)), want \(shapeWanted)") }
+            guard await until(5, { self.storedShape(c) == shapeWanted }) else { return finish(false, "phase 1: after \(name) the store holds \(String(describing: storedShape(c))) 5 s later, want \(shapeWanted)") }
+        }
+        c.toggleGroup(g)
+        let closedShape = "grid=[b^] top=[G^-[d e c]] day=[f a]"
+        guard await until(5, { self.storedShape(c) == closedShape }) else { return finish(false, "phase 1: the closed folder is stored as \(String(describing: storedShape(c))), want \(closedShape)") }
+        func frame(_ e: SidebarEntry) -> CGRect { sb.layout.placements.first { $0.entry == e }?.frame ?? CGRect(x: -999, y: -999, width: 0, height: 0) }
+        func isOpen() -> Bool { c.list.groups.first { $0.id == g }?.isCollapsed == false }
+
+        line("info", "step: a folder opened by the hover and a drop elsewhere: closed in the list and the store")
+        sb.dragBegan(.tab(a))
+        over(.tab(a), CGPoint(x: 100, y: frame(.group(g)).midY))
+        guard await until(3, { isOpen() }) else { return finish(false, "phase 1: the folder did not open under the hover") }
+        let dropAt = CGPoint(x: 100, y: frame(.tab(f, level: 0)).minY + 4)
+        over(.tab(a), dropAt)
+        guard release(.tab(a), dropAt) else { return finish(false, "phase 1: the drop on the first day row was refused") }
+        sb.dragEnded(dropped: true)
+        c.refreshNow()
+        let afterDrop = "grid=[b^] top=[G^-[d e c]] day=[a f]"
+        guard listShape(c) == afterDrop, await until(5, { self.storedShape(c) == afterDrop }) else { return finish(false, "phase 1: after the hover and the drop elsewhere the list is \(listShape(c)) and the store \(String(describing: storedShape(c))), want \(afterDrop)") }
+
+        line("info", "step: a folder opened by the hover, saved open by another change, then closed by a cancel: the close is saved")
+        sb.dragBegan(.tab(f))
+        over(.tab(f), CGPoint(x: 100, y: frame(.group(g)).midY))
+        guard await until(3, { isOpen() }) else { return finish(false, "phase 1: the folder did not open under the second hover") }
+        c.changed()  // a title update, a favicon: something saves the window while the folder is open
+        guard await until(5, { self.storedOpen(c, g) == true }) else { return finish(false, "phase 1: the store never saw the folder open") }
+        sb.dragEnded(dropped: false)
+        c.refreshNow()
+        guard !isOpen(), await until(5, { self.storedOpen(c, g) == false }) else { return finish(false, "phase 1: after the cancel the folder is open in the list \(isOpen()) and in the store \(String(describing: storedOpen(c, g))), want closed in both") }
+        guard listShape(c) == want, await until(5, { self.storedShape(c) == want }) else { return finish(false, "phase 1: the final list is \(listShape(c)) and the store \(String(describing: storedShape(c))), want \(want)") }
+        finish(violations.isEmpty, "phase 1: a reorder, a join, a pin into the grid, a tile unpinned, a folder moved, a folder opened by the hover and closed by a drop elsewhere, and one closed by a cancel are each in the store by the debounced save, quitting at once \(violations)")
     }
 
     // MARK: drag-haptic
@@ -512,7 +673,13 @@ extension SelfTest {
         do { try store.setSetting("hapticReorder", "1") } catch { return finish(false, "could not store hapticReorder=1: \(error)") }
         let on = run()
         guard on == 3 else { return finish(false, "with hapticReorder=1 the same drag tapped \(on) times, want 3 (a tap for each slot change, none for the first)") }
-        finish(violations.isEmpty, "hapticReorder=0 (--selftest-setting): a drag with 3 slot changes taps 0 times; after the setting is stored as 1 the same drag taps 3 times, read again when each drag starts \(violations)")
+        let direct = Haptic.taps
+        c.sidebar.dragBegan(item)
+        over(item, at(d0, 4))  // the first move goes straight to another slot: one tap, for the slot changed from the row's own
+        let straight = Haptic.taps - direct
+        c.sidebar.dragEnded(dropped: false)
+        guard straight == 1 else { return finish(false, "a drag whose first move went straight to another slot tapped \(straight) times, want 1 (the origin is the row's own slot)") }
+        finish(violations.isEmpty, "hapticReorder=0 (--selftest-setting): a drag with 3 slot changes taps 0 times; after the setting is stored as 1 the same drag taps 3 times, read again when each drag starts, and a first move straight to another slot taps once \(violations)")
     }
 }
 #endif

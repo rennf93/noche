@@ -208,7 +208,7 @@ extension BrowserWindowController {
         return CtxEntry(title: e.title, id: id, run: run, enabled: e.enabled(ctx), checked: e.state?(ctx) ?? false)
     }
 
-    /// The tab row's menu. A dormant tab has no engine tab: Duplicate and Copy Link use its address, and Close is disabled (it is closed).
+    /// The tab row's menu. A dormant tab has no engine tab: Duplicate and Copy Link use its address, and Close is disabled for a pinned one (it is already closed) and removes an unpinned one.
     func tabMenuEntries(for t: TabItem) -> [CtxEntry] {
         typealias E = CtxEntry
         let id = t.id
@@ -220,7 +220,7 @@ extension BrowserWindowController {
         let copyLink = E(title: "Copy Link", id: "edit.copyURL") { [weak self, weak tab] in
             if let tab { self?.copyURL(of: tab) } else { self?.copyText(t.url, note: "copyURL") }
         }
-        let close = E(title: "Close", id: "file.closeTab", run: { [weak self, weak tab] in if let tab { self?.closeTab(tab) } }, enabled: tab != nil)
+        let close = E(title: "Close", id: "file.closeTab", run: { [weak self, weak tab] in if let tab { self?.closeTab(tab) } else { self?.closeDormant(t) } }, enabled: tab != nil || !t.isPinned)
         // Edit Pinned Page (spec section 2): Use Current Page as Pinned Page and Reset to Pinned Page act only off the pinned page.
         let off = offPinnedPage(t)
         let editPinned: E = t.isPinned

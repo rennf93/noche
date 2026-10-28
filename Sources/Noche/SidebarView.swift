@@ -44,13 +44,14 @@ final class GroupBoxesView: NSView {
 /// A press on a row that then moves 3 pt starts the row's drag (note 4.1); a press that does not is a click.
 struct DragTrigger {
     static let distance: CGFloat = 3
+    private static let noThreshold = BarHook.on("DRAG_NOTHRESHOLD")  // the hook: any movement starts the drag
     private var origin: NSPoint?
     mutating func press(_ event: NSEvent) { origin = event.locationInWindow }
     /// True when the press ends with no drag begun: the click.
     mutating func release() -> Bool { defer { origin = nil }; return origin != nil }
     /// True once, when |event| is 3 pt or more from the press.
     mutating func moved(_ event: NSEvent) -> Bool {
-        guard let o = origin, hypot(event.locationInWindow.x - o.x, event.locationInWindow.y - o.y) >= Self.distance else { return false }
+        guard let o = origin, hypot(event.locationInWindow.x - o.x, event.locationInWindow.y - o.y) >= (Self.noThreshold ? 0 : Self.distance) else { return false }
         origin = nil
         return true
     }
@@ -113,6 +114,7 @@ final class SidebarView: DragView, NSDraggingSource {
     private static let recycleCommits = BarHook.on("GRP_RECYCLECOMMIT"), groupsUnvirtual = BarHook.on("SB_GROUPSUNVIRTUAL")  // the hooks: a recycled row commits its rename; every row has a view while a group is open
     private static let noIndicator = BarHook.on("DRAG_NOINDICATOR"), noExpand = BarHook.on("DRAG_NOEXPAND"), noHaptic = BarHook.on("DRAG_NOHAPTIC")  // the hooks: no indicator, no auto-expand, no tap
     private static let hapticAlways = BarHook.on("DRAG_HAPTICIGNORE"), anyWindow = BarHook.on("DRAG_ANYWINDOW"), dragRecycles = BarHook.on("DRAG_RECYCLE"), cancelDrops = BarHook.on("DRAG_CANCELDROPS")  // the hooks: the setting is ignored, another window's drop is taken, the dragged row is recycled, a cancel drops
+    private static let noOrigin = BarHook.on("DRAG_NOORIGIN"), indicatorLow = BarHook.on("DRAG_INDICATORLOW"), anyId = BarHook.on("DRAG_UNKNOWNID"), ownRowMoves = BarHook.on("DRAG_OWNROW")  // the hooks: no origin slot, the indicator is left under later rows, an unknown id is taken, a drop on the item's own row lands below it
     private static let fixedWidth = BarHook.on("SB_FIXEDWIDTH"), unvirtual = BarHook.on("SB_UNVIRTUAL"), lowRows = BarHook.on("SB_GEOMETRY"), noReveal = BarHook.on("SB_NOREVEAL")
     let lights: [TrafficLightView] = ChromeStyle.trafficColors.map { color in
         let v = TrafficLightView(frame: .zero)
@@ -146,6 +148,7 @@ final class SidebarView: DragView, NSDraggingSource {
     var onReturnFocus: ((Bool) -> Void)?            // a rename ended: focus goes back to the page (true: unless a click moved it)
     var windowID = UUID()                           // the window a drag starts in: another window's drop is refused
     var isGroupCollapsed: (GroupID) -> Bool = { _ in false }
+    var isKnown: (DragItem) -> Bool = { _ in true }  // the tab or group is in the window's list (a tab inside a closed folder is, with no row)
     var onDrop: ((DragItem, DropTarget) -> Bool)?   // the list change of an accepted drop
     var onOpenFolder: ((GroupID) -> Void)?          // a drag hovered a closed folder long enough
     var onDragEnd: ((DragItem, [GroupID]) -> Void)? // the drag is over; the folders it opened
@@ -333,6 +336,8 @@ final class SidebarView: DragView, NSDraggingSource {
             let f = p.frame.offsetBy(dx: 0, dy: Self.lowRows ? 3 - Self.strip : -Self.strip)  // negative control: every row 3 pt low
             if view.frame != f { view.frame = f }
         }
+        // A row realized during a drag (a scroll, a folder opened by the hover) is added above the indicator: it goes back on top.
+        if dropIndicator != nil, !Self.indicatorLow, indicatorView.superview === document, document.subviews.last !== indicatorView { document.addSubview(indicatorView) }
     }
 
     private func makeView(for entry: SidebarEntry) -> NSView {
@@ -430,17 +435,25 @@ extension SidebarView {
         dragEnded(dropped: operation != [])
     }
 
-    /// The drag of |item| started here: its row keeps its view until the drag ends, and the first slot it passes does not tap.
-    func dragBegan(_ item: DragItem) {
-        dragEnded(dropped: true)
-        let entry = entries.first {
+    /// The layout entry of a dragged tab (a row or a tile) or group.
+    private func entry(of item: DragItem) -> SidebarEntry? {
+        entries.first {
             switch ($0, item) {
             case (.tab(let a, _), .tab(let b)), (.gridTile(let a), .tab(let b)): a == b
             case (.group(let a), .group(let b)): a == b
             default: false
             }
         }
-        drag = DragState(item: item, entry: entry, haptic: Self.hapticAlways || hapticOn())
+    }
+
+    /// The drag of |item| started here: its row keeps its view until the drag ends, and the first slot it passes does not tap.
+    func dragBegan(_ item: DragItem) {
+        dragEnded(dropped: true)
+        let entry = entry(of: item)
+        // The slot a drop on the row's own place would take is where the drag starts: moving straight to another slot taps once.
+        let origin = Self.noOrigin ? nil : entry.flatMap { e in layout.placements.first { $0.entry == e }?.frame }
+            .flatMap { DropResolver.resolve(CGPoint(x: $0.midX, y: $0.midY), layout: layout, dragged: item, isCollapsed: isGroupCollapsed).target }
+        drag = DragState(item: item, entry: entry, haptic: Self.hapticAlways || hapticOn(), slot: origin)
         realize(reconfigure: false)
     }
 
@@ -464,7 +477,11 @@ extension SidebarView {
         return dragDropped(p, at: layoutPoint(info))
     }
 
-    private func draggedItem(_ payload: DragPayload) -> DragItem? { Self.anyWindow ? payload.item : payload.item(in: windowID) }
+    /// The dragged item of a payload of this window that is in the list: another window's, or one naming a tab or group that is gone, is nil.
+    private func draggedItem(_ payload: DragPayload) -> DragItem? {
+        guard let item = Self.anyWindow ? payload.item : payload.item(in: windowID), Self.anyId || isKnown(item) else { return nil }
+        return item
+    }
 
     /// The pointer is over the list at |point| (layout coordinates): scrolls near an edge, draws the indicator, taps when the slot
     /// changed, starts the open timer over a closed folder. True when a drop here would be accepted.
@@ -492,8 +509,10 @@ extension SidebarView {
     /// A drop at |point|: the list change when the slot there takes it. The drag ends after (`dragEnded`).
     @discardableResult
     func dragDropped(_ payload: DragPayload, at point: CGPoint) -> Bool {
-        guard let item = draggedItem(payload),
-              let t = DropResolver.resolve(point, layout: layout, dragged: item, isCollapsed: isGroupCollapsed).target else { return false }
+        guard let item = draggedItem(payload) else { return false }
+        var point = point
+        if Self.ownRowMoves, let f = drag?.entry.flatMap({ e in layout.placements.first { $0.entry == e }?.frame }), f.contains(point) { point.y = f.maxY + 20 }  // the hook: a drop on the row's own place lands below it
+        guard let t = DropResolver.resolve(point, layout: layout, dragged: item, isCollapsed: isGroupCollapsed).target else { return false }
         return onDrop?(item, t) ?? false
     }
 

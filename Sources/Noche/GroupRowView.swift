@@ -131,6 +131,6 @@ final class GroupRowView: NSView {
         trigger.press(event)  // the click lands on release: a press that moves is a drag, which must not open or close the group
     }
     override func mouseDragged(with event: NSEvent) { if trigger.moved(event) { onDragStart?(event) } }
-    override func mouseUp(with event: NSEvent) { if trigger.release(), bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() } }  // released inside the row
+    override func mouseUp(with event: NSEvent) { if trigger.release(), bounds.contains(convert(event.locationInWindow, from: nil)), !BarHook.on("DRAG_NOCLICK") { onClick?() } }  // released inside the row (the hook: a release clicks nothing)
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }

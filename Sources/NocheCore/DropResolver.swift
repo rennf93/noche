@@ -97,7 +97,8 @@ public enum DropResolver {
         var ref: TopRef
         var frame: CGRect
         var collapsed = false
-        var kids: [CGRect] = []
+        var kids: [CGRect] = []  // every child row of an open folder, the dragged one included: it still fills its box
+        var own: Int?            // the dragged child's place in |kids|: indexes do not count it
         var box: CGRect { kids.last.map { frame.union($0) } ?? frame }
         var group: GroupID? { if case .group(let g) = ref { g } else { nil } }
     }
@@ -128,9 +129,12 @@ public enum DropResolver {
             case .tab(let t, let level):
                 if level > 0 {
                     // A child: it belongs to the last unit, which is a group (the layout puts children right after their header).
-                    if !skipping, dragged != .tab(t) {
-                        if inDay, !day.isEmpty { day[day.count - 1].kids.append(p.frame) } else if !inDay, !persistent.isEmpty { persistent[persistent.count - 1].kids.append(p.frame) }
+                    func add(_ units: inout [Unit]) {
+                        guard !skipping, !units.isEmpty else { return }
+                        units[units.count - 1].kids.append(p.frame)
+                        if dragged == .tab(t) { units[units.count - 1].own = units[units.count - 1].kids.count - 1 }
                     }
+                    if inDay { add(&day) } else { add(&persistent) }
                     continue
                 }
                 skipping = false
@@ -186,6 +190,6 @@ public enum DropResolver {
         var k = 0
         while k < u.kids.count, y >= u.kids[k].midY { k += 1 }
         let edgeY = k == 0 ? (u.kids.first?.minY ?? u.frame.maxY) : u.kids[k - 1].maxY
-        return DropResolution(target: .group(g, k), indicator: line(edgeY, indent: M.groupIndent), openFolder: nil)
+        return DropResolution(target: .group(g, k - (u.own.map { $0 < k ? 1 : 0 } ?? 0)), indicator: line(edgeY, indent: M.groupIndent), openFolder: nil)
     }
 }

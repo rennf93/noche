@@ -428,8 +428,24 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     }
 
     func closeRow(_ i: Int) {
-        guard i < list.items.count, let tab = engineTab(list.items[i]) else { return }
-        closeTab(tab)
+        guard i < list.items.count else { return }
+        let t = list.items[i]
+        if let tab = engineTab(t) { closeTab(tab) } else { closeDormant(t) }
+    }
+
+    /// Close on a list row with no engine tab: a dormant tab that is not pinned (a tile unpinned by a drag or by Unpin). It leaves the list and
+    /// the store like a closed tab and goes on the reopen list. A pinned dormant tile stays (Task 3: it wakes on a click).
+    func closeDormant(_ t: TabItem) {
+        guard t.engineID == nil, !t.isPinned, !BarHook.on("DRAG_NOCLOSEDORMANT") else { return }  // the hook: a dormant row's Close does nothing
+        note("closeDormant")
+        let index = list.containerIndex(of: t.id) ?? 0
+        let next = list.remove(t.id)
+        dormantIcons[t.id] = nil
+        faviconSeeds[t.id] = nil
+        leftAt[t.id] = nil
+        if let next, let n = item(withID: next) { activate(n) }
+        refresh()
+        if !app.closing { app.writer?.closed(tab: t, window: id, index: index) }  // saves the window without it, then records it
     }
 
     func closeTab(_ tab: NCTab) {

@@ -493,13 +493,17 @@ extension SelfTest {
         return IconPicker.pending == nil
     }
 
-    /// The image of tab |id|'s row once it has not changed for 0.6 s (the favicon replaces the default image when the engine reports it); the last one read after 8 s.
+    /// The image of tab |id|'s row once the page's favicon has arrived: the engine reports its address and the row shows that image. The last image read
+    /// after 8 s if it never does (a page with no favicon).
     func settledRowImage(_ c: BrowserWindowController, _ id: TabID) async -> NSImage? {
-        var last: NSImage?, since = Date()
+        var last: NSImage?
         let end = Date().addingTimeInterval(8)
         while Date() < end {
+            let tab = c.item(withID: id).flatMap { c.engineTab($0) }
             let now = c.sidebar.rows.first(where: { $0.tabID == id })?.faviconView.image
-            if now !== last { last = now; since = Date() } else if now != nil, Date().timeIntervalSince(since) >= 0.6 { return now }
+            if let now, BarHook.on("GRP_EARLYBEFORE") { return now }  // the hook: read before the favicon arrives
+            if let now, tab?.faviconURL != nil, now === tab?.favicon { return now }
+            last = now ?? last
             try? await Task.sleep(for: .milliseconds(50))
         }
         return last
@@ -518,7 +522,9 @@ extension SelfTest {
         guard await openTabs(2) else { return finish(false, "extra tabs never appeared") }
         let t = c.list.items.map(\.id)
         IconPicker.dismiss()
-        // Ruling M92: the page's favicon arrives on its own turn and replaces the default image, so |before| is read once the row's image has held still.
+        guard let page = c.item(withID: t[1]).flatMap({ c.engineTab($0) }) else { return finish(false, "tab B has no engine tab") }
+        page.loadURL(fixture("favicon.html"))  // its favicon arrives after this turn: a read right now sees the default image
+        // Ruling M92: the page's favicon arrives on its own turn and replaces the default image, so |before| is read once the engine reports it and the row shows it.
         guard let before = await settledRowImage(c, t[1]) else { return finish(false, "tab B's row shows no image before any icon is picked") }  // its favicon, or the default
         for (label, icon) in [("an emoji", "📌"), ("a symbol", "star")] {
             line("info", "step: Change Icon on a tab, \(label).")

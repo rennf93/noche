@@ -165,6 +165,7 @@ final class SelfTest {
             case "drag-cancel": await dragCancel()
             case "drag-property": await dragProperty()
             case "drag-haptic": await dragHaptic()
+            case "drag-relaunch": await dragRelaunch()
             case "groups": await groups()
             case "group-colors": await groupColors()
             case "group-menus": await groupMenus()

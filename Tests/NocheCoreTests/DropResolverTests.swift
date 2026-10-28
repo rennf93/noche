@@ -166,6 +166,130 @@ final class DropResolverTests: XCTestCase {
         }
     }
 
+    /// A list of one open folder with |n| children (pinned: in the persistent area between two loose pinned rows; else in the day list
+    /// between two day tabs), for the drops of a child on its own row.
+    private func folderList(pinned: Bool, kids n: Int) -> (list: TabList, group: GroupID, kids: [TabID]) {
+        func tab(_ k: Int, pinned: Bool = false, group: GroupID? = nil) -> TabItem {
+            TabItem(id: TabID(), engineID: k, url: "https://f\(k).example/", title: "f\(k)", isLoading: false, isPinned: pinned, groupID: group)
+        }
+        let g = GroupID()
+        let kids = (0..<n).map { tab(10 + $0, group: g) }
+        let (a, b) = (tab(1, pinned: pinned), tab(2, pinned: pinned)), (x, y) = (tab(3), tab(4))
+        let group = TabGroup(id: g, name: "F", colorIndex: 0, icon: nil, isCollapsed: false, isPinned: pinned)
+        let list = pinned
+            ? TabList(items: [a, b] + kids + [x, y], groups: [group], topOrder: [.tab(a.id), .group(g), .tab(b.id)], dayOrder: [.tab(x.id), .tab(y.id)], activeID: x.id)!
+            : TabList(items: [a, b] + kids + [x, y], groups: [group], topOrder: [.tab(a.id), .tab(b.id)], dayOrder: [.tab(x.id), .group(g), .tab(y.id)], activeID: x.id)!
+        return (list, g, kids.map(\.id))
+    }
+
+    /// Review Important 1: a child dropped on its own row stays where it is (the first, a middle, the last and the only child, in a
+    /// persistent and a day folder, with the pointer at the row's middle and 4 pt either side), with the line inside the folder's box.
+    func testAChildDroppedOnItsOwnRowStaysInItsFolder() {
+        for pinned in [true, false] {
+            for n in [1, 2, 3, 4] {
+                for c in 0..<n {
+                    let (list, g, kids) = folderList(pinned: pinned, kids: n)
+                    let layout = SidebarLayout(entries: list.layout(), width: 197)
+                    func frame(_ e: SidebarEntry) -> CGRect { layout.placements.first { $0.entry == e }!.frame }
+                    let row = frame(.tab(kids[c], level: 1)), box = frame(.group(g)).union(frame(.tab(kids[n - 1], level: 1)))
+                    for dy in [CGFloat(-4), 0, 4] {
+                        let at = "pinned \(pinned), \(n) kids, child \(c), dy \(dy)"
+                        let r = DropResolver.resolve(CGPoint(x: 100, y: row.midY + dy), layout: layout, dragged: .tab(kids[c]), isCollapsed: { _ in false })
+                        XCTAssertEqual(r.target, .group(g, c), at)
+                        guard case .line(let l)? = r.indicator else { XCTFail("no line, \(at)"); continue }
+                        // The line sits at the row's top edge above the middle, at its bottom edge from the middle on, indented like the children.
+                        XCTAssertEqual(l.midY, dy < 0 ? row.minY : row.maxY, at)
+                        XCTAssertTrue(l.midY >= box.minY && l.midY <= box.maxY, at)
+                        XCTAssertEqual(l.minX, 6 + 14, at)
+                        var moved = list
+                        moved.move(kids[c], to: r.target!)
+                        XCTAssertEqual(moved.items, list.items, at)
+                        XCTAssertEqual(moved.topOrder, list.topOrder, at)
+                        XCTAssertEqual(moved.dayOrder, list.dayOrder, at)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Review Minor 2, an oracle that does not read the resolver's answer: with the pointer on the middle half of its own row (a tile: on
+    /// its own slot) an item is dropped where it is, whatever it is.
+    func testDroppingAnItemOnTheMiddleOfItsOwnRowChangesNothing() {
+        let base = Fixture()
+        var checked = 0
+        for p in base.layout.placements {
+            let item: DragItem
+            switch p.entry {
+            case .tab(let t, _), .gridTile(let t): item = .tab(t)
+            case .group(let g): item = .group(g)
+            default: continue
+            }
+            for dy in [-p.frame.height / 4, 0, p.frame.height / 4 - 0.5] {
+                var f = base
+                let r = f.resolve(p.frame.midY + dy, x: p.frame.midX, item)
+                guard let target = r.target else { XCTFail("refused on its own row: \(p.entry)"); continue }
+                switch item {
+                case .tab(let t): f.list.move(t, to: target)
+                case .group(let g): XCTAssertTrue(f.list.moveGroup(g, to: target))
+                }
+                XCTAssertEqual(f.list.items, base.list.items, "\(p.entry) dy \(dy)")
+                XCTAssertEqual(f.list.topOrder, base.list.topOrder, "\(p.entry) dy \(dy)")
+                XCTAssertEqual(f.list.dayOrder, base.list.dayOrder, "\(p.entry) dy \(dy)")
+                XCTAssertEqual(f.list.groups, base.list.groups, "\(p.entry) dy \(dy)")
+                checked += 1
+            }
+        }
+        XCTAssertGreaterThan(checked, 30)
+    }
+
+    /// Review Minor 2, literal expected values for the rows that had none.
+    func testLiteralLinesAndTargetsForTheRemainingRows() {
+        let f = Fixture()
+        // A group over a day-list folder's quarters: D is a closed folder at y 440..., its top quarter is before, its bottom quarter after.
+        let d = f.frame(.group(f.D))
+        XCTAssertEqual(f.resolve(d.minY + 3, .group(f.C)).target, .day(2))
+        XCTAssertEqual(f.resolve(d.maxY - 3, .group(f.C)).target, .day(3))
+        XCTAssertNil(f.resolve(d.midY, .group(f.C)).target)
+        // The line of the last unit: it sits under it, at its box's bottom, and the line of an empty container at its top.
+        let last = f.tab(f.d[2])
+        guard case .line(let after)? = f.resolve(last.maxY - 2, .tab(f.g[0])).indicator else { return XCTFail("no line after the last unit") }
+        XCTAssertEqual(f.resolve(last.maxY - 2, .tab(f.g[0])).target, .day(4))
+        XCTAssertEqual(after, CGRect(x: 6, y: last.maxY - 1, width: 185, height: 2))
+        let one = TabItem(id: TabID(), engineID: 1, url: "https://a.example/", title: "a", isLoading: false)
+        let list = TabList(items: [one], activeID: one.id)!
+        let layout = SidebarLayout(entries: list.layout(), width: 197)
+        let newTab = layout.placements.first { $0.entry == .newTab }!.frame, div = layout.placements.first { $0.entry == .divider }!.frame
+        let below = DropResolver.resolve(CGPoint(x: 100, y: 400), layout: layout, dragged: .tab(one.id), isCollapsed: { _ in false })
+        XCTAssertEqual(below.indicator, .line(CGRect(x: 6, y: newTab.maxY - 1, width: 185, height: 2)))
+        let above = DropResolver.resolve(CGPoint(x: 100, y: div.minY - 3), layout: layout, dragged: .tab(one.id), isCollapsed: { _ in false })
+        XCTAssertEqual(above.indicator, .line(CGRect(x: 6, y: SidebarMetrics.listTop - 1, width: 185, height: 2)))
+    }
+
+    /// A tile dropped between loose rows under a folder: the gap under an open folder's box and the gap between two loose rows below it.
+    func testATileDroppedBetweenLooseRowsUnderAFolder() {
+        func tab(_ k: Int, pinned: Bool = false, grid: Bool = false, group: GroupID? = nil) -> TabItem {
+            TabItem(id: TabID(), engineID: k, url: "https://u\(k).example/", title: "u\(k)", isLoading: false, isPinned: pinned, inGrid: grid, groupID: group)
+        }
+        let g = GroupID()
+        let (tile, a, b, c, x) = (tab(0, pinned: true, grid: true), tab(1, pinned: true), tab(2, pinned: true), tab(3, pinned: true), tab(4))
+        let kids = [tab(5, group: g), tab(6, group: g)]
+        let group = TabGroup(id: g, name: "F", colorIndex: 0, icon: nil, isCollapsed: false, isPinned: true)
+        let list = TabList(items: [tile, a, b, c, x] + kids, groups: [group], topOrder: [.tab(a.id), .group(g), .tab(b.id), .tab(c.id)], dayOrder: [.tab(x.id)], activeID: x.id)!
+        let layout = SidebarLayout(entries: list.layout(), width: 197)
+        func frame(_ e: SidebarEntry) -> CGRect { layout.placements.first { $0.entry == e }!.frame }
+        let box = frame(.group(g)).union(frame(.tab(kids[1].id, level: 1))), bRow = frame(.tab(b.id, level: 0)), cRow = frame(.tab(c.id, level: 0))
+        func drop(_ y: CGFloat) -> DropResolution { DropResolver.resolve(CGPoint(x: 100, y: y), layout: layout, dragged: .tab(tile.id), isCollapsed: { _ in false }) }
+        let under = drop(box.maxY + 1), between = drop(bRow.maxY + (cRow.minY - bRow.maxY) / 2 + 1)
+        XCTAssertEqual(under.target, .persistent(2))
+        XCTAssertEqual(under.indicator, .line(CGRect(x: 6, y: (box.maxY + bRow.minY) / 2 - 1, width: 185, height: 2)))
+        XCTAssertEqual(between.target, .persistent(3))
+        XCTAssertEqual(between.indicator, .line(CGRect(x: 6, y: (bRow.maxY + cRow.minY) / 2 - 1, width: 185, height: 2)))
+        var moved = list
+        moved.move(tile.id, to: between.target!)
+        XCTAssertEqual(moved.topOrder, [.tab(a.id), .group(g), .tab(b.id), .tab(tile.id), .tab(c.id)])
+        XCTAssertTrue(moved.items.first { $0.id == tile.id }.map { $0.isPinned && !$0.inGrid && $0.groupID == nil } ?? false)
+    }
+
     func testEmptyContainersTakeADropAtTheirTop() {
         let one = TabItem(id: TabID(), engineID: 1, url: "https://a.example/", title: "a", isLoading: false)
         let list = TabList(items: [one], activeID: one.id)!

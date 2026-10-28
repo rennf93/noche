@@ -8,6 +8,12 @@ extension BrowserWindowController {
     func wireDrag() {
         sidebar.windowID = id
         sidebar.isGroupCollapsed = { [weak self] g in self?.group(withID: g)?.isCollapsed ?? false }
+        sidebar.isKnown = { [weak self] item in
+            switch item {
+            case .tab(let t): self?.item(withID: t) != nil
+            case .group(let g): self?.group(withID: g) != nil
+            }
+        }
         sidebar.onDrop = { [weak self] item, target in self?.performDrop(item, to: target) ?? false }
         sidebar.onOpenFolder = { [weak self] g in
             self?.list.collapse(g, false)
@@ -41,11 +47,11 @@ extension BrowserWindowController {
             guard group(withID: g) != nil, list.moveGroup(g, to: target) else { return false }
         }
         refresh()
-        changed()
+        if !BarHook.on("DRAG_NOSAVE") { changed() }  // negative control: a drop is not saved
         return true
     }
 
-    /// The drag is over: a folder it opened closes again unless the tab went into it.
+    /// The drag is over: a folder it opened closes again unless the tab went into it (saved: a save in between may have kept it open).
     func dragFinished(_ item: DragItem, opened: [GroupID]) {
         if BarHook.on("DRAG_NOCOLLAPSE") { return }  // negative control: the folders stay open
         var any = false
@@ -54,6 +60,9 @@ extension BrowserWindowController {
             list.collapse(g, true)
             any = true
         }
-        if any { refreshNow() }
+        if any {
+            refreshNow()
+            if !BarHook.on("DRAG_NOSAVECLOSE") { changed() }  // negative control: the close of a folder the hover opened is not saved
+        }
     }
 }
