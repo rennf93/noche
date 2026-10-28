@@ -16,6 +16,8 @@ final class StoreWriter {
     private var debouncer = Debouncer(now: { Date() })
     private var dirty = Set<UUID>()      // tabs or state changed: the whole window is saved
     private var geometry = Set<UUID>()   // only the frame changed: one UPDATE of the window row, tab rows untouched
+    /// A window that gave a tab to a new window waits for it: its debounced save would tombstone the tab before the new window's rows exist.
+    var holds: [UUID: UUID] = [:]
     private var polling = false
     private var frozen = false
 #if NOCHE_TESTHOOKS
@@ -57,9 +59,11 @@ final class StoreWriter {
                 guard !self.frozen || noFix else { return }
                 guard !(self.dirty.isEmpty && self.geometry.isEmpty) else { return }
                 if self.debouncer.due() {
-                    self.save(self.dirty, async: true)
+                    let ready = self.dirty.filter { self.holds[$0] == nil }
+                    self.save(ready, async: true)
                     for id in self.geometry { self.saveFrame(id) }
-                    self.dirty.removeAll(); self.geometry.removeAll(); self.debouncer.fired()
+                    self.dirty.subtract(ready); self.geometry.removeAll(); self.debouncer.fired()
+                    if !self.dirty.isEmpty { self.debouncer.event(); self.poll() }
                 } else { self.poll() }
             }
         }
@@ -89,9 +93,16 @@ final class StoreWriter {
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NOFLUSH"] == "1" { return }  // negative control: the quit flush never happens
 #endif
         guard !frozen else { return }
-        save(Set(windowIDs()))
+        save(Set(windowIDs().filter { holds[$0] == nil }))  // a held window keeps its old rows: they still hold the tab it gave up
         dirty.removeAll(); geometry.removeAll()
         debouncer.fired()
+    }
+
+    /// Saves these windows now, one after the other in this order (a move writes the window that receives before the one that gave up: the
+    /// group row and the tab rows land in the new window before the old one drops what it no longer holds).
+    func saveNow(_ ids: [UUID]) {
+        guard !frozen else { return }
+        for id in ids { holds[id] = nil; save([id]); dirty.remove(id); geometry.remove(id) }
     }
 
     /// Quit: with `close` the windows are dropped (the closed list stays), otherwise every window is written. Nothing is written afterwards.
@@ -126,6 +137,7 @@ final class StoreWriter {
     func windowClosed(_ id: UUID) {
         guard !frozen else { return }
         dirty.remove(id); geometry.remove(id)
+        holds[id] = nil; holds = holds.filter { $0.value != id }
         attempt("remove window") { try store.removeWindow(id) }
     }
 

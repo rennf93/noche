@@ -23,6 +23,7 @@ extension BrowserWindowController {
 
     func changed(geometry: Bool = false) {
         if geometry, let f = nsWindow?.frame, !(nsWindow?.styleMask.contains(.fullScreen) ?? false) { lastFrame = f }
+        if geometry, let ns = nsWindow { lastFullScreen = ns.styleMask.contains(.fullScreen); lastZoomed = ns.isZoomed }
         if !restoring { app.writer?.markDirty(window: id, geometry: geometry) }
     }
 

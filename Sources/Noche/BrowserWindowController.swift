@@ -102,6 +102,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var skipActivation: TabID?           // the restore's own activation of the selected tab is not the user using it
     var restore: Restore?
     var restoreAdded = 0
+    /// Runs once when the restore ends (a window made for a moved tab saves then).
+    var afterRestore: (() -> Void)?
     var restoreStarted = false
     /// The last favicon of a tab that went dormant: shown until it wakes (not stored, so a relaunch shows the placeholder).
     var dormantIcons: [TabID: NSImage] = [:]
@@ -120,6 +122,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let initialFrame: NSRect
     var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
     var lastFrame: NSRect?              // the window's frame as of the last move or resize: a window the engine closed on its own is revived there
+    var lastFullScreen = false          // full screen and zoom as of the last geometry change: a revived window comes back the same (Space and z-order do not)
+    var lastZoomed = false
+#if NOCHE_TESTHOOKS
+    var testFullScreen = false          // Test support: a hidden window never enters full screen, so this reports it did (revive's Restore)
+#endif
     var faviconSeeds: [TabID: (url: String, icon: String)] = [:]   // saved icon address, used until the page reports its own
     var windowClosing = false           // close() was asked: the tabs that go with the window are not "closed tabs"
     var observers: [NSObjectProtocol] = []

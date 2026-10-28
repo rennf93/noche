@@ -349,7 +349,7 @@ extension SelfTest {
 
     /// Live-ui.md section 3, the three menus (titles and enabled state; the separators are builder calls, see the README): the tab row's, the
     /// group's (day, pinned and empty) and the empty space's. Only the later features are disabled (Chat With, Open as Split, Move to Profile,
-    /// New Live Group, Move to Window until Task 5b); a disabled item acts on nothing.
+    /// New Live Group); a disabled item acts on nothing.
     func groupMenus() async {
         guard await ready(), let c = ctl else { return }
         guard await openTabs(2) else { return finish(false, "extra tabs never appeared") }
@@ -376,12 +376,12 @@ extension SelfTest {
                          "---", "Colors", "---", "Rename...", "Change Icon...", "---", "Move to Bookmark Bar", "Delete"]
         guard let gm = await groupMenu(c, g) else { return finish(false, "no group menu") }
         guard titles(gm.menu) == groupWant else { return finish(false, "group menu \(titles(gm.menu)), want \(groupWant)") }
-        let groupEnabled = ["Pin", "New Tab in Group", "Separate Tabs", "Duplicate", "Copy All Links", "Colors", "Rename...", "Change Icon...", "Move to Bookmark Bar", "Delete"]
+        let groupEnabled = ["Pin", "New Tab in Group", "Separate Tabs", "Duplicate", "Move to Window", "Copy All Links", "Colors", "Rename...", "Change Icon...", "Move to Bookmark Bar", "Delete"]
         guard enabledTitles(gm.menu) == groupEnabled else { return finish(false, "group menu enabled \(enabledTitles(gm.menu)), want \(groupEnabled)") }
         guard sameKey(item(gm.menu, "New Tab in Group"), menuItem("New Tab in Group")) else { return finish(false, "New Tab in Group's key differs from the menu bar's") }
         guard (item(gm.menu, "Colors")?.view as? SwatchRowView)?.selected == 0 else { return finish(false, "the Colors row is not the swatch view with white selected") }
         BrowserWindowController.actionCounts = [:]
-        for later in ["Chat With \"Reading\"", "Move to Window", "Move to Profile"] {
+        for later in ["Chat With \"Reading\"", "Move to Profile"] {
             ContextMenus.dismiss(choosing: item(gm.menu, later))
             guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "\(later) acted: \(BrowserWindowController.actionCounts)") }
             guard await groupMenu(c, g) != nil else { return finish(false, "no group menu again") }
@@ -393,14 +393,14 @@ extension SelfTest {
         guard await until(5, { c.list.groups.count == 2 }), let e = c.list.groups.first(where: { $0.id != g })?.id, await until(5, { c.sidebar.groupRow(e) != nil }) else { return finish(false, "no empty group") }
         c.sidebar.groupRow(e)?.renameField.cancel()
         guard let em = await groupMenu(c, e) else { return finish(false, "no menu for the empty group") }
-        guard enabledTitles(em.menu) == ["Pin", "New Tab in Group", "Separate Tabs", "Duplicate", "Colors", "Rename...", "Change Icon...", "Delete"] else { return finish(false, "the empty group's enabled items are \(enabledTitles(em.menu))") }
+        guard enabledTitles(em.menu) == ["Pin", "New Tab in Group", "Separate Tabs", "Duplicate", "Move to Window", "Colors", "Rename...", "Change Icon...", "Delete"] else { return finish(false, "the empty group's enabled items are \(enabledTitles(em.menu))") }
         // The empty space.
         let sideWant = ["New Tab", "Reopen Closed Tab", "---", "New Group", "New Live Group", "New Profile...", "---", "Bookmark All Tabs", "---", "Show Tabs in Sidebar", "Auto-Hide Tabs", "---", "Close All Tabs"]
         guard let sm = await sidebarMenu(c) else { return finish(false, "no sidebar menu") }
         guard titles(sm.menu) == sideWant else { return finish(false, "sidebar menu \(titles(sm.menu)), want \(sideWant)") }
         guard enabledTitles(sm.menu) == ["New Tab", "New Group", "Bookmark All Tabs", "Auto-Hide Tabs", "Close All Tabs"] else { return finish(false, "sidebar menu enabled \(enabledTitles(sm.menu))") }
         ContextMenus.dismiss(choosing: nil)
-        finish(violations.isEmpty, "the tab, group (day, pinned, empty) and empty-space menus list the section 3 items in order with only the later features disabled (Chat With, Open as Split, Move to Profile, Move to Window, New Live Group, New Profile..., Show Tabs in Sidebar), the group menu carries the swatch row and the tab menus list the groups, a disabled item acts on nothing \(violations)")
+        finish(violations.isEmpty, "the tab, group (day, pinned, empty) and empty-space menus list the section 3 items in order with only the later features disabled (Chat With, Open as Split, Move to Profile, New Live Group, New Profile..., Show Tabs in Sidebar), the group menu carries the swatch row and the tab menus list the groups, a disabled item acts on nothing \(violations)")
     }
 
     // MARK: rename-tab

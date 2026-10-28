@@ -18,7 +18,7 @@ final class SelfTest {
     static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
 
     /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
-    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") }
+    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") || check == "move-window" || check == "merge-windows" }
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -166,6 +166,9 @@ final class SelfTest {
             case "drag-property": await dragProperty()
             case "drag-haptic": await dragHaptic()
             case "drag-relaunch": await dragRelaunch()
+            case "move-window": await moveWindow()
+            case "merge-windows": await mergeWindows()
+            case "revive-window": await reviveWindow()
             case "groups": await groups()
             case "group-colors": await groupColors()
             case "group-menus": await groupMenus()

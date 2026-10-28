@@ -16,4 +16,10 @@ public struct KeyRecency<ID: Hashable> {
 
     /// The most recently key window that is still in |alive|; nil when none of them was ever key.
     public func mostRecent(among alive: [ID]) -> ID? { order.first { alive.contains($0) } }
+
+    /// |alive| from the front window to the back: the key order first, then the ones never key in the order given.
+    public func frontToBack(among alive: [ID]) -> [ID] {
+        let keyed = order.filter { alive.contains($0) }
+        return keyed + alive.filter { !keyed.contains($0) }
+    }
 }

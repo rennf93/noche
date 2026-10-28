@@ -246,6 +246,55 @@ public struct TabList: Equatable, Sendable {
         return take(id)?.successor
     }
 
+    // MARK: leaving for another window (Move to Window, Merge All Windows)
+
+    /// Takes a tab out of the list for another window: the item comes back loose (out of its group) and, when it was the active tab, the
+    /// id that became active, chosen as in |remove|. Nil for an unknown id.
+    public mutating func extract(_ id: TabID) -> (item: TabItem, successor: TabID?)? {
+        guard var out = take(id) else { return nil }
+        out.item.groupID = nil
+        return out
+    }
+
+    /// Takes a group and every child out of the list: the group as it is (name, color, icon, collapsed, pinned) and the children in order.
+    /// The active tab, when it is one of them, is taken last so its successor is outside the group. Nil for an unknown id.
+    public mutating func extract(group id: GroupID) -> (group: TabGroup, items: [TabItem], successor: TabID?)? {
+        guard let g = groupIndex(id) else { return nil }
+        let kids = items.filter { $0.groupID == id }.map(\.id)
+        var gone: [TabID: TabItem] = [:]
+        var successor: TabID?
+        for k in kids.filter({ $0 != activeID }) + kids.filter({ $0 == activeID }) {
+            guard let t = take(k) else { continue }
+            gone[k] = t.item
+            if t.successor != nil { successor = t.successor }
+        }
+        var m = model()
+        m.top.removeAll { $0 == .group(id) }
+        m.day.removeAll { $0 == .group(id) }
+        m.kids[id] = nil
+        let group = groups.remove(at: g)
+        commit(m)
+        return (group, kids.compactMap { gone[$0] }, successor)
+    }
+
+    /// A group from another window: it goes to the end of the persistent area (pinned) or the day list, with its children in order. False
+    /// (nothing changes) when the group or any tab is already here.
+    @discardableResult
+    public mutating func adopt(group g: TabGroup, items kids: [TabItem]) -> Bool {
+        guard groupIndex(g.id) == nil, Set(kids.map(\.id)).count == kids.count,
+              !kids.contains(where: { k in index(of: k.id) != nil || archived.contains { $0.id == k.id } }) else { return false }
+        groups.append(g)
+        var m = model()
+        m.put(.group(g.id), at: g.isPinned ? .persistent(Int.max) : .day(Int.max))
+        for var t in kids {
+            t.groupID = g.id; t.isPinned = false; t.inGrid = false; t.pinnedURL = nil; t.archivedAt = nil
+            items.append(t)
+            m.kids[g.id, default: []].append(t.id)
+        }
+        commit(m)
+        return true
+    }
+
     private mutating func take(_ id: TabID) -> (item: TabItem, successor: TabID?)? {
         guard let i = index(of: id) else { return nil }
         var successor: TabID?

@@ -31,4 +31,11 @@ final class KeyRecencyTests: XCTestCase {
         r.remove(2)
         XCTAssertEqual(r.mostRecent(among: [1, 2]), 1)
     }
+
+    func testFrontToBackPutsKeyOrderFirstThenTheRestInGivenOrder() {
+        var r = KeyRecency<String>()
+        r.becameKey("b"); r.becameKey("c"); r.becameKey("a")
+        XCTAssertEqual(r.frontToBack(among: ["a", "b", "c", "d", "e"]), ["a", "c", "b", "d", "e"])  // never-key windows follow, oldest first
+        XCTAssertEqual(r.frontToBack(among: ["e", "b"]), ["b", "e"])
+    }
 }

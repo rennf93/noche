@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private(set) var selfTest: SelfTest?
     /// Set by the self-test when its verdict is only known at exit.
     var exitCodeOverride: Int32?
+    /// Test support: the `Restore` the last revived window was made with.
+    var lastRevive: BrowserWindowController.Restore?
 #endif
     private(set) var controllers: [BrowserWindowController] = []
     let downloads = DownloadsController()
@@ -25,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     lazy var bookmarksMenuDelegate = BookmarksMenuDelegate(app: self)
     lazy var moveToGroupDelegate = MoveToGroupMenuDelegate(app: self)
+    lazy var moveToWindowDelegate = MoveToWindowMenuDelegate(app: self)
     /// View > Show Bookmarks Bar (stored in the `setting` table as `bookmarksBar`, loaded when the store opens).
     var barMode = BookmarksBarMode.newTabOnly
     var writer: StoreWriter?
@@ -196,10 +199,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func newWindowAction() {
         BrowserWindowController.note("newWindow")
         guard let base = active?.nsWindow?.frame else { newWindow(); return }
+        newWindow(frame: cascadedFrame(from: base))
+    }
+
+    /// The frame of a window opened from |base|: 22 pt down and right of it (back to the corner at the screen's edge); the default without one.
+    func cascadedFrame(from base: NSRect?) -> NSRect {
+        guard let base else { return Self.defaultFrame(size: NSSize(width: 1280, height: 800)) }
         let area = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         var f = base.offsetBy(dx: 22, dy: -22)
         if f.maxX > area.maxX || f.minY < area.minY { f = Self.defaultFrame(size: base.size) }
-        newWindow(frame: f)
+        return f
     }
 
     /// File > Reopen Closed Tab: the newest closed tab goes back to its window at its index (clamped), else the front window, appended.
@@ -231,6 +240,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func windowBecameKey(_ n: Notification) {
         guard let w = n.object as? NSWindow, let c = controllers.first(where: { $0.nsWindow === w }) else { return }
         keyRecency.becameKey(c.id)
+    }
+
+    /// The browser windows from the front one to the back (the key order, then the ones never key in creation order).
+    var windowsFrontToBack: [BrowserWindowController] {
+        keyRecency.frontToBack(among: controllers.map(\.id)).compactMap { id in controllers.first { $0.id == id } }
     }
 
     /// The window menu actions apply to: the key window's, else the one that was key most recently, else the newest (hidden windows are never key).
@@ -281,6 +295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func newGroupWithTab(_ s: Any?) { active?.newGroupWithTab() }
     @objc func newTabInGroup(_ s: Any?) { active?.newTabInGroup() }
     @objc func moveToGroupMenu(_ s: Any?) {}  // the item opens its submenu; the action only lets the table decide whether it is enabled
+    @objc func moveToWindowMenu(_ s: Any?) {}  // the same for Move to Window
+    @objc func mergeAllWindows(_ s: Any?) { mergeAllWindows() }
     @objc func renameTab(_ s: Any?) { if let c = active, let id = c.list.activeID { c.beginRename(tab: id) } }
     @objc func changeTabIcon(_ s: Any?) { if let c = active, let id = c.list.activeID { c.changeIcon(tab: id) } }
     /// History and Downloads are Noche's own windows.
@@ -382,12 +398,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let kept = c.list.items.filter { $0.isPinned || $0.engineID == nil }
         guard !kept.isEmpty else { return false }
         let blank = TabID()
+#if NOCHE_TESTHOOKS
+        let fullScreen = c.lastFullScreen || c.testFullScreen
+#else
+        let fullScreen = c.lastFullScreen
+#endif
         let restore = BrowserWindowController.Restore(
-            tabs: [(blank, "about:blank")], selected: blank, sidebarHidden: c.sidebarHidden, fullScreen: false,
+            tabs: [(blank, "about:blank")], selected: blank, sidebarHidden: c.sidebarHidden, fullScreen: fullScreen && !BarHook.on("REVIVE_NOSTATE"), isZoomed: c.lastZoomed && !BarHook.on("REVIVE_NOSTATE"),  // the hook: full screen and zoom are lost, as before
             items: Dictionary(uniqueKeysWithValues: kept.map { ($0.id, $0) }), groups: c.list.groups, topOrder: c.list.topOrder, dayOrder: c.list.dayOrder,
             favicons: c.faviconSeeds.mapValues(\.icon), order: kept.map(\.id) + [blank])
         controllers.removeAll { $0 === c }
         keyRecency.remove(c.id)
+#if NOCHE_TESTHOOKS
+        lastRevive = restore
+#endif
         FileHandle.standardError.write(Data("NOCHE window: the engine closed a window that held pinned tabs; made it again with a blank tab\n".utf8))
         newWindow(url: "about:blank", frame: c.lastFrame ?? c.initialFrame, id: c.id, restore: restore)
         return true

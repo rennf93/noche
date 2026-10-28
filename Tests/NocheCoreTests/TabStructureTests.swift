@@ -593,4 +593,64 @@ final class TabStructureTests: XCTestCase {
         XCTAssertEqual(ok.list.items.first?.id, pinned.id)
         current = ok.list
     }
+
+    // MARK: moving between windows (M1.6 Task 5b)
+
+    func testExtractTabReturnsItLooseAndHandsOverTheSelection() {
+        var (l, t) = list(3)
+        let g = l.createGroup(with: t[0])!
+        l.setGroup(t[1], g)
+        l.markActive(t[1], at: t0)
+        let out = l.extract(t[1])!
+        XCTAssertNil(out.item.groupID)                 // out of the group: it arrives loose
+        XCTAssertEqual(out.successor, t[2])            // the active tab left: the next live row takes over, as when it closes
+        XCTAssertEqual(l.activeID, t[2])
+        XCTAssertNil(l.extract(t[1]))                  // gone
+        XCTAssertEqual(ids(l), [t[0], t[2]])
+    }
+    func testExtractGroupTakesEveryChildAndItsRows() {
+        var (l, t) = list(4)
+        let g = l.createGroup(with: t[1], name: "Reading")!
+        l.setGroup(t[2], g)
+        l.setGroupColor(g, 3); l.setGroupIcon(g, "star"); l.collapse(g)
+        l.markActive(t[2], at: t0)                     // the active tab is a child: the successor is outside the group
+        let out = l.extract(group: g)!
+        XCTAssertEqual(out.group.id, g)
+        XCTAssertEqual([out.group.name, "\(out.group.colorIndex)", out.group.icon ?? "", "\(out.group.isCollapsed)"], ["Reading", "3", "star", "true"])
+        XCTAssertEqual(out.items.map(\.id), [t[1], t[2]])   // in the group's order
+        XCTAssertEqual(out.successor, t[3])
+        XCTAssertEqual(l.activeID, t[3])
+        XCTAssertTrue(l.groups.isEmpty)
+        XCTAssertEqual(l.dayOrder, [.tab(t[0]), .tab(t[3])])
+        XCTAssertNil(l.extract(group: g))
+    }
+    func testAdoptGroupGoesToTheEndOfItsAreaWithItsTabsAndState() {
+        var src = list(3).0
+        let ids3 = src.items.map(\.id)
+        let g = src.createGroup(with: ids3[1], name: "G")!
+        src.setGroup(ids3[2], g)
+        src.setGroupColor(g, 5); src.collapse(g)
+        let out = src.extract(group: g)!
+        var dst = list(2).0
+        let own = ids(dst)
+        let dormant = out.items.map { var x = $0; x.engineID = nil; return x }
+        XCTAssertTrue(dst.adopt(group: out.group, items: dormant))
+        XCTAssertEqual(dst.dayOrder, [.tab(own[0]), .tab(own[1]), .group(g)])      // the end of the day list
+        XCTAssertEqual(dst.items.map(\.id), own + [ids3[1], ids3[2]])
+        XCTAssertEqual(dst.groups, [out.group])
+        XCTAssertTrue(dst.items.suffix(2).allSatisfy { $0.groupID == g && $0.engineID == nil })
+        XCTAssertFalse(dst.adopt(group: out.group, items: dormant))                 // an id never repeats in a window
+    }
+    func testAdoptPinnedGroupGoesToThePersistentArea() {
+        var src = list(2).0
+        let a = src.items[1].id
+        let g = src.createGroup(with: a)!
+        src.pinGroup(g)
+        let out = src.extract(group: g)!
+        XCTAssertTrue(out.group.isPinned)
+        var dst = list(1).0
+        XCTAssertTrue(dst.adopt(group: out.group, items: out.items))
+        XCTAssertEqual(dst.topOrder, [.group(g)])
+        XCTAssertEqual(dst.dayOrder.count, 1)
+    }
 }

@@ -88,6 +88,13 @@ enum MenuTable {
         return e
     }()
 
+    /// Tabs > Move to Window: filled when it opens. The action is a placeholder that gives the item a rule: enabled with an active tab to move.
+    private static let moveToWindow: E = {
+        var e = app("Move to Window", nil, #selector(AppDelegate.moveToWindowMenu(_:)), enabled: { $0.window?.list.activeID != nil && !BarHook.on("MOVE_MENUOFF") })
+        e.submenu = []
+        return e
+    }()
+
     static let bar: [MenuEntry] = [
         menu("Noche", [
             std("About Noche", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
@@ -235,7 +242,7 @@ enum MenuTable {
             app("New Group with Tab", "tabs.newGroupWithTabs", #selector(AppDelegate.newGroupWithTab(_:)), enabled: { $0.window?.list.activeID != nil }),
             moveToGroup,  // the groups of the window are listed when it opens (MoveToGroupMenuDelegate)
             later("Move to Profile", "M1.7"),
-            later("Move to Window", "M1.6"),
+            moveToWindow,  // the windows of the profile are listed when it opens (MoveToWindowMenuDelegate)
             sep,
             app("Rename...", nil, #selector(AppDelegate.renameTab(_:)), enabled: { $0.window?.list.activeID != nil }),
             app("Change Icon...", nil, #selector(AppDelegate.changeTabIcon(_:)), enabled: { $0.window?.list.activeID != nil }),
@@ -263,7 +270,7 @@ enum MenuTable {
             sep,
             app("Downloads", "window.downloads", #selector(AppDelegate.showDownloads(_:)), enabled: always),  // Noche's own Downloads window (M1.5)
             app("Task Manager", nil, #selector(AppDelegate.taskManager(_:)), enabled: { $0.window?.activeTab?.canExecuteChromeCommandNamed("IDC_TASK_MANAGER") ?? false }),
-            later("Merge All Windows", "window.mergeAllWindows", "M1.6"),
+            app("Merge All Windows", "window.mergeAllWindows", #selector(AppDelegate.mergeAllWindows(_:)), enabled: { ctx in ctx.window.map(ctx.app.canMerge) ?? false }),
         ], role: .windows),
         menu("Help", [
             app("Copy Diagnostics", "help.copyDiagnostics", #selector(AppDelegate.copyDiagnostics(_:)), enabled: always),

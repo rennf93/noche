@@ -257,4 +257,38 @@ final class StoreSidebarTests: XCTestCase {
         XCTAssertNoThrow(try store.recordClosed(a, windowID: win, index: 0))
         XCTAssertNil(try store.popLastClosed()?.tab.groupID)
     }
+    /// Move to Window (M1.6 5b): the tab and group rows are keyed by id alone, an upsert re-homes them, and a window's tombstoning only touches
+    /// rows still naming it. So B saved first holds them while A still lists them (two live windows, never none), and A's save after leaves them.
+    func testAMoveSavedDestinationFirstNeverLeavesTheItemsInNoWindow() throws {
+        var a = structured()
+        let store = try makeStore()
+        let (winA, winB) = (UUID(), UUID())
+        try store.save(snapshot(a, id: winA))
+        var b = TabList()
+        b.insertNew(tab(99), opener: nil, addToTop: false, activate: true)
+        try store.save(snapshot(b, id: winB))
+        let gid = a.groups[1].id
+        let loose = try XCTUnwrap(a.items.first { $0.groupID == nil && !$0.isPinned })
+        let out = try XCTUnwrap(a.extract(group: gid))
+        let one = try XCTUnwrap(a.extract(loose.id))
+        XCTAssertTrue(b.adopt(group: out.group, items: out.items))
+        b.insertNew(one.item, opener: nil, addToTop: false, activate: false)
+        let moved = Set(out.items.map(\.id) + [one.item.id])
+        func owner(_ db: Database, _ id: TabID) throws -> String? {
+            try String.fetchOne(db, sql: "SELECT windowId FROM tab WHERE id = ? AND deletedAt IS NULL", arguments: [id.raw.uuidString])
+        }
+        try store.save(snapshot(b, id: winB))
+        try store.db.read { db in   // between the two saves
+            for id in moved { XCTAssertEqual(try owner(db, id), winB.uuidString) }
+            XCTAssertEqual(try String.fetchOne(db, sql: "SELECT windowId FROM tabGroup WHERE id = ? AND deletedAt IS NULL", arguments: [gid.raw.uuidString]), winB.uuidString)
+        }
+        try store.save(snapshot(a, id: winA))
+        try store.db.read { db in
+            for id in moved { XCTAssertEqual(try owner(db, id), winB.uuidString) }
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT count(*) FROM tabGroup WHERE id = ? AND deletedAt IS NOT NULL", arguments: [gid.raw.uuidString]), 0)
+        }
+        let back = try store.loadWindows()
+        XCTAssertEqual(Set(try XCTUnwrap(back.first { $0.id == winB }).tabs.map(\.id)).isSuperset(of: moved), true)
+        XCTAssertTrue(try XCTUnwrap(back.first { $0.id == winA }).tabs.allSatisfy { !moved.contains($0.id) })
+    }
 }

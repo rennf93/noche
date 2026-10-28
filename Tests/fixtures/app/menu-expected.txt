@@ -5,7 +5,7 @@
 # Items of a later milestone are present and 0. Layout glyph keys of section 1 are the US keys (Cmd+[ and Cmd+] for Go Back and Go Forward).
 # Omitted on purpose (no Noche counterpart, design section 3): the reference's invite item, plan label, Upgrade Plan..., Sign Out, Chat with Support,
 #   Video Tour, Status, Record Performance Issue..., the per-profile Window items (profiles arrive in M1.7), the installed-extensions list
-#   and the Recent Bookmarks entries (dynamic). Submenus of Move to Group, Move to Profile, Move to Window and Bookmarks Bar are dynamic: the items stand alone (Move to Group is a live submenu, listed as disabled in a window with no group: its groups, under a disabled PINNED header, are added when it opens).
+#   and the Recent Bookmarks entries (dynamic). Submenus of Move to Group, Move to Profile, Move to Window and Bookmarks Bar are dynamic: the items stand alone (Move to Group is a live submenu, listed as disabled in a window with no group: its groups, under a disabled PINNED header, are added when it opens; Move to Window is a live submenu, listed as enabled with an active tab: this window, the others and New Window are added when it opens; Merge All Windows is live and listed as disabled with one window).
 # Window items the system adds (Fill, Center, Move & Resize, Full Screen Tile, Move to display, the window list) carry no Noche mark and are skipped.
 bar|Noche|||1
 bar|File|||1
@@ -142,7 +142,7 @@ Tabs|---|||-
 Tabs|New Group with Tab|n|ctrl+cmd|1
 Tabs|Move to Group|||0
 Tabs|Move to Profile|||0
-Tabs|Move to Window|||0
+Tabs|Move to Window|||1
 Tabs|---|||-
 Tabs|Rename...|||1
 Tabs|Change Icon...|||1

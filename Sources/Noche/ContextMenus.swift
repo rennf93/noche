@@ -246,8 +246,7 @@ extension BrowserWindowController {
             + [.sep, rename, icon, editPinned, .sep, close]
     }
 
-    /// The group row's menu (live-ui.md section 3). Chat With, Move to Window and Move to Profile wait for their features (Move to Window for
-    /// Task 5b); the rest is live. The separators are a builder call: Pin | New Tab in Group, Chat With | Separate Tabs ... Copy All Links |
+    /// The group row's menu (live-ui.md section 3). Chat With and Move to Profile wait for their features; the rest is live. The separators are a builder call: Pin | New Tab in Group, Chat With | Separate Tabs ... Copy All Links |
     /// the swatches | Rename, Change Icon | Move to Bookmark Bar | Delete.
     func groupMenuEntries(for g: GroupID) -> [CtxEntry] {
         typealias E = CtxEntry
@@ -266,7 +265,7 @@ extension BrowserWindowController {
                 .later("Chat With \"\(grp.name)\"", "M2"), .sep,
                 E(title: "Separate Tabs") { [weak self] in if !BarHook.on("GRP_NOSEP") { self?.separateTabs(g) } },  // the hook: the menu item does nothing
                 E(title: "Duplicate") { [weak self] in self?.duplicateGroup(g) },
-                .later("Move to Window", "M1.6", submenu: true),
+                E(title: "Move to Window", run: {}, children: moveToWindowEntries(.group(g))),
                 .later("Move to Profile", "M1.7", submenu: true),
                 E(title: "Copy All Links", run: { [weak self] in self?.copyAllLinks(g) }, enabled: !kids.isEmpty),
                 .sep, E(title: "Colors", view: swatches), .sep, rename, icon, .sep,

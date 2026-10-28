@@ -78,7 +78,10 @@ extension BrowserWindowController {
         if !BarHook.on("RESTORE_FLAT") { applySavedStructure(r) }  // negative control: the tabs stay the day tabs they were added as
         restoring = false
         restore = nil
-        if r.isZoomed, !r.fullScreen { nsWindow?.zoom(nil) }
+        if r.isZoomed, !r.fullScreen, nsWindow?.isZoomed == false { nsWindow?.zoom(nil) }  // a window made at its zoomed frame is zoomed already: zoom toggles
+        let after = afterRestore
+        afterRestore = nil
+        after?()
     }
 
     /// The saved pins, groups, titles and order go back once every saved tab is in: the tabs were added one by one as day tabs. A saved tab
