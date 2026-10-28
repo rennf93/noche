@@ -83,15 +83,15 @@ extension SelfTest {
         guard let again = c.sidebar.groupRow(g), click(again) else { return finish(false, "could not click the collapsed group row") }
         guard await until(5, { !c.list.groups[0].isCollapsed && self.rowCount == rows }) else { return finish(false, "a second click left collapsed=\(c.list.groups[0].isCollapsed) and \(rowCount) rows, want open and \(rows)") }
         line("info", "step: Move to Group: C's menu lists Reading; the pick puts C at th")
-        guard let cm = await tabMenu(c, t[2]), let mg = item(cm.menu, "Move to Group"), mg.isEnabled, mg.submenu?.items.map(\.title) == ["Reading"], mg.submenu?.items.first?.state == .off else {
-            return finish(false, "C's Move to Group menu is \(String(describing: (await tabMenu(c, t[2]))?.menu.items.first { $0.title == "Move to Group" }?.submenu?.items.map(\.title))), want enabled with Reading")
+        guard let cm = await tabMenu(c, t[2]), let mg = item(cm.menu, "Move to Group"), mg.isEnabled, mg.submenu?.items.map(\.title) == ["PINNED", "Reading"], mg.submenu?.items.first?.isEnabled == false, mg.submenu?.items.last?.state == .off else {
+            return finish(false, "C's Move to Group menu is \(String(describing: (await tabMenu(c, t[2]))?.menu.items.first { $0.title == "Move to Group" }?.submenu?.items.map(\.title))), want enabled with a disabled PINNED header, then Reading")
         }
-        ContextMenus.dismiss(choosing: mg.submenu?.items.first)
+        ContextMenus.dismiss(choosing: mg.submenu?.items.last)
         guard await until(5, { self.entry(c, t[2])?.groupID == g }), c.list.items.filter({ $0.groupID == g }).map(\.id) == [t[1], t[2]], !c.list.groups[0].isCollapsed, c.list.dayOrder == [.tab(t[0]), .group(g)] else {
             return finish(false, "Move to Group left C in \(String(describing: entry(c, t[2])?.groupID)), the group holds \(c.list.items.filter { $0.groupID == g }.count), day list \(c.list.dayOrder)")
         }
         line("info", "step: B's menu shows its own group checked, and so does the Tabs m")
-        guard let bm = await tabMenu(c, t[1]), item(bm.menu, "Move to Group")?.submenu?.items.first?.state == .on else { return finish(false, "B's Move to Group does not check Reading") }
+        guard let bm = await tabMenu(c, t[1]), item(bm.menu, "Move to Group")?.submenu?.items.last?.state == .on else { return finish(false, "B's Move to Group does not check Reading") }
         ContextMenus.dismiss(choosing: nil)
         guard let bar = menuItem("Move to Group")?.submenu else { return finish(false, "no Tabs > Move to Group submenu") }
         bar.update()
@@ -134,6 +134,17 @@ extension SelfTest {
         guard await until(15, { win.tabs.count == 7 && c.list.groups.count == 2 }), let copy = c.list.groups.first(where: { $0.id != g })?.id else { return finish(false, "Duplicate left \(win.tabs.count) engine tabs and \(c.list.groups.count) groups, want 7 and 2") }
         guard await until(15, { c.list.items.filter { $0.groupID == copy }.map(\.url) == urls }) else { return finish(false, "the copy holds \(c.list.items.filter { $0.groupID == copy }.map(\.url)), want \(urls)") }
         guard c.group(withID: copy)?.name == "Reading", c.group(withID: copy)?.colorIndex == c.group(withID: g)?.colorIndex else { return finish(false, "the copy is \(String(describing: c.group(withID: copy)))") }
+        line("info", "step: Move to Group lists the pinned group first, in both menus.")
+        c.togglePin(group: copy)  // the later group pinned: B's group (first in the list) is checked after the header and the pinned copy
+        guard await until(5, { c.group(withID: copy)?.isPinned == true }), let om = await tabMenu(c, t[1]), let oi = item(om.menu, "Move to Group")?.submenu?.items else { return finish(false, "no Move to Group menu with a pinned copy") }
+        bar.update()
+        bar.delegate?.menuNeedsUpdate?(bar)
+        guard oi.map(\.title) == ["PINNED", "Reading", "Reading"], oi.map(\.state) == [.off, .off, .on], bar.items.map(\.title) == ["PINNED", "Reading", "Reading"], bar.items.map(\.state) == [.off, .off, .on] else {
+            return finish(false, "with the later group pinned the tab menu lists \(oi.map { "\($0.title) \($0.state == .on ? "on" : "off")" }) and Tabs > Move to Group \(bar.items.map { "\($0.title) \($0.state == .on ? "on" : "off")" }), want PINNED, the pinned copy, then B's own group checked")
+        }
+        ContextMenus.dismiss(choosing: nil)
+        c.togglePin(group: copy)
+        guard await until(5, { c.group(withID: copy)?.isPinned == false }) else { return finish(false, "the copy did not unpin") }
         line("info", "step: Duplicate on a pinned group: the copy is pinned too")
         c.togglePin(group: g)
         guard await until(5, { c.group(withID: g)?.isPinned == true }), let pdm = await groupMenu(c, g) else { return finish(false, "no pinned group to duplicate") }
@@ -331,7 +342,7 @@ extension SelfTest {
                 weakest = min(weakest, runnerUp - d[best])
             }
         }
-        finish(violations.isEmpty, "the 8 swatches in order (white, green, blue, purple, amber, pink, red, orange) set colorIndex 0 to 7, stored, and the icon and the outline of the open group draw in that color (read back from the pixels, each within \(Self.colorExact) of its reference with no white mixed in, every winner ahead of the runner-up by at least \(weakest), the least margin over the 8 swatches, want \(Self.colorMargin)) \(violations)")
+        finish(violations.isEmpty, "least margin \(weakest) (want \(Self.colorMargin)): the 8 swatches in order (white, green, blue, purple, amber, pink, red, orange) set colorIndex 0 to 7, stored, and the icon and the outline of the open group draw in that color (read back from the pixels, each within \(Self.colorExact) of its reference with no white mixed in, every winner ahead of the runner-up by at least the least margin over the 8 swatches) \(violations)")
     }
 
     // MARK: group-menus
@@ -360,7 +371,7 @@ extension SelfTest {
         guard await until(5, { c.sidebar.groupRow(g)?.renameField.isEditing == true }), let field = c.sidebar.groupRow(g)?.renameField else { return finish(false, "the name is not in edit") }
         typeName(field, "Reading")
         guard await until(5, { c.sidebar.groupRow(g)?.name == "Reading" }) else { return finish(false, "the row did not show Reading") }
-        guard let m2 = await tabMenu(c, t[0]), item(m2.menu, "Move to Group")?.isEnabled == true, item(m2.menu, "Move to Group")?.submenu?.items.map(\.title) == ["Reading"] else { return finish(false, "A's Move to Group does not list Reading") }
+        guard let m2 = await tabMenu(c, t[0]), item(m2.menu, "Move to Group")?.isEnabled == true, item(m2.menu, "Move to Group")?.submenu?.items.map(\.title) == ["PINNED", "Reading"], item(m2.menu, "Move to Group")?.submenu?.items.first?.isEnabled == false else { return finish(false, "A's Move to Group does not list a disabled PINNED header, then Reading") }
         let groupWant = ["Pin", "---", "New Tab in Group", "Chat With \"Reading\"", "---", "Separate Tabs", "Duplicate", "Move to Window", "Move to Profile", "Copy All Links",
                          "---", "Colors", "---", "Rename...", "Change Icon...", "---", "Move to Bookmark Bar", "Delete"]
         guard let gm = await groupMenu(c, g) else { return finish(false, "no group menu") }
@@ -495,6 +506,7 @@ extension SelfTest {
         guard await openTabs(2) else { return finish(false, "extra tabs never appeared") }
         let t = c.list.items.map(\.id)
         IconPicker.dismiss()
+        guard let before = c.sidebar.rows.first(where: { $0.tabID == t[1] })?.faviconView.image else { return finish(false, "tab B's row shows no image before any icon is picked") }  // its favicon, or the default
         for (label, icon) in [("an emoji", "📌"), ("a symbol", "star")] {
             line("info", "step: Change Icon on a tab, \(label).")
             guard let m = await tabMenu(c, t[1]) else { return finish(false, "no tab menu") }
@@ -509,6 +521,9 @@ extension SelfTest {
         choose(rm.menu, "Change Icon...")
         guard pickIcon(nil), await until(5, { self.entry(c, t[1])?.customIcon == nil && !(self.rowShows(c, t[1], "star")) }), stored(t[1])?.customIcon == nil else {
             return finish(false, "Remove Icon left customIcon \(String(describing: entry(c, t[1])?.customIcon)), stored \(String(describing: stored(t[1])?.customIcon)), row still the symbol \(rowShows(c, t[1], "star"))")
+        }
+        guard await until(5, { c.sidebar.rows.first(where: { $0.tabID == t[1] })?.faviconView.image === before }) else {
+            return finish(false, "after Remove Icon the row shows \(String(describing: c.sidebar.rows.first { $0.tabID == t[1] }?.faviconView.image)), want the page's favicon or the default icon it showed before (\(before))")
         }
         c.newGroupWithTab(t[0])
         guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, c.sidebar.groupRow(g).map({ $0.renameField.cancel(); return true }) == true else { return finish(false, "no group") }
@@ -526,7 +541,7 @@ extension SelfTest {
         guard pickIcon(nil), await until(5, { c.list.groups[0].icon == nil && c.sidebar.groupRow(g)?.icon == nil }), storedGroups().first?.icon == nil else {
             return finish(false, "Remove Icon left the group's icon \(String(describing: c.list.groups[0].icon)), row \(String(describing: c.sidebar.groupRow(g)?.icon)), stored \(String(describing: storedGroups().first?.icon))")
         }
-        finish(violations.isEmpty, "Change Icon... on a tab and on a group (menus, then a picked cell): an emoji and a symbol set customIcon or the group's icon (list, store and the row's image or glyph), Remove Icon clears them \(violations)")
+        finish(violations.isEmpty, "Change Icon... on a tab and on a group (menus, then a picked cell): an emoji and a symbol set customIcon or the group's icon (list, store and the row's image or glyph), Remove Icon clears them and the row shows the page's favicon (or the default icon) again \(violations)")
     }
 
     /// Two phases. Phase 1: a group is named, colored (pink), given an emoji and collapsed, and a tab gets a symbol icon. Phase 2, after a relaunch: the
@@ -589,6 +604,84 @@ extension SelfTest {
         scroll.reflectScrolledClipView(scroll.contentView)
         guard await until(5, { c.sidebar.groupRow(g.id)?.name == "Reading" && c.sidebar.groupRow(g.id)?.renameField.isEditing == false }) else { return finish(false, "back at the top the row shows \(String(describing: c.sidebar.groupRow(g.id)?.name))") }
         finish(violations.isEmpty, "a rename typed to Half and not committed is cancelled when the row scrolls out: the name stays Reading, the field is not left in edit, and the row is back as Reading \(violations)")
+    }
+
+    // MARK: rename-focus
+
+    /// The tab's row field, in edit with the first responder on it (not on the page): Rename... from the tab's menu.
+    func startTabRename(_ c: BrowserWindowController, _ id: TabID) async -> RenameField? {
+        guard let m = await tabMenu(c, id) else { return nil }
+        choose(m.menu, "Rename...")
+        guard let f = c.sidebar.rows.first(where: { $0.tabID == id })?.renameField, f.isEditing, let ns = c.nsWindow, ns.firstResponder === f.currentEditor(), !inPage() else { return nil }
+        return f
+    }
+
+    /// How a rename ends (rulings M89 and M90). Escape on a tab rename and on a group rename gives focus back to the page, as Return does; a click elsewhere (the
+    /// command bar's field takes first responder while the rename is open) commits and leaves focus on that control; a rename whose row scrolled out gives focus
+    /// back to the page; and Return on an untouched rename of a blank tab sets no custom title.
+    func renameFocus() async {
+        guard await ready(), let c = ctl, let win, let ns = c.nsWindow else { return }
+        guard await openTabs(2) else { return finish(false, "extra tabs never appeared") }
+        let t = c.list.items.map(\.id)
+        line("info", "step: Return on an untouched rename of a blank tab sets no custom title.")
+        _ = win.addTab(withURL: "about:blank", activate: false)
+        guard await until(10, { c.list.items.count == 3 }), let b = c.list.items.first(where: { !t.contains($0.id) }), b.url == "about:blank", b.customTitle == nil, TabList.displayTitle(for: b) == "New Tab" else {
+            return finish(false, "no blank third tab with no custom title: \(c.list.items.map { "\($0.url) \(String(describing: $0.customTitle))" })")
+        }
+        guard let fb = await startTabRename(c, b.id), fb.stringValue == "New Tab" else { return finish(false, "Rename... on the blank tab did not start an edit on \"New Tab\"") }
+        typeName(fb, fb.stringValue)  // Return, the field untouched
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !fb.isEditing, entry(c, b.id)?.customTitle == nil, stored(b.id)?.customTitle == nil else {
+            return finish(false, "Return on an untouched rename of the blank tab left customTitle \(String(describing: entry(c, b.id)?.customTitle)), stored \(String(describing: stored(b.id)?.customTitle)), want none")
+        }
+        line("info", "step: Escape on a tab rename returns focus to the page.")
+        guard let f1 = await startTabRename(c, t[1]) else { return finish(false, "Rename... on a tab did not give the field first responder (\(String(describing: ns.firstResponder)))") }
+        typeName(f1, "Nope", cancel: true)
+        guard await until(5, { self.inPage() }) else { return finish(false, "after Escape on a tab rename the first responder is \(String(describing: ns.firstResponder)), want the page") }
+        guard !f1.isEditing, entry(c, t[1])?.customTitle == nil else { return finish(false, "Escape left editing \(f1.isEditing) and customTitle \(String(describing: entry(c, t[1])?.customTitle))") }
+        line("info", "step: Escape on a group rename returns focus to the page.")
+        c.newGroupWithTab(t[1])
+        guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, await until(5, { c.sidebar.groupRow(g)?.renameField.isEditing == true }), let fg = c.sidebar.groupRow(g)?.renameField,
+              ns.firstResponder === fg.currentEditor(), !inPage() else { return finish(false, "the new group's name field does not hold first responder (\(String(describing: ns.firstResponder)))") }
+        typeName(fg, "Nope", cancel: true)
+        guard await until(5, { self.inPage() }) else { return finish(false, "after Escape on a group rename the first responder is \(String(describing: ns.firstResponder)), want the page") }
+        guard c.list.groups[0].name == "Untitled", !fg.isEditing else { return finish(false, "Escape left the group named \(c.list.groups[0].name), editing \(fg.isEditing)") }
+        line("info", "step: a click elsewhere commits and leaves focus on the control that was clicked (a plain field, then the address field).")
+        guard let host = win.chromeHost, let fp = await startTabRename(c, t[0]) else { return finish(false, "Rename... on tab A did not give the field first responder (\(String(describing: ns.firstResponder)))") }
+        let other = NSTextField(frame: NSRect(x: 300, y: 300, width: 200, height: 24))
+        host.addSubview(other)
+        defer { other.removeFromSuperview() }
+        fp.stringValue = "Plain"  // typed, not committed
+        guard ns.makeFirstResponder(other) else { return finish(false, "a plain field refused first responder") }
+        try? await Task.sleep(for: .milliseconds(500))  // a focus hand-back to the page would come in a turn of its own
+        guard ns.firstResponder === other.currentEditor(), !inPage(), !fp.isEditing, entry(c, t[0])?.customTitle == "Plain" else {
+            return finish(false, "after a click on a plain field the first responder is \(String(describing: ns.firstResponder)) (want that field's editor), the rename is editing \(fp.isEditing) with customTitle \(String(describing: entry(c, t[0])?.customTitle)) (want Plain)")
+        }
+        other.removeFromSuperview()
+        guard let f2 = await startTabRename(c, t[0]) else { return finish(false, "Rename... on tab A did not give the field first responder (\(String(describing: ns.firstResponder)))") }
+        f2.stringValue = "Clicked"  // typed, not committed
+        cmdL()  // the address field takes first responder: what a click on it does
+        guard await until(5, { self.barOpen() && self.barEditor != nil && ns.firstResponder === self.barEditor }) else { return finish(false, "Cmd+L did not give the command bar's field first responder (\(String(describing: ns.firstResponder)))") }
+        try? await Task.sleep(for: .milliseconds(500))  // a focus hand-back to the page would come in a turn of its own
+        guard ns.firstResponder === barEditor, barOpen(), !inPage(), !f2.isEditing, entry(c, t[0])?.customTitle == "Clicked" else {
+            return finish(false, "after the click the first responder is \(String(describing: ns.firstResponder)) (want the address field's editor), the rename is editing \(f2.isEditing) with customTitle \(String(describing: entry(c, t[0])?.customTitle)) (want Clicked)")
+        }
+        closeBarNow()  // the bar's close hands focus back to the page, in a turn of the engine's own
+        guard await until(5, { self.inPage() }) else { return finish(false, "closing the command bar did not give focus back to the page (\(String(describing: ns.firstResponder)))") }
+        try? await Task.sleep(for: .milliseconds(500))
+        line("info", "step: a rename whose row scrolled out gives focus back to the page.")
+        var items = (0..<60).map { TabItem(id: TabID(), engineID: $0, url: "https://site\($0).example/", title: "Tab \($0)", isLoading: false) }
+        let sg = TabGroup(id: GroupID(), name: "Reading", colorIndex: 0, icon: nil, isCollapsed: false, isPinned: false)
+        for i in 0..<2 { items[i].groupID = sg.id }
+        guard let seeded = TabList(items: items, groups: [sg], topOrder: [], dayOrder: [.group(sg.id)] + items[2...].map { .tab($0.id) }, activeID: items[59].id) else { return finish(false, "no seeded list") }
+        c.testSeed(seeded)
+        c.beginRename(group: sg.id)
+        guard let fs = c.sidebar.groupRow(sg.id)?.renameField, fs.isEditing, ns.firstResponder === fs.currentEditor() else { return finish(false, "the seeded group's name field does not hold first responder (\(String(describing: ns.firstResponder)))") }
+        let scroll = c.sidebar.scroll
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, c.sidebar.document.frame.height - scroll.bounds.height)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        guard !fs.isEditing, await until(5, { self.inPage() }) else { return finish(false, "after the row scrolled out the field editing is \(fs.isEditing) and the first responder is \(String(describing: ns.firstResponder)), want the page") }
+        finish(violations.isEmpty, "Return on an untouched rename of a blank tab sets no custom title (list and store); Escape on a tab rename and on a group rename, and a rename whose row scrolled out, give focus back to the page; a click elsewhere (the command bar's field) commits the rename and leaves focus on that field \(violations)")
     }
 }
 #endif

@@ -94,19 +94,25 @@ extension BrowserWindowController {
             if var t = live[id] {
                 if let s = r.items[id] {
                     t.isPinned = s.isPinned; t.inGrid = s.inGrid; t.pinnedURL = s.pinnedURL
-                    t.groupID = s.groupID; t.customTitle = BarHook.on("RENAME_NORESTORE") ? nil : s.customTitle; t.customIcon = BarHook.on("GRP_NORESTORE") ? nil : s.customIcon  // the hooks: the restore drops the saved titles, or the icons
+                    t.groupID = s.groupID; t.customTitle = BarHook.on("RENAME_NORESTORE") ? nil : s.customTitle; t.customIcon = BarHook.on("GRP_NORESTORETABICON") ? nil : s.customIcon  // the hooks: the restore drops the saved titles, or a tab's icon
                 }
                 items.append(t)
             } else if var s = r.items[id] {
                 if BarHook.on("RENAME_NORESTORE") { s.customTitle = nil }
-                if BarHook.on("GRP_NORESTORE") { s.customIcon = nil }
+                if BarHook.on("GRP_NORESTORETABICON") { s.customIcon = nil }
                 s.engineID = nil; s.isLoading = false
                 items.append(s)
             }
         }
         let placed = Set(saved)
         items += list.items.filter { !placed.contains($0.id) }  // tabs the engine added on its own
-        let savedGroups = BarHook.on("GRP_NORESTORE") ? r.groups.map { var g = $0; g.icon = nil; g.colorIndex = 0; return g } : r.groups  // the hook: icons and colors are not restored
+        let savedGroups = r.groups.map { saved -> TabGroup in  // the hooks: a group's color, its icon or its collapsed state is not restored (one each)
+            var g = saved
+            if BarHook.on("GRP_NORESTORECOLOR") { g.colorIndex = 0 }
+            if BarHook.on("GRP_NORESTOREICON") { g.icon = nil }
+            if BarHook.on("GRP_NORESTORECOLLAPSE") { g.isCollapsed = false }
+            return g
+        }
         let rebuilt = TabList.restored(items: items, groups: savedGroups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID, current: list)
         if !rebuilt.intact { FileHandle.standardError.write(Data("NOCHE restore: the saved structure was refused; kept every saved tab, groups and order may be lost\n".utf8)) }
         list = rebuilt.list

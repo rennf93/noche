@@ -258,6 +258,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.onGroupMenu = { [weak self] g, p in self?.showGroupMenu(group: g, at: p) }
         sidebar.onRenameTab = { [weak self] id, text in self?.renameTab(id, to: text) }
         sidebar.onRenameGroup = { [weak self] g, text in self?.renameGroup(g, to: text) }
+        sidebar.onReturnFocus = { [weak self] free in self?.returnFocus(afterRename: free) }
         sidebar.groupColor = { [weak self] g in self?.group(withID: g)?.colorIndex ?? 0 }
         sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
         toolbar.toggle.onClick = { [weak self] in self?.toggleSidebar() }

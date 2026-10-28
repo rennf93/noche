@@ -1,10 +1,14 @@
 import AppKit
 
 /// The inline name field of a row being renamed (a tab or a group): Return and a click elsewhere commit, Escape cancels. The row that owns
-/// it sets |onCommit| and |onCancel| and calls |begin|; it ends on its own, once, whichever way it ends.
+/// it sets |onCommit| and |onCancel| and calls |begin|; it ends on its own, once, whichever way it ends. Focus goes back to the page when
+/// it ended on a key (Return, Escape) or the row scrolled out while the field had it, never when a click moved it to another control.
 final class RenameField: NSTextField, NSTextFieldDelegate {
+    private static let escStays = BarHook.on("RENAME_ESCNOFOCUS"), recycleStays = BarHook.on("RENAME_RECYCLENOFOCUS")  // negative controls: Escape, or a scroll cancel, leaves focus nowhere
     var onCommit: ((String) -> Void)?
     var onCancel: (() -> Void)?
+    /// Gives focus back to the page; |onlyIfFree|: only when no other control has taken it by the time the click that ended the edit is handled.
+    var returnFocus: ((_ onlyIfFree: Bool) -> Void)?
     private(set) var isEditing = false
 
     init() {
@@ -30,19 +34,23 @@ final class RenameField: NSTextField, NSTextFieldDelegate {
         currentEditor()?.selectAll(nil)
     }
 
-    func commit() {
+    /// |clicked|: the edit ended because focus moved (a click elsewhere), not on a key.
+    func commit(clicked: Bool = false) {
         guard isEditing else { return }
         isEditing = false
         let text = stringValue
         removeFromSuperview()
         onCommit?(text)
+        returnFocus?(clicked)
     }
 
-    func cancel() {
+    func cancel(recycled: Bool = false) {
         guard isEditing else { return }
         isEditing = false
+        let hadFocus = currentEditor().map { window?.firstResponder === $0 } ?? false
         removeFromSuperview()
         onCancel?()
+        if hadFocus, !(recycled ? Self.recycleStays : Self.escStays) { returnFocus?(false) }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -53,7 +61,7 @@ final class RenameField: NSTextField, NSTextFieldDelegate {
         }
     }
 
-    func controlTextDidEndEditing(_ notification: Notification) { commit() }
+    func controlTextDidEndEditing(_ notification: Notification) { commit(clicked: true) }
 }
 
 /// A pinned tile has no title on screen to edit in place: its rename is a small popover holding the same field.
@@ -64,8 +72,9 @@ enum RenamePopover {
     static var pending: RenameField?
 #endif
 
-    static func present(from anchor: NSView, text: String, commit: @escaping (String) -> Void) {
+    static func present(from anchor: NSView, text: String, returnFocus: @escaping (Bool) -> Void, commit: @escaping (String) -> Void) {
         let field = RenameField()
+        field.returnFocus = returnFocus
         let box = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 34))
         field.onCommit = commit
 #if NOCHE_TESTHOOKS

@@ -231,9 +231,10 @@ extension BrowserWindowController {
             : .later("Edit Pinned Page", "M1.6", submenu: true)
         // New Group with Tab and Move to Group (the groups of this window, the tab's own checked).
         let newGroup = E(title: "New Group with Tab", id: "tabs.newGroupWithTabs") { [weak self] in self?.newGroupWithTab(id) }
-        let groups = list.groups
-        let moveTo = E(title: "Move to Group", run: {}, enabled: !groups.isEmpty, children: groups.map { g in
-            E(title: g.name, run: { [weak self] in self?.moveToGroup(id, g.id) }, checked: t.groupID == g.id)
+        let choices = moveToGroupChoices().filter { $0 != nil || !BarHook.on("GRP_CTXNOHDR") }  // the hook: this menu lacks the header
+        let moveTo = E(title: "Move to Group", run: {}, enabled: !list.groups.isEmpty, children: choices.map { choice in
+            guard let g = choice else { return E(title: "PINNED", run: {}, enabled: false) }
+            return E(title: g.name, run: { [weak self] in self?.moveToGroup(id, g.id) }, checked: t.groupID == g.id)
         })
         var middle: [E] = [duplicate, newGroup, moveTo, .later("Move to Profile", "M1.7", submenu: true), .sep, copyLink]
 #if NOCHE_TESTHOOKS

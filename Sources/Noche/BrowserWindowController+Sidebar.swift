@@ -26,6 +26,7 @@ extension BrowserWindowController {
     /// A custom icon (Change Icon...) shows in place of the favicon.
     private func icon(of t: TabItem) -> NSImage? {
         if let c = t.customIcon, let image = IconRender.cached(c) { return image }
+        if t.id == Self.staleIcon, let image = IconRender.cached("📌") { return image }
         return engineTab(t)?.favicon ?? dormantIcons[t.id]
     }
 

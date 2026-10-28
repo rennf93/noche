@@ -155,7 +155,7 @@ extension SelfTest {
             if ctl.sidebar.realizedCount > 40 { bad.append("groups scenario at the \(name): \(ctl.sidebar.realizedCount) views, want at most 40") }
         }
         if rename.isEditing { bad.append("groups scenario: the rename of group 10 is still in edit after its row scrolled away") }
-        finish(bad.isEmpty && violations.isEmpty, "500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll; with the capture's 12 pins above 500 day tabs at most \(rowsMost) row views and \(viewsMost) views in all (tiles extra); with 500 tabs in 20 open groups and a rename active at most \(groupsMost) views and a refresh p95 of \(String(format: "%.2f", gP95)) ms, the rename cancelled by the scroll \(bad) \(violations)")
+        finish(bad.isEmpty && violations.isEmpty, "groups refresh p95 \(String(format: "%.2f", gP95)) ms (want under 4): 500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll; with the capture's 12 pins above 500 day tabs at most \(rowsMost) row views and \(viewsMost) views in all (tiles extra); with 500 tabs in 20 open groups and a rename active at most \(groupsMost) views and a refresh p95 of \(String(format: "%.2f", gP95)) ms, the rename cancelled by the scroll \(bad) \(violations)")
     }
 
     /// T2.5 `min-width`: the window's minimum content width is the sidebar (197) plus a card of 284 (the find pill's 260 floor and its two

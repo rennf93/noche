@@ -79,6 +79,7 @@ final class SidebarView: DragView {
     var onRenameGroup: ((GroupID, String) -> Void)?
     var groupColor: (GroupID) -> Int = { _ in 0 }   // a group's colorIndex, for its outline
     var onEmptyMenu: ((NSPoint) -> Void)?
+    var onReturnFocus: ((Bool) -> Void)?            // a rename ended: focus goes back to the page (true: unless a click moved it)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -218,7 +219,7 @@ final class SidebarView: DragView {
         for (key, view) in realized where !keys.contains(key) {
             realized[key] = nil
             // A rename in progress on a row that scrolls out is cancelled (the old name stays), not committed by the view leaving the window.
-            if !Self.recycleCommits { (view as? GroupRowView)?.renameField.cancel(); (view as? TabRowView)?.renameField.cancel() }
+            if !Self.recycleCommits { (view as? GroupRowView)?.renameField.cancel(recycled: true); (view as? TabRowView)?.renameField.cancel(recycled: true) }
             view.removeFromSuperview()
             switch view {
             case let v as TabRowView: spareTabs.append(v)
@@ -255,6 +256,7 @@ final class SidebarView: DragView {
             v.onClick = { [weak self, weak v] in if let g = v?.groupID { self?.onToggleGroup?(g) } }
             v.onContextMenu = { [weak self, weak v] p in if let g = v?.groupID { self?.onGroupMenu?(g, p) } }
             v.onRename = { [weak self, weak v] text in if let g = v?.groupID { self?.onRenameGroup?(g, text) } }
+            v.renameField.returnFocus = { [weak self] free in self?.onReturnFocus?(free) }
             view = v
         default:
             let v = spareTabs.popLast() ?? TabRowView(frame: .zero)
@@ -264,6 +266,7 @@ final class SidebarView: DragView {
             v.onContextMenu = { [weak self, weak v] p in if let id = v?.tabID { self?.onTabMenu?(id, p) } }
             v.onReset = { [weak self, weak v] in if let id = v?.tabID { self?.onReset?(id) } }
             v.onRename = { [weak self, weak v] text in if let id = v?.tabID { self?.onRenameTab?(id, text) } }
+            v.renameField.returnFocus = { [weak self] free in self?.onReturnFocus?(free) }
             view = v
         }
         document.addSubview(view)

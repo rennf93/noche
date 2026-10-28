@@ -167,6 +167,7 @@ final class SelfTest {
             case "group-restore-relaunch": await groupRestore()
             case "group-rename-scroll": await groupRenameScroll()
             case "rename-tab": await renameTab()
+            case "rename-focus": await renameFocus()
             case "pin-toggle": await pinToggle()
             case "pin-dormant": await pinDormant()
             case "pin-reset": await pinReset()

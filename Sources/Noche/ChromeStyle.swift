@@ -86,8 +86,9 @@ enum ChromeStyle {
     static let groupFill = NSColor.white.withAlphaComponent(0.05)                // P: TabGroupNeutralBackground at 50%
     /// The expanded group's outline in its color: white (index 0) keeps the neutral outline, the others take their swatch at |groupTintAlpha|.
     static let groupTintAlpha: CGFloat = 0.55                                    // P
-    static func groupOutline(colorIndex i: Int) -> NSColor {
-        i <= 0 ? groupOutline : groupColors[min(i, groupColors.count - 1)].withAlphaComponent(groupTintAlpha)
+    static func groupOutline(colorIndex index: Int) -> NSColor {
+        let i = BarHook.on("GRP_SWAPOUT47") && (index == 4 || index == 7) ? 11 - index : index  // negative control: the outline alone trades amber and orange
+        return i <= 0 ? groupOutline : groupColors[min(i, groupColors.count - 1)].withAlphaComponent(groupTintAlpha)
     }
     static let swatchSize: CGFloat = 18, swatchPitch: CGFloat = 24               // M: ~18 px circles, pitch 24
     static let swatchRing = NSColor.white                                        // M: the selected swatch has a white ring

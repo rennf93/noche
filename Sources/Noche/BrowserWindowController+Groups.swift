@@ -10,6 +10,7 @@ extension BrowserWindowController {
     func members(of g: GroupID) -> [TabItem] { list.items.filter { $0.groupID == g } }
     /// The group the active tab is in (File > New Tab in Group needs one).
     var activeGroup: GroupID? { list.activeID.flatMap { item(withID: $0)?.groupID } }
+    static var staleIcon: TabID?
     private static let pageTitleWins = BarHook.on("RENAME_PAGEWINS")  // negative control: the page's title shows over a custom one
 
     // MARK: making groups
@@ -159,7 +160,7 @@ extension BrowserWindowController {
         if let g = t.groupID, group(withID: g)?.isCollapsed == true { list.collapse(g, false); refreshNow() }
         if sidebar.beginRename(tab: id) { return }
         guard let anchor = sidebar.anchor(tab: id) else { return }
-        RenamePopover.present(from: anchor, text: TabList.displayTitle(for: t)) { [weak self] text in self?.renameTab(id, to: text) }
+        RenamePopover.present(from: anchor, text: TabList.displayTitle(for: t), returnFocus: { [weak self] free in self?.returnFocus(afterRename: free) }) { [weak self] text in self?.renameTab(id, to: text) }
     }
 
     func beginRename(group g: GroupID) {
@@ -175,11 +176,20 @@ extension BrowserWindowController {
         let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The page's own title is not a custom one: typing it (over a custom title) goes back to following the page. The hook compares with the shown title.
         let page = BarHook.on("RENAME_SHOWNCMP") ? TabList.displayTitle(for: t) : t.title
-        if name == TabList.displayTitle(for: t), name != page || t.customTitle == nil { return window.focusActiveContent() }
+        if name == TabList.displayTitle(for: t), name != page || t.customTitle == nil, !BarHook.on("RENAME_NOEARLY") { return }  // the hook: an untouched field is a rename
         list.setCustomization(id, title: name == page ? "" : name, icon: t.customIcon)
         refresh()
         changed()
-        window.focusActiveContent()
+    }
+
+    /// The inline field ended: the page gets focus back (Return, Escape, a row scrolled away). A click elsewhere has moved focus on its own: AppKit
+    /// sets the new first responder after the field's end notification, so the next turn tells a click on a control (it keeps focus) from a click on nothing.
+    func returnFocus(afterRename onlyIfFree: Bool) {
+        guard onlyIfFree else { return window.focusActiveContent() }
+        DispatchQueue.main.async { [weak self] in  // the hook RENAME_CLICKSTEALS: the page takes focus whatever the click chose
+            guard let self, let ns = nsWindow, BarHook.on("RENAME_CLICKSTEALS") || ns.firstResponder == nil || ns.firstResponder === ns else { return }
+            window.focusActiveContent()
+        }
     }
 
     func renameGroup(_ g: GroupID, to text: String) {
@@ -188,7 +198,6 @@ extension BrowserWindowController {
         if !name.isEmpty { list.renameGroup(g, name) }  // an empty name keeps the old one
         refresh()
         changed()
-        window.focusActiveContent()
     }
 
     /// Change Icon... on a tab: the picked icon shows in place of its favicon; Remove Icon brings the favicon back.
@@ -197,6 +206,7 @@ extension BrowserWindowController {
         guard let anchor = sidebar.anchor(tab: id) else { return }
         IconPicker.present(from: anchor) { [weak self] icon in
             guard let self, let t = self.item(withID: id), !BarHook.on("GRP_NOICONSET") else { return }  // the hook: the pick is never written
+            if icon == nil, BarHook.on("GRP_STALEICON") { Self.staleIcon = id }  // the hook: Remove Icon leaves the row on another glyph, not the favicon
             self.list.setCustomization(id, title: t.customTitle, icon: icon)
             self.refresh()
             self.changed()
@@ -217,6 +227,16 @@ extension BrowserWindowController {
     func shownTitle(_ t: TabItem) -> String { Self.pageTitleWins && !t.title.isEmpty ? t.title : TabList.displayTitle(for: t) }
 }
 
+extension BrowserWindowController {
+    /// What both Move to Group menus list, in order: a disabled PINNED header (nil), the pinned groups, then the others (spec section 2). Nothing without a group.
+    func moveToGroupChoices() -> [TabGroup?] {
+        guard !list.groups.isEmpty else { return [] }
+        let ordered = BarHook.on("GRP_MTGLISTORDER") ? list.groups : list.groups.filter(\.isPinned) + list.groups.filter { !$0.isPinned }  // the hook: the list's order
+        let header: [TabGroup?] = BarHook.on("GRP_NOPINNEDHDR") ? [] : [nil]
+        return header + ordered.map { Optional($0) }
+    }
+}
+
 /// Tabs > Move to Group lists the active window's groups each time it opens (rows without the table's mark: they are not part of the table).
 @MainActor
 final class MoveToGroupMenuDelegate: NSObject, NSMenuDelegate {
@@ -229,13 +249,14 @@ final class MoveToGroupMenuDelegate: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         guard let c = app.active, let id = c.list.activeID else { return }
         let current = c.item(withID: id)?.groupID
-        // The spec's PINNED header (disabled), then the pinned groups, then the others.
-        if !BarHook.on("GRP_NOPINNEDHDR") {
-            let header = NSMenuItem(title: "PINNED", action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            menu.addItem(header)
-        }
-        for g in c.list.groups.filter(\.isPinned) + c.list.groups.filter({ !$0.isPinned }) {
+        for choice in c.moveToGroupChoices() {
+            guard let g = choice else {
+                if BarHook.on("GRP_BARNOHDR") { continue }  // the hook: only this menu lacks the header
+                let header = NSMenuItem(title: "PINNED", action: nil, keyEquivalent: "")
+                header.isEnabled = false
+                menu.addItem(header)
+                continue
+            }
             let i = NSMenuItem(title: g.name, action: #selector(ContextMenus.Target.fire(_:)), keyEquivalent: "")
             i.target = ContextMenus.target
             i.state = g.id == current ? .on : .off
