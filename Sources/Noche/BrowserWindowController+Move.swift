@@ -68,21 +68,24 @@ extension BrowserWindowController {
         if let target {
             target.receive(d)
             changed()
-            app.writer?.saveNow([target.id] + (giving ? [] : [id]))  // the destination first: the rows re-home to it before this window drops what it gave up
+            app.writer?.saveNow(BarHook.on("MOVE_SRCFIRST") ? [id, target.id] : [target.id] + (giving ? [] : [id]))  // the destination first: the rows re-home to it before this window drops what it gave up (the hook: the source first)
             if BarHook.on("MOVE_ASCLOSE") { for l in d.loaded { d.items.first { $0.id == l.id }.map { app.writer?.closed(tab: $0, window: id, index: 0) } } }  // negative control: a moved tab is a closed one
-            if giving { giveUp() }
+            if giving, !BarHook.on("MOVE_NOGIVEUP") { giveUp() }  // the hook: the window that gave everything up stays open
             app.bringForward(target)
         } else {
             let frame = app.cascadedFrame(from: nsWindow?.frame)
             let new = app.newWindow(for: d, frame: frame)
-            app.writer?.holds[id] = new.id
-            // The new window saves once its restore ended; the window that gave the items up follows it (or closes, which drops its rows), so the
-            // store never holds them in neither: the rows are keyed by id and a save of the new window re-homes them first.
+            // This window waits for every new window it gave to (a set: a second move must not drop the first's wait). Each saves once its restore
+            // ended; the last one frees this window to save (or close, which drops its rows, also when it closed meanwhile), so the store never holds
+            // the items in neither window: the rows are keyed by id and a save of the new window re-homes them first.
+            let app = self.app, source = id
+            if !BarHook.on("MOVE_NOHOLD") { app.writer?.hold(source, until: new.id) }  // the hook: never held
             new.afterRestore = { [weak self, weak new] in
-                guard let self, let new else { return }
-                self.app.writer?.saveNow([new.id])
-                if self.windowClosing { return }
-                if giving { self.giveUp() } else { self.app.writer?.saveNow([self.id]) }
+                guard let w = app.writer, let new else { return }
+                w.saveNow([new.id])
+                guard w.release(source, after: new.id) else { return }
+                guard let self, !self.windowClosing else { return }
+                if giving { if !BarHook.on("MOVE_NOGIVEUP") { self.giveUp() } } else { w.saveNow([source]) }
             }
             changed()
         }
@@ -108,7 +111,7 @@ extension BrowserWindowController {
             var copy = t
             copy.engineID = nil; copy.isLoading = false
             if let e = engine.first(where: { $0.item.id == t.id }) {
-                d.loaded.append((t.id, t.url.isEmpty ? "about:blank" : t.url))
+                if !t.isDiscarded || BarHook.on("MOVE_WAKEDISC") { d.loaded.append((t.id, t.url.isEmpty ? "about:blank" : t.url)) }  // a discarded tab moves dormant (its engine tab still closes here); the hook loads it
                 if let icon = e.tab.faviconURL { d.favicons[t.id] = icon }
                 if let image = e.tab.favicon { d.images[t.id] = image }
             } else {
@@ -120,7 +123,7 @@ extension BrowserWindowController {
             if group == nil { d.pieces.append(.tab(copy)) }
         }
         if let group { d.pieces.append(.group(group, gone.map { var c = $0; c.engineID = nil; c.isLoading = false; return c })) }
-        d.active = d.loaded.contains { $0.id == wasActive } ? wasActive : d.loaded.first?.id
+        d.active = d.loaded.contains { $0.id == wasActive } ? wasActive : (BarHook.on("MOVE_GROUPACTIVE") ? d.loaded.last : d.loaded.first)?.id  // the hook: the last loaded tab of a group takes over
         if !list.items.isEmpty, gone.contains(where: { $0.id == wasActive }) {
             closeNext.removeAll()
             if let s = successor, let next = item(withID: s).flatMap(engineTab) {
@@ -149,7 +152,9 @@ extension BrowserWindowController {
         for piece in d.pieces {
             switch piece {
             case .tab(let t): list.insertNew(t, opener: nil, addToTop: false, activate: false)
-            case .group(let g, let kids): list.adopt(group: g, items: kids)
+            case .group(var g, let kids):
+                if BarHook.on("MOVE_NOCOLLAPSE") { g.isCollapsed = false }  // negative control: a moved group opens
+                list.adopt(group: g, items: kids)
             }
         }
         for t in d.items {
@@ -224,7 +229,7 @@ extension AppDelegate {
     }
 
     /// The windows of the front window's profile (a merge needs two).
-    func canMerge(_ w: BrowserWindowController) -> Bool { controllers.filter { w.sameProfile($0) && !$0.windowClosing }.count >= 2 }
+    func canMerge(_ w: BrowserWindowController) -> Bool { controllers.filter { w.sameProfile($0) && !$0.windowClosing && (!$0.restoring || BarHook.on("MERGE_COUNTRESTORING")) }.count >= 2 }  // a restoring window is not merged: Merge would do nothing
 
     /// The profiles the New Window submenu lists: the store's, the window's own marked. Without a store (it failed to open) the default one.
     var profileChoices: [(name: String, own: Bool)] {

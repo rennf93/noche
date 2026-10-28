@@ -22,7 +22,12 @@ extension BrowserWindowController {
     }
 
     func changed(geometry: Bool = false) {
-        if geometry, let f = nsWindow?.frame, !(nsWindow?.styleMask.contains(.fullScreen) ?? false) { lastFrame = f }
+        if let ns = nsWindow, !ns.styleMask.contains(.fullScreen) {
+            // A frame that stood for 0.3 s and was then replaced is a frame the window was left at: the frames of a zoom's animation never are, so
+            // the frame from before a zoom is what `lastFrame` keeps (a revived window zooms again from it).
+            let now = ProcessInfo.processInfo.systemUptime, f = ns.frame
+            if let seen = frameSeen, seen.frame != f { if now - seen.since >= 0.3 { lastFrame = seen.frame }; frameSeen = (f, now) } else if frameSeen == nil { frameSeen = (f, now) }
+        }
         if geometry, let ns = nsWindow { lastFullScreen = ns.styleMask.contains(.fullScreen); lastZoomed = ns.isZoomed }
         if !restoring { app.writer?.markDirty(window: id, geometry: geometry) }
     }

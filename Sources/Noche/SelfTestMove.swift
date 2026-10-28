@@ -100,7 +100,16 @@ extension SelfTest {
             return finish(false, "the tile in B is \(String(describing: entry(b, p))), want pinned in the grid (first) with its pinned page \(String(describing: pinnedURL))")
         }
         let bTabs = b.window.tabs.count
+        // The save order (M98 item 6): the store is read after each of the move's two saves; the tab is in a window both times.
+        writer.saveNow([a.id, b.id])
+        guard storedWindows().first(where: { $0.id == a.id })?.tabs.contains(where: { $0.id == d }) == true else { return finish(false, "the store does not hold D in A before the move") }
+        let saves = Saves()
+        writer.savedHook = { id in saves.list.append((id, self.storedWindows().first { $0.tabs.contains { $0.id == d } }?.id)) }
         a.move(.tab(d), to: b)
+        writer.savedHook = nil
+        guard saves.list.map(\.0) == [b.id, a.id], saves.list.map(\.1) == [b.id, b.id] else {
+            return finish(false, "the move saved \(saves.list.map { $0.0 == a.id ? "A" : $0.0 == b.id ? "B" : "?" }) and the store held D in \(saves.list.map { $0.1 == a.id ? "A" : $0.1 == b.id ? "B" : "no window" }) after each save, want B then A with D in B both times (never in no window)")
+        }
         guard await until(10, { self.entry(b, d) != nil && self.entry(a, d) == nil }), entry(b, d)?.engineID == nil, entry(b, d)?.customTitle == "m-dormant", entry(b, d)?.isPinned == false, b.list.dayOrder.last == .tab(d) else {
             return finish(false, "the dormant tab in B is \(String(describing: entry(b, d))), want a dormant day tab at the end")
         }
@@ -171,8 +180,149 @@ extension SelfTest {
             let s = storedWindows()
             return finish(false, "the store after the debounce: \(s.map { "\($0.id == b.id ? "B" : $0.id == c.id ? "C" : $0.id == e.id ? "E" : "?"):\($0.tabs.compactMap(\.customTitle).sorted()) groups \($0.groups.map(\.name))" })")
         }
-        finish(violations.isEmpty, "Tabs > Move to Window and the group menu list this window (checked, off), the others by title and New Window per profile (only the own one live); a loaded tab, a tile, a dormant tab (loads nothing), a tab out of a group (loose), a group with its tabs and a tab to a new window arrive with their ids, titles and state, B in front; a window left with a pin gets a blank tab, A's last tab closes it; nothing is a closed tab; the store holds each item once after the debounce \(violations)")
+        guard await discardedMoves(b) else { return }
+        guard await groupToNewWindow() else { return }
+        guard await heldSourceSteps() else { return }
+        finish(violations.isEmpty, "Tabs > Move to Window and the group menu list this window (checked, off), the others by title and New Window per profile (only the own one live); a loaded tab, a tile, a dormant tab (loads nothing), a tab out of a group (loose), a group with its tabs and a tab to a new window arrive with their ids, titles and state, B in front; a window left with a pin gets a blank tab, A's last tab closes it; nothing is a closed tab; the store holds each item once after the debounce; a discarded tab moves dormant, a group goes to a new window, and a window that gave to new windows is never saved or dropped before each of them has saved (another tab closing, its own close, two moves) \(violations)")
     }
+
+    final class Saves { var list: [(UUID, UUID?)] = [] }
+
+    /// A window of |n| loaded tabs titled "<tag><i>" (its first active), the store knowing it.
+    func source(_ tag: String, _ n: Int) async -> (BrowserWindowController, [TabID])? {
+        guard let w = await openWindow("b.html") else { return nil }
+        for _ in 1..<n { guard let _ = w.window.addTab(withURL: fixture("b.html"), activate: false) else { return nil } }
+        guard await until(20, { w.list.items.count == n && w.window.tabs.count == n && w.list.items.allSatisfy { !$0.title.isEmpty } }) else { return nil }
+        let ids = w.list.items.map(\.id)
+        for (i, id) in ids.enumerated() { w.renameTab(id, to: "\(tag)\(i)") }
+        return (w, ids)
+    }
+
+    func pairGroup(_ w: BrowserWindowController, _ a: TabID, _ b: TabID, _ name: String) -> GroupID? {
+        guard let g = w.list.createGroup(with: a, name: name) else { return nil }
+        w.list.setGroup(b, g); w.refresh(); w.changed()
+        return g
+    }
+
+    func liveInStore(_ ids: [TabID]) -> Bool {
+        let all = Set(storedWindows().flatMap { $0.tabs.map(\.id) })
+        return ids.allSatisfy { all.contains($0) }
+    }
+
+    func closeWindows(_ ws: [BrowserWindowController]) async {
+        for w in ws where app.controllers.contains(where: { $0 === w }) { w.close() }
+        _ = await until(15, { ws.allSatisfy { w in !self.app.controllers.contains { $0 === w } } })
+    }
+
+    /// Task 5b fix 1 (I1): a discarded tab, loose or inside a group, moves as a dormant item and loads nothing; its engine tab still closes in the source.
+    func discardedMoves(_ b: BrowserWindowController) async -> Bool {
+        line("info", "step: discarded tabs")
+        guard let (s, t) = await source("d-", 4), let g = pairGroup(s, t[2], t[3], "d-group") else { finish(false, "no source for the discarded tabs"); return false }
+        guard await discardNow(s, t[1]), await discardNow(s, t[3]) else { finish(false, "the engine did not discard the tabs"); return false }
+        let bTabs = b.window.tabs.count
+        s.move(.tab(t[1]), to: b)
+        guard await until(10, { self.entry(b, t[1]) != nil && self.entry(s, t[1]) == nil }), entry(b, t[1])?.engineID == nil, entry(b, t[1])?.isDiscarded == false, entry(b, t[1])?.customTitle == "d-1" else {
+            finish(false, "the discarded tab in B is \(String(describing: entry(b, t[1]))), want a dormant item"); return false
+        }
+        s.move(.group(g), to: b)
+        guard await until(15, { self.entry(b, t[2])?.engineID != nil && self.entry(b, t[3]) != nil && self.entry(s, t[3]) == nil }), entry(b, t[3])?.engineID == nil, b.group(withID: g) != nil else {
+            finish(false, "the group with a discarded child in B: loaded child \(String(describing: entry(b, t[2])?.engineID)), discarded child \(String(describing: entry(b, t[3]))); want the first loaded and the discarded one dormant"); return false
+        }
+        try? await Task.sleep(for: .milliseconds(1000))
+        guard b.window.tabs.count == bTabs + 1, b.pendingByTab.isEmpty, entry(b, t[1])?.engineID == nil, entry(b, t[3])?.engineID == nil else {
+            finish(false, "a discarded tab loaded in B (\(b.window.tabs.count) engine tabs, want \(bTabs + 1): only the group's loaded child)"); return false
+        }
+        guard await until(10, { s.window.tabs.count == 1 }) else { finish(false, "the source still has \(s.window.tabs.count) engine tabs, want 1: the engine tabs of the discarded tabs close with the move"); return false }
+        await closeWindows([s])
+        return true
+    }
+
+    /// Task 5b fix 6: a group goes to a new window with its id, name, color, icon and collapsed state; its tabs load there.
+    func groupToNewWindow() async -> Bool {
+        line("info", "step: a group to a new window")
+        guard let (s, t) = await source("g-", 4), let g = pairGroup(s, t[1], t[2], "g-group") else { finish(false, "no source for the group"); return false }
+        s.list.setGroupColor(g, 5); s.list.setGroupIcon(g, "star"); s.list.collapse(g); s.refresh(); s.changed()
+        let copy = s.group(withID: g)!
+        let before = app.controllers.count
+        s.move(.group(g), to: nil)
+        guard await until(25, { self.app.controllers.count == before + 1 && self.restoredUp(before + 1) }), let e = app.controllers.last, e !== s else { finish(false, "no new window for the group"); return false }
+        guard await until(15, { e.list.items.count == 2 && e.window.tabs.count == 2 && e.list.items.allSatisfy { $0.engineID != nil } }), e.group(withID: g) == copy, e.members(of: g).map(\.id) == [t[1], t[2]], entry(s, t[1]) == nil, s.group(withID: g) == nil else {
+            finish(false, "the new window holds \(e.list.items.count) items, group \(String(describing: e.group(withID: g))), want \(copy) with both tabs loaded and nothing left in the source"); return false
+        }
+        guard await until(8, { self.storeHolds([t[1], t[2]], in: e.id, groups: [g], elsewhere: [t[0]: s.id]) }) else { finish(false, "the store after the group moved to a new window: \(storedWindows().map { "\($0.tabs.compactMap(\.customTitle).sorted())" })"); return false }
+        await closeWindows([s, e])
+        return true
+    }
+
+    /// Task 5b fix 2 (I2, M98 item 6): a window that gave items to a new window is not saved or dropped before that window has saved. Each new window's
+    /// restore is held open (its last tab never arrives, the fallback ends it after 5 s) so the store can be read while the source waits.
+    func heldSourceSteps() async -> Bool {
+        guard let writer = app.writer else { return false }
+        BrowserWindowController.holdLastRestoreTab = true
+        BrowserWindowController.restoreFallback = 5
+        defer { BrowserWindowController.holdLastRestoreTab = false; BrowserWindowController.restoreFallback = 15 }
+
+        // 1. Another tab closes in the held source, and the debounce passes: the group's tabs stay in the store.
+        line("info", "step: a held source, another tab closes")
+        guard let (s, t) = await source("h1-", 4), let g = pairGroup(s, t[1], t[2], "h1-group") else { finish(false, "no held source"); return false }
+        writer.saveNow([s.id])
+        guard liveInStore(t) else { finish(false, "the store does not know the source's tabs"); return false }
+        var n0 = app.controllers.count
+        s.move(.group(g), to: nil)
+        guard app.controllers.count == n0 + 1, let e = app.controllers.last, e.restoring, let closing = entry(s, t[3]).flatMap({ s.engineTab($0) }) else { finish(false, "no restoring new window for the group"); return false }
+        s.closeTab(closing)
+        guard await until(5, { writer.peekClosed()?.tab.id == t[3] }) else { finish(false, "the closed tab was not recorded"); return false }
+        guard e.restoring, liveInStore([t[1], t[2]]) else { finish(false, "after another tab closed in the source, the store holds the group's tabs in no window (new window restoring \(e.restoring))"); return false }
+        try? await Task.sleep(for: .milliseconds(2600))   // past the debounce's 2 s cap
+        guard e.restoring, liveInStore([t[1], t[2]]) else { finish(false, "after the debounce the store holds the group's tabs in no window (new window restoring \(e.restoring))"); return false }
+        guard await until(10, { !e.restoring }), await until(8, { self.storeHolds([t[1], t[2]], in: e.id, groups: [g], elsewhere: [t[0]: s.id]) }), !liveInStore([t[3]]), writer.peekClosed()?.tab.id == t[3] else {
+            finish(false, "after the new window saved: \(storedWindows().map { "\($0.tabs.compactMap(\.customTitle).sorted())" }), closed list \(String(describing: writer.peekClosed()?.tab.customTitle)); want the group in the new window, the source's rest in the source, h1-3 closed"); return false
+        }
+        writer.reopened(t[3])
+        await closeWindows([s, e])
+
+        // 2. The held source is closed by the user.
+        line("info", "step: a held source is closed")
+        guard let (s2, u) = await source("h2-", 3), let g2 = pairGroup(s2, u[1], u[2], "h2-group") else { finish(false, "no second held source"); return false }
+        writer.saveNow([s2.id])
+        n0 = app.controllers.count
+        s2.move(.group(g2), to: nil)
+        guard app.controllers.count == n0 + 1, let e2 = app.controllers.last, e2.restoring else { finish(false, "no restoring new window for the second group"); return false }
+        s2.close()
+        guard await until(10, { !self.app.controllers.contains { $0 === s2 } }) else { finish(false, "the held source did not close"); return false }
+        guard e2.restoring, liveInStore([u[1], u[2]]) else { finish(false, "closing the held source dropped the group's tabs from the store before the new window saved (restoring \(e2.restoring))"); return false }
+        guard await until(10, { !e2.restoring }), await until(8, { self.storeHolds([u[1], u[2]], in: e2.id, groups: [g2], elsewhere: [:]) && !self.storedWindows().contains { $0.id == s2.id } }) else {
+            finish(false, "after the new window saved: \(storedWindows().map { "\($0.id == e2.id ? "E" : "?"):\($0.tabs.compactMap(\.customTitle).sorted())" }), the closed source still stored \(storedWindows().contains { $0.id == s2.id })"); return false
+        }
+        await closeWindows([e2])
+
+        // 3. Two moves out of one source: the first new window's save does not free it.
+        line("info", "step: two moves out of a held source")
+        guard let (s3, v) = await source("h3-", 5), let ga = pairGroup(s3, v[1], v[2], "h3-a"), let gb = pairGroup(s3, v[3], v[4], "h3-b") else { finish(false, "no third held source"); return false }
+        writer.saveNow([s3.id])
+        n0 = app.controllers.count
+        s3.move(.group(ga), to: nil)
+        s3.move(.group(gb), to: nil)
+        guard app.controllers.count == n0 + 2, let first = app.controllers.dropLast().last, let second = app.controllers.last, first.restoring, second.restoring else { finish(false, "no two restoring new windows"); return false }
+        let marks = Marks()
+        writer.savedHook = { id in marks.list.append((id, self.liveInStore([v[1], v[2], v[3], v[4]]))) }   // read the store after each save
+        let gate = Gate(), original = second.afterRestore
+        second.afterRestore = { Task { @MainActor in while !gate.open { try? await Task.sleep(for: .milliseconds(50)) }; original?() } }
+        guard await until(15, { self.storeHolds([v[1], v[2]], in: first.id, groups: [ga], elsewhere: [:]) }) else { finish(false, "the first new window never saved"); return false }
+        gate.open = true
+        guard await until(15, { self.storeHolds([v[1], v[2]], in: first.id, groups: [ga], elsewhere: [v[0]: s3.id]) && self.storeHolds([v[3], v[4]], in: second.id, groups: [gb], elsewhere: [v[0]: s3.id]) }) else {
+            finish(false, "after both saved: \(storedWindows().map { "\($0.id == s3.id ? "S" : $0.id == first.id ? "E1" : $0.id == second.id ? "E2" : "?"):\($0.tabs.compactMap(\.customTitle).sorted())" })"); return false
+        }
+        writer.savedHook = nil
+        guard marks.list.map(\.0) == [first.id, second.id, s3.id], marks.list.allSatisfy(\.1) else {
+            finish(false, "the saves were \(marks.list.map { $0.0 == s3.id ? "S" : $0.0 == first.id ? "E1" : $0.0 == second.id ? "E2" : "?" }) with the moved tabs in the store after each: \(marks.list.map(\.1)); want E1, E2, S and true each (the source waits for both)"); return false
+        }
+        await closeWindows([s3, first, second])
+        return true
+    }
+
+    final class Gate { var open = false }
+    final class Marks { var list: [(UUID, Bool)] = [] }
 
     /// An item moved to |b|: in B's list, not in any other window's, its engine tab there when |loaded| (same id), active when |active|.
     func arrived(_ id: TabID, in b: BrowserWindowController, loaded: Bool, active: Bool, state: String) async -> Bool {
@@ -242,6 +392,9 @@ extension SelfTest {
         guard await until(5, { self.entry(w2, v[1])?.inGrid == true }), let tileTab = entry(w2, v[1]).flatMap({ w2.engineTab($0) }) else { return finish(false, "W2's tile") }
         w2.closeTab(tileTab)
         guard await until(10, { self.entry(w2, v[1])?.engineID == nil && w2.window.tabs.count == 1 }), let g2 = w2.list.createGroup(with: v[0], name: "w2-group") else { return finish(false, "W2's dormant tile or group") }
+        // A loaded tab that is not active: the merge leaves it as it is (ruling M100), loaded.
+        guard let _ = w2.window.addTab(withURL: fixture("link.html"), activate: false), await until(15, { w2.list.items.count == 3 && w2.window.tabs.count == 2 && w2.list.items.allSatisfy { !$0.title.isEmpty } }), let extra = w2.list.items.map(\.id).first(where: { !v.contains($0) }) else { return finish(false, "W2's loaded extra tab never appeared") }
+        w2.renameTab(extra, to: "w2-extra")
         w2.refresh()
         guard let w3 = await openWindow("link.html") else { return finish(false, "W3 did not open") }
         guard let _ = w3.window.addTab(withURL: fixture("b.html"), activate: false), let _ = w3.window.addTab(withURL: fixture("b.html"), activate: false), let _ = w3.window.addTab(withURL: fixture("b.html"), activate: false),
@@ -253,51 +406,57 @@ extension SelfTest {
         w3.list.setGroup(x[3], g3)
         w3.refresh()
         // The sources as the test knows them, before the merge.
-        guard w1.list.dayOrder == [.tab(u[0]), .group(g1)], w1.list.topOrder == [.tab(u[2])], w3.list.dayOrder == [.tab(x[0]), .group(g3)], w2.list.dayOrder == [.group(g2)] else {
+        guard w1.list.dayOrder == [.tab(u[0]), .group(g1)], w1.list.topOrder == [.tab(u[2])], w3.list.dayOrder == [.tab(x[0]), .group(g3)], Set(w2.list.dayOrder) == [.group(g2), .tab(extra)], w2.list.activeID == v[0] else {
             return finish(false, "the windows before the merge: \(w1.list.dayOrder) \(w1.list.topOrder) \(w2.list.dayOrder) \(w3.list.dayOrder)")
         }
-        let groupOne = w1.group(withID: g1)!
+        let groupOne = w1.group(withID: g1)!, w2Day = w2.list.dayOrder, w2Own = Set(w2.list.items.map(\.id))
         // The middle window is the front one.
         becomeKey(w3); becomeKey(w1); becomeKey(w2)
         guard app.active === w2, app.windowsFrontToBack.map(\.id) == [w2.id, w1.id, w3.id] else { return finish(false, "the front window is not W2 (\(app.windowsFrontToBack.map(\.id)))") }
         guard let merge = menuItem("Merge All Windows") else { return finish(false, "no Window > Merge All Windows") }
+        w1.restoring = true; w3.restoring = true   // two of the three are still restoring: nothing to merge
+        merge.menu?.update()
+        let offWhileRestoring = !merge.isEnabled && !app.canMerge(w2)
+        w1.restoring = false; w3.restoring = false
+        guard offWhileRestoring else { return finish(false, "Merge All Windows is enabled while the other windows are restoring (canMerge \(app.canMerge(w2)))") }
         merge.menu?.update()
         guard merge.isEnabled else { return finish(false, "Merge All Windows is disabled with three windows open") }
         app.frontLog = []
         guard fire("Merge All Windows") else { return finish(false, "Merge All Windows did not run") }
-        guard await until(25, { self.app.controllers.count == 1 && w2.list.items.count == 11 }), app.controllers[0] === w2 else {
-            return finish(false, "after the merge \(app.controllers.count) windows, W2 holds \(w2.list.items.count) items, want 1 and 11")
+        guard await until(25, { self.app.controllers.count == 1 && w2.list.items.count == 12 }), app.controllers[0] === w2 else {
+            return finish(false, "after the merge \(app.controllers.count) windows, W2 holds \(w2.list.items.count) items, want 1 and 12")
         }
         // The stated order: tiles and rows into the pinned area, groups and loose tabs to the end of the day list, front to back.
         let grid = w2.list.items.filter { $0.isPinned && $0.inGrid }.map(\.id)
-        guard grid == [v[1], u[1], x[1]], w2.list.topOrder == [.tab(u[2])], w2.list.dayOrder == [.group(g2), .tab(u[0]), .group(g1), .tab(x[0]), .group(g3)] else {
-            return finish(false, "W2's order: grid \(grid.count) (\(grid == [v[1], u[1], x[1]])), top \(w2.list.topOrder), day \(w2.list.dayOrder), want [tile W2, tile W1, tile W3], [W1's row], [g2, w1-day, g1, w3-day, g3]")
+        guard grid == [v[1], u[1], x[1]], w2.list.topOrder == [.tab(u[2])], w2.list.dayOrder == w2Day + [.tab(u[0]), .group(g1), .tab(x[0]), .group(g3)] else {
+            return finish(false, "W2's order: grid \(grid.count) (\(grid == [v[1], u[1], x[1]])), top \(w2.list.topOrder), day \(w2.list.dayOrder), want [tile W2, tile W1, tile W3], [W1's row], \(w2Day) then [w1-day, g1, w3-day, g3]")
         }
         guard w2.members(of: g1).map(\.id) == [u[3], u[4]], w2.group(withID: g1) == groupOne, w2.members(of: g3).map(\.id) == [x[2], x[3]], w2.members(of: g2).map(\.id) == [v[0]] else { return finish(false, "the groups in W2 are not whole: \(String(describing: w2.group(withID: g1))), want \(groupOne)") }
+        // No merged item has an engine tab; the target's own loaded tabs (its active one and the extra one) keep theirs.
         let live = w2.list.items.filter { $0.engineID != nil }.map(\.id)
-        guard live == [v[0]], w2.window.tabs.count == 1, w2.list.activeID == v[0] else { return finish(false, "W2 has \(live.count) tabs with an engine tab (\(w2.window.tabs.count) engine tabs), want only its active tab") }
-        guard w2.list.items.filter({ $0.engineID == nil }).allSatisfy({ !$0.isLoading }), w2.pendingByTab.isEmpty else { return finish(false, "the merged tabs are loading") }
+        guard Set(live) == [v[0], extra], w2.window.tabs.count == 2, w2.list.activeID == v[0] else { return finish(false, "W2 has \(live.count) tabs with an engine tab (\(w2.window.tabs.count) engine tabs), want its own active and extra tab only") }
+        guard w2.list.items.filter({ !w2Own.contains($0.id) }).allSatisfy({ $0.engineID == nil && !$0.isLoading }), w2.pendingByTab.isEmpty else { return finish(false, "a merged tab has an engine tab or is loading") }
         guard app.frontLog.last == w2.id, !app.controllers.contains(where: { $0 === w1 || $0 === w3 }) else { return finish(false, "W2 is not in front or a source window is still open") }
         guard writer.hasClosed == false else { return finish(false, "a merged tab is on the closed list") }
         let ids = w2.list.items.map(\.id)
         guard await until(8, { let s = self.storedWindows(); return s.count == 1 && s[0].id == w2.id && Set(s[0].tabs.map(\.id)) == Set(ids) && Set(s[0].groups.map(\.id)) == [g1, g2, g3] }) else {
             return finish(false, "the store after the merge: \(storedWindows().map { "\($0.tabs.count) tabs, \($0.groups.count) groups" })")
         }
-        finish(violations.isEmpty, "Merge All Windows from the middle of three windows: the front window holds the other two's tiles at the end of its grid, the pinned row in its pinned area and their groups and loose tabs at the end of its day list in front to back order, groups whole, ids unchanged, only its active tab has an engine tab, the sources closed, the store holds one window with 11 tabs and 3 groups \(violations)")
+        finish(violations.isEmpty, "Merge All Windows from the middle of three windows: the front window holds the other two's tiles at the end of its grid, the pinned row in its pinned area and their groups and loose tabs at the end of its day list in front to back order, groups whole, ids unchanged, no merged tab has an engine tab (the target\'s loaded tab that is not active stays loaded), the sources closed, the store holds one window with 12 tabs and 3 groups \(violations)")
     }
 
     func mergeWindowsRelaunch() async {
         guard await until(40, { self.restoredUp(1) }), let w = ctl else { return finish(false, "phase 2: \(app.controllers.count) windows, want 1") }
-        let names = ["w2-active", "w2-tile", "w1-day", "w1-tile", "w1-row", "w1-ka", "w1-kb", "w3-day", "w3-tile", "w3-ka", "w3-kb"]
-        guard await until(30, { w.list.items.count == 11 }), names.allSatisfy({ self.marked($0).count == 1 }) else { return finish(false, "phase 2: \(w.list.items.count) items, held \(names.map { "\($0)x\(marked($0).count)" })") }
+        let names = ["w2-active", "w2-extra", "w2-tile", "w1-day", "w1-tile", "w1-row", "w1-ka", "w1-kb", "w3-day", "w3-tile", "w3-ka", "w3-kb"]
+        guard await until(30, { w.list.items.count == 12 }), names.allSatisfy({ self.marked($0).count == 1 }) else { return finish(false, "phase 2: \(w.list.items.count) items, held \(names.map { "\($0)x\(marked($0).count)" })") }
         let grid = w.list.items.filter { $0.isPinned && $0.inGrid }.compactMap(\.customTitle)
         guard grid == ["w2-tile", "w1-tile", "w3-tile"], w.list.items.filter({ $0.isPinned && !$0.inGrid }).compactMap(\.customTitle) == ["w1-row"] else { return finish(false, "phase 2: the pinned area is \(grid)") }
         let groups = w.list.groups.map { g in "\(g.name):\(w.members(of: g.id).compactMap(\.customTitle).joined(separator: ","))" }
         guard groups == ["w1-group:w1-ka,w1-kb", "w2-group:w2-active", "w3-group:w3-ka,w3-kb"] || Set(groups) == ["w1-group:w1-ka,w1-kb", "w2-group:w2-active", "w3-group:w3-ka,w3-kb"] else { return finish(false, "phase 2: groups \(groups)") }
         guard let g1 = w.list.groups.first(where: { $0.name == "w1-group" }), g1.colorIndex == 3, g1.icon == "bolt" else { return finish(false, "phase 2: w1-group lost its color or icon") }
         let day = w.list.dayOrder.map { r -> String in switch r { case .tab(let id): w.item(withID: id)?.customTitle ?? "?"; case .group(let g): w.group(withID: g)?.name ?? "?" } }
-        guard day == ["w2-group", "w1-day", "w1-group", "w3-day", "w3-group"] else { return finish(false, "phase 2: the day list is \(day)") }
-        finish(violations.isEmpty, "phase 2: after the relaunch one window holds the 11 merged tabs: tiles w2, w1, w3, the pinned row, and the day list w2-group, w1-day, w1-group, w3-day, w3-group with their groups \(violations)")
+        guard day == ["w2-group", "w2-extra", "w1-day", "w1-group", "w3-day", "w3-group"] else { return finish(false, "phase 2: the day list is \(day)") }
+        finish(violations.isEmpty, "phase 2: after the relaunch one window holds the 12 merged tabs: tiles w2, w1, w3, the pinned row, and the day list w2-group, w2-extra, w1-day, w1-group, w3-day, w3-group with their groups \(violations)")
     }
 
     // MARK: revive-window (T5b.3)
@@ -305,10 +464,13 @@ extension SelfTest {
     /// A window the engine closes by itself while a pin waits in it is made again (AppDelegate.revive): zoomed stays zoomed and a window that was in full screen
     /// is asked to be. A hidden run cannot enter full screen, so a hook reports the old window as full screen and the check reads the `Restore` the new window
     /// is made with; the zoom is real, read from the new window.
+    func near(_ a: NSRect, _ b: NSRect) -> Bool { abs(a.minX - b.minX) < 2 && abs(a.minY - b.minY) < 2 && abs(a.width - b.width) < 2 && abs(a.height - b.height) < 2 }
+
     func reviveWindow() async {
         guard await ready(), let c = ctl, let win, let tab = win.activeTab, let ns = c.nsWindow else { return }
         pinKey()
         guard await until(5, { c.list.items.first?.isPinned == true }) else { return finish(false, "the tab did not pin") }
+        let before = ns.frame
         ns.zoom(nil)
         guard await until(10, { ns.isZoomed && c.lastZoomed }) else { return finish(false, "the window did not zoom (isZoomed \(ns.isZoomed), recorded \(c.lastZoomed))") }
         tab.close()   // the engine's own close of the last tab: Noche's close path is not involved
@@ -316,14 +478,18 @@ extension SelfTest {
             return finish(false, "the window was not revived (\(ctl === c ? "same controller" : "new") with \(ctl?.list.items.count ?? -1) items)")
         }
         guard let r = app.lastRevive, r.isZoomed else { return finish(false, "the revived window's Restore has isZoomed \(String(describing: app.lastRevive?.isZoomed)), want true") }
+        // The new window is made at the frame from before the zoom (not the zoomed one) and zooms through the carry: only the carry can make it zoomed.
         guard let nn = n.nsWindow, await until(10, { nn.isZoomed }) else { return finish(false, "the revived window is not zoomed (isZoomed \(n.nsWindow?.isZoomed ?? false))") }
+        guard app.lastReviveFrame.map({ near($0, before) }) == true else { return finish(false, "the revived window is made at \(String(describing: app.lastReviveFrame)), want the frame from before the zoom \(before)") }
+        nn.zoom(nil)
+        guard await until(10, { !nn.isZoomed && near(nn.frame, before) }) else { return finish(false, "un-zooming the revived window left it at \(nn.frame) (zoomed \(nn.isZoomed)), want the frame from before the zoom \(before)") }
         // Full screen: a hook reports the window as in it; the Restore of the next revival carries it.
         n.testFullScreen = true
         guard let tab2 = n.window.activeTab else { return finish(false, "the revived window has no active tab") }
         tab2.close()
         guard await until(20, { guard let m = self.ctl, m !== n else { return false }; return !m.restoring && m.window.tabs.count == 1 && m.list.items.count == 2 }) else { return finish(false, "the window was not revived a second time") }
         guard let r2 = app.lastRevive, r2.fullScreen else { return finish(false, "the revived window's Restore has fullScreen \(String(describing: app.lastRevive?.fullScreen)), want true (the old window was reported in full screen)") }
-        finish(violations.isEmpty, "a revived window carries the old window's full screen into its Restore (a hook reports it: a hidden run cannot enter it) and comes back zoomed, read from the new window \(violations)")
+        finish(violations.isEmpty, "a revived window carries the old window's full screen into its Restore (a hook reports it: a hidden run cannot enter it) and comes back zoomed through the carry from the frame before the zoom (un-zooming it returns there), read from the new window \(violations)")
     }
 }
 #endif

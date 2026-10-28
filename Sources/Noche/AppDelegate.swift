@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var exitCodeOverride: Int32?
     /// Test support: the `Restore` the last revived window was made with.
     var lastRevive: BrowserWindowController.Restore?
+    var lastReviveFrame: NSRect?
 #endif
     private(set) var controllers: [BrowserWindowController] = []
     let downloads = DownloadsController()
@@ -404,7 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let fullScreen = c.lastFullScreen
 #endif
         let restore = BrowserWindowController.Restore(
-            tabs: [(blank, "about:blank")], selected: blank, sidebarHidden: c.sidebarHidden, fullScreen: fullScreen && !BarHook.on("REVIVE_NOSTATE"), isZoomed: c.lastZoomed && !BarHook.on("REVIVE_NOSTATE"),  // the hook: full screen and zoom are lost, as before
+            tabs: [(blank, "about:blank")], selected: blank, sidebarHidden: c.sidebarHidden, fullScreen: fullScreen && !BarHook.on("REVIVE_NOSTATE") && !BarHook.on("REVIVE_NOFULL"), isZoomed: c.lastZoomed && !BarHook.on("REVIVE_NOSTATE") && !BarHook.on("REVIVE_NOZOOM"),  // the hooks: full screen and zoom are lost (as before), or one of them
             items: Dictionary(uniqueKeysWithValues: kept.map { ($0.id, $0) }), groups: c.list.groups, topOrder: c.list.topOrder, dayOrder: c.list.dayOrder,
             favicons: c.faviconSeeds.mapValues(\.icon), order: kept.map(\.id) + [blank])
         controllers.removeAll { $0 === c }
@@ -413,7 +414,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         lastRevive = restore
 #endif
         FileHandle.standardError.write(Data("NOCHE window: the engine closed a window that held pinned tabs; made it again with a blank tab\n".utf8))
-        newWindow(url: "about:blank", frame: c.lastFrame ?? c.initialFrame, id: c.id, restore: restore)
+        let frame = (c.lastZoomed ? c.lastFrame : c.frameSeen?.frame) ?? c.lastFrame ?? c.initialFrame   // a zoomed window comes back at the frame from before the zoom
+#if NOCHE_TESTHOOKS
+        lastReviveFrame = frame
+#endif
+        newWindow(url: "about:blank", frame: frame, id: c.id, restore: restore)
         return true
     }
 

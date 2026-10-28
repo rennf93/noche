@@ -16,8 +16,13 @@ final class StoreWriter {
     private var debouncer = Debouncer(now: { Date() })
     private var dirty = Set<UUID>()      // tabs or state changed: the whole window is saved
     private var geometry = Set<UUID>()   // only the frame changed: one UPDATE of the window row, tab rows untouched
-    /// A window that gave a tab to a new window waits for it: its debounced save would tombstone the tab before the new window's rows exist.
-    var holds: [UUID: UUID] = [:]
+    /// A window that gave items to new windows waits for each of them: a save of it (debounced, a closed tab, its close) would tombstone the
+    /// items before the new windows' rows exist. The set holds the windows it still waits for.
+    var holds: [UUID: Set<UUID>] = [:]
+    private var removing = Set<UUID>()   // closed while held: its rows are dropped once the last window it waits for has saved
+#if NOCHE_TESTHOOKS
+    var savedHook: ((UUID) -> Void)?     // Test only: called after each `saveNow` write (a check reads the store between two)
+#endif
     private var polling = false
     private var frozen = false
 #if NOCHE_TESTHOOKS
@@ -102,7 +107,27 @@ final class StoreWriter {
     /// group row and the tab rows land in the new window before the old one drops what it no longer holds).
     func saveNow(_ ids: [UUID]) {
         guard !frozen else { return }
-        for id in ids { holds[id] = nil; save([id]); dirty.remove(id); geometry.remove(id) }
+        for id in ids where holds[id] == nil {  // a held window saves when its last new window has (`release`), it stays dirty meanwhile
+            save([id]); dirty.remove(id); geometry.remove(id)
+#if NOCHE_TESTHOOKS
+            savedHook?(id)
+#endif
+        }
+    }
+
+    /// |source| gave items to the new window |new| and waits for its first save.
+    func hold(_ source: UUID, until new: UUID) { holds[source, default: []].insert(new) }
+
+    /// |new| saved (or closed): true when |source| waits for no other window and is still open, so the caller may save it. A source that was
+    /// closed meanwhile is dropped from the store here, after every window it gave to has its rows.
+    @discardableResult
+    func release(_ source: UUID, after new: UUID) -> Bool {
+        if BarHook.on("MOVE_HOLD1") { holds[source] = nil } else { holds[source]?.remove(new) }  // negative control: one wait for all, the first new window frees the source
+        guard holds[source]?.isEmpty ?? true else { return false }
+        holds[source] = nil
+        guard removing.remove(source) != nil else { return true }
+        attempt("remove window") { try store.removeWindow(source) }
+        return false
     }
 
     /// Quit: with `close` the windows are dropped (the closed list stays), otherwise every window is written. Nothing is written afterwards.
@@ -129,15 +154,18 @@ final class StoreWriter {
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_CLOSED"] == "1" { return markDirty(window: window) }  // negative control
 #endif
-        if let s = snapshot(window) { attempt("save") { try store.save(s) } }
+        let held = holds[window] != nil && !BarHook.on("HOLD_NOCLOSED")  // the hook: a closed tab saves a held window at once
+        if !held, let s = snapshot(window) { attempt("save") { try store.save(s) } }
         attempt("record closed tab") { try store.recordClosed(tab, windowID: window, index: index) }
-        dirty.remove(window); geometry.remove(window)
+        if held { markDirty(window: window) } else { dirty.remove(window); geometry.remove(window) }  // a held window saves without the tab once it is free
     }
 
     func windowClosed(_ id: UUID) {
         guard !frozen else { return }
         dirty.remove(id); geometry.remove(id)
-        holds[id] = nil; holds = holds.filter { $0.value != id }
+        for source in Array(holds.keys) where holds[source]?.contains(id) == true { release(source, after: id) }  // a new window closed before it saved: nothing more to wait for
+        if holds[id] != nil, !BarHook.on("HOLD_NOREMOVE") { removing.insert(id); return }  // the hook: closing a held window drops its rows at once
+        holds[id] = nil
         attempt("remove window") { try store.removeWindow(id) }
     }
 

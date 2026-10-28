@@ -121,7 +121,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 #endif
     let initialFrame: NSRect
     var normalFrame: NSRect?            // the frame before full screen, which is what a snapshot stores then
-    var lastFrame: NSRect?              // the window's frame as of the last move or resize: a window the engine closed on its own is revived there
+    var lastFrame: NSRect?              // the last frame the window was left at (before a zoom, not during it): a window the engine closed on its own is revived there
+    var frameSeen: (frame: NSRect, since: TimeInterval)?   // the newest frame `changed` saw and since when (see `lastFrame`)
     var lastFullScreen = false          // full screen and zoom as of the last geometry change: a revived window comes back the same (Space and z-order do not)
     var lastZoomed = false
 #if NOCHE_TESTHOOKS
