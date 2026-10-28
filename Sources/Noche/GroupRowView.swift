@@ -9,6 +9,8 @@ final class GroupRowView: NSView {
     var onClick: (() -> Void)?
     var onContextMenu: ((NSPoint) -> Void)?   // the click in window coordinates
     var onRename: ((String) -> Void)?         // the inline field committed this name
+    var onDragStart: ((NSEvent) -> Void)?     // a press moved 3 pt: the group's drag
+    private var trigger = DragTrigger()
     private(set) var name = "", icon: String?, colorIndex = 0
     private(set) var isCollapsed = true
     private var hasActive = false
@@ -126,7 +128,9 @@ final class GroupRowView: NSView {
     override func mouseDown(with event: NSEvent) {
         if renameField.isEditing { return }
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
-        onClick?()
+        trigger.press(event)  // the click lands on release: a press that moves is a drag, which must not open or close the group
     }
+    override func mouseDragged(with event: NSEvent) { if trigger.moved(event) { onDragStart?(event) } }
+    override func mouseUp(with event: NSEvent) { if trigger.release(), bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() } }  // released inside the row
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }

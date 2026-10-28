@@ -1,4 +1,5 @@
 import AppKit
+import NocheCore
 
 extension NSColor {
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
@@ -81,7 +82,7 @@ enum ChromeStyle {
     static let groupChevronSize: CGFloat = 8, groupChevronGap: CGFloat = 8       // M gap, P size
     static let groupChevron = NSColor(hex: 0x8A8A8A)                             // P
     static let groupChevronDuration: TimeInterval = 0.120                        // P
-    static let groupIndent: CGFloat = 14                                         // P: a child row's favicon and title
+    static let groupIndent = SidebarMetrics.groupIndent                          // P: a child row's favicon and title
     static let groupOutline = NSColor.white.withAlphaComponent(0.10)             // T TabGroupSidebarStroke
     static let groupFill = NSColor.white.withAlphaComponent(0.05)                // P: TabGroupNeutralBackground at 50%
     /// The expanded group's outline in its color: white (index 0) keeps the neutral outline, the others take their swatch at |groupTintAlpha|.
@@ -94,6 +95,10 @@ enum ChromeStyle {
     static let swatchRing = NSColor.white                                        // M: the selected swatch has a white ring
     static let swatchRowInset: CGFloat = 14, swatchRowHeight: CGFloat = 28       // P: the menu row that holds the 8 swatches
     static let iconCell: CGFloat = 30, iconColumns = 8, iconPickerPad: CGFloat = 10  // P: the Change Icon popover
+    // Drag and drop (note 2.1, M1.6 Task 5)
+    static let dropOutline = NSColor.white.withAlphaComponent(0x2E / 255.0)      // T TabGroupNeutralStroke: the folder a drop joins
+    static let dropOutlineWidth: CGFloat = 2                                     // note 2: a 2 pt outline
+    static let dropLine = NSColor.white.withAlphaComponent(0.75)                 // P: the insertion line (2 pt, DropResolver.lineHeight)
     static let groupActiveDot: CGFloat = 4                                       // P
     static let groupActiveDotColor = NSColor(hex: 0xE0E0E0)                      // P
     /// The 8 group colors in `colorIndex` order: white, green, blue, purple, amber, pink, red, orange (P: the macOS dark system palette).

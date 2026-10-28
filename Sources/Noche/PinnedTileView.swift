@@ -10,6 +10,8 @@ final class PinnedTileView: NSView {
     var onClose: (() -> Void)?
     var onContextMenu: ((NSPoint) -> Void)?   // the click in window coordinates
     var onReset: (() -> Void)?                // the return glyph was clicked: back to the pinned page
+    var onDragStart: ((NSEvent) -> Void)?     // a press moved 3 pt: the tile's drag
+    private var trigger = DragTrigger()
     private(set) var showsPlaceholder = true
     /// The tab is not on its pinned page (|url| differs from |pinnedURL|): hovering the tile shows the return glyph.
     private(set) var canReset = false
@@ -90,8 +92,11 @@ final class PinnedTileView: NSView {
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
         if showsResetGlyph, resetGlyphRect.contains(convert(event.locationInWindow, from: nil)) { onReset?(); return }
+        trigger.press(event)
         onSelect?()
     }
+    override func mouseDragged(with event: NSEvent) { if trigger.moved(event) { onDragStart?(event) } }
+    override func mouseUp(with event: NSEvent) { _ = trigger.release() }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }

@@ -18,6 +18,7 @@ public enum SidebarMetrics {
     public static let newTabHeight: CGFloat = 39
     public static let rowX: CGFloat = 6
     public static let rowInset: CGFloat = 12        // rows are the sidebar's width minus this
+    public static let groupIndent: CGFloat = 14     // a child row's favicon and title (note 1.3)
     public static let bottomPad: CGFloat = 12       // the list's content ends this far above the bottom bar
     /// Realized rows: the visible ones plus |overscan| on each side, so that at most |realizedBudget| are alive when a window shows
     /// 36 to 38 rows (the 1436 pt test height).
@@ -45,11 +46,14 @@ public struct SidebarLayout: Equatable, Sendable {
     public private(set) var boxes: [GroupBox] = []
     /// Where the list ends (window points, without the bottom padding).
     public private(set) var contentBottom: CGFloat = SidebarMetrics.listTop
+    /// The sidebar width the layout was made for.
+    public private(set) var width: CGFloat = 0
 
     public init() {}
 
     public init(entries: [SidebarEntry], width: CGFloat) {
         typealias M = SidebarMetrics
+        self.width = width
         let rowW = width - M.rowInset
         var y = M.listTop
         let tiles = entries.filter { if case .gridTile = $0 { true } else { false } }.count

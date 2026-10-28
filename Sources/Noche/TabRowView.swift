@@ -23,6 +23,8 @@ final class TabRowView: NSView {
     let fade = CAGradientLayer()
     let renameField = RenameField()
     var onRename: ((String) -> Void)?         // the inline field committed this title
+    var onDragStart: ((NSEvent) -> Void)?     // a press moved 3 pt: the row's drag
+    private var trigger = DragTrigger()
     var tabID: TabID?
     private var level = 0
 
@@ -125,8 +127,11 @@ final class TabRowView: NSView {
         if renameField.isEditing { return }
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
         if showsResetGlyph, resetGlyphRect.contains(convert(event.locationInWindow, from: nil)) { onReset?(); return }
+        trigger.press(event)
         onSelect?()
     }
+    override func mouseDragged(with event: NSEvent) { if trigger.moved(event) { onDragStart?(event) } }
+    override func mouseUp(with event: NSEvent) { _ = trigger.release() }
     override func otherMouseUp(with event: NSEvent) { onClose?() }  // middle click
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(event.locationInWindow) }
 }

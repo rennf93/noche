@@ -261,6 +261,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.onReturnFocus = { [weak self] free in self?.returnFocus(afterRename: free) }
         sidebar.groupColor = { [weak self] g in self?.group(withID: g)?.colorIndex ?? 0 }
         sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
+        wireDrag()
         toolbar.toggle.onClick = { [weak self] in self?.toggleSidebar() }
         toolbar.back.onClick = { [weak self] in self?.goBack() }
         toolbar.forward.onClick = { [weak self] in self?.goForward() }

@@ -39,7 +39,15 @@ public enum SettingKeys {
         SettingKey(name: "discardAfterMinutes", type: .int(1...525_600), defaultValue: "120"),
         // "Add emoji to new tab groups" (M83, B): a new group takes an emoji from `GroupEmoji.list`. Off by default.
         SettingKey(name: "emojiForNewGroups", type: .bool, defaultValue: "0"),
+        // "Haptic feedback when reordering tabs" (spec note section 2, default on): a tap each time a sidebar drag's insertion slot changes.
+        SettingKey(name: "hapticReorder", type: .bool, defaultValue: "1"),
     ]
+
+    /// Whether a drag taps the trackpad: the stored value when it is valid, else the default (on).
+    public static func hapticReorder(stored: String?) -> Bool {
+        let k = key("hapticReorder")!
+        return (stored.flatMap { k.isValid($0) ? $0 : nil } ?? k.defaultValue) == "1"
+    }
 
     /// The discard threshold in minutes: the stored value when it is valid for the key's range, else the default (120).
     public static func discardAfterMinutes(stored: String?) -> Int {
