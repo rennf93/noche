@@ -84,6 +84,15 @@ enum ChromeStyle {
     static let groupIndent: CGFloat = 14                                         // P: a child row's favicon and title
     static let groupOutline = NSColor.white.withAlphaComponent(0.10)             // T TabGroupSidebarStroke
     static let groupFill = NSColor.white.withAlphaComponent(0.05)                // P: TabGroupNeutralBackground at 50%
+    /// The expanded group's outline in its color: white (index 0) keeps the neutral outline, the others take their swatch at |groupTintAlpha|.
+    static let groupTintAlpha: CGFloat = 0.55                                    // P
+    static func groupOutline(colorIndex i: Int) -> NSColor {
+        i <= 0 ? groupOutline : groupColors[min(i, groupColors.count - 1)].withAlphaComponent(groupTintAlpha)
+    }
+    static let swatchSize: CGFloat = 18, swatchPitch: CGFloat = 24               // M: ~18 px circles, pitch 24
+    static let swatchRing = NSColor.white                                        // M: the selected swatch has a white ring
+    static let swatchRowInset: CGFloat = 14, swatchRowHeight: CGFloat = 28       // P: the menu row that holds the 8 swatches
+    static let iconCell: CGFloat = 30, iconColumns = 8, iconPickerPad: CGFloat = 10  // P: the Change Icon popover
     static let groupActiveDot: CGFloat = 4                                       // P
     static let groupActiveDotColor = NSColor(hex: 0xE0E0E0)                      // P
     /// The 8 group colors in `colorIndex` order: white, green, blue, purple, amber, pink, red, orange (P: the macOS dark system palette).

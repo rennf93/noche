@@ -100,7 +100,7 @@ enum MenuTable {
         ]),
         menu("File", [
             app("New Tab", "file.newTab", #selector(AppDelegate.newTab(_:)), enabled: always),
-            later("New Tab in Group", "file.newTabInGroup", "M1.6"),
+            app("New Tab in Group", "file.newTabInGroup", #selector(AppDelegate.newTabInGroup(_:)), enabled: { $0.window?.activeGroup != nil }),
             app("New Window", "file.newWindow", #selector(AppDelegate.newWindowMenu(_:)), enabled: always),
             later("New Incognito Window", "file.newIncognitoWindow", "M1.7"),
             app("Reopen Closed Tab", "file.reopenClosedTab", #selector(AppDelegate.reopenClosedTab(_:)),
@@ -226,13 +226,13 @@ enum MenuTable {
                 titleRule: { $0.window?.activeIsPinned == true ? "Unpin" : "Pin" }),  // the table's title is the default; validation sets the live one
             app("Duplicate", "tabs.duplicateTab", #selector(AppDelegate.duplicateTab(_:))),
             sep,
-            later("New Group with Tab", "tabs.newGroupWithTabs", "M1.6"),
-            later("Move to Group", "M1.6"),
+            app("New Group with Tab", "tabs.newGroupWithTabs", #selector(AppDelegate.newGroupWithTab(_:)), enabled: { $0.window?.list.activeID != nil }),
+            menu("Move to Group", []),  // the groups of the window are listed when it opens (MoveToGroupMenuDelegate)
             later("Move to Profile", "M1.7"),
             later("Move to Window", "M1.6"),
             sep,
-            later("Rename...", "M1.6"),
-            later("Change Icon...", "M1.6"),
+            app("Rename...", nil, #selector(AppDelegate.renameTab(_:)), enabled: { $0.window?.list.activeID != nil }),
+            app("Change Icon...", nil, #selector(AppDelegate.changeTabIcon(_:)), enabled: { $0.window?.list.activeID != nil }),
         ]),
         menu("Bookmarks", [
             app("Bookmark This Page", "bookmarks.add", #selector(AppDelegate.bookmarkThisPage(_:)),

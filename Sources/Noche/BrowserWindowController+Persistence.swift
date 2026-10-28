@@ -16,7 +16,8 @@ extension BrowserWindowController {
             return (item.id, TabMeta(faviconURL: icon))
         })
         return WindowSnapshot(id: id, frame: frame, isFullScreen: full, isZoomed: ns?.isZoomed ?? false, sidebarWidth: Double(ChromeStyle.sidebarWidth),
-                              sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: list.items, selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta,
+                              sidebarMode: sidebarHidden ? "hidden" : "shown", tabs: BarHook.on("RENAME_NOSAVE") ? list.items.map { var t = $0; t.customTitle = nil; return t } : list.items,  // the hook: a custom title is never saved
+                              selectedTabID: list.activeID, zOrder: zOrder, tabMeta: meta,
                               groups: list.groups, topOrder: list.topOrder, dayOrder: list.dayOrder)
     }
 

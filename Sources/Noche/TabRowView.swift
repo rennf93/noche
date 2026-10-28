@@ -21,6 +21,8 @@ final class TabRowView: NSView {
     var isSelected = false { didSet { if isSelected != oldValue { needsDisplay = true } } }
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
     let fade = CAGradientLayer()
+    let renameField = RenameField()
+    var onRename: ((String) -> Void)?         // the inline field committed this title
     var tabID: TabID?
     private var level = 0
 
@@ -49,8 +51,16 @@ final class TabRowView: NSView {
         addSubview(faviconView)
         addSubview(titleField)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        renameField.onCommit = { [weak self] text in self?.titleField.isHidden = false; self?.onRename?(text) }
+        renameField.onCancel = { [weak self] in self?.titleField.isHidden = false }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The title becomes an inline field (Return commits, Escape cancels).
+    func beginRename() {
+        titleField.isHidden = true
+        renameField.begin(titleField.stringValue, font: ChromeStyle.font, frame: titleField.frame, in: self)
+    }
 
     /// Child frames are window points: the row sits at x 6, so favicon x 14 and title x 37 are 8 and 31 inside it.
     override func layout() {
@@ -70,7 +80,7 @@ final class TabRowView: NSView {
 
     /// A refresh configures every realized row; one whose content did not change does nothing.
     /// A view taken from the pool is not under the pointer until AppKit says so.
-    func clearHover() { isHovered = false }
+    func clearHover() { renameField.cancel(); isHovered = false }
     /// The pointer entering or leaving (the checks call it: a hidden window gets no tracking events).
     func hover(_ on: Bool) { isHovered = on }
 
@@ -105,10 +115,14 @@ final class TabRowView: NSView {
     }
 
     /// The row takes every click inside it, whatever subview is under the point.
-    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return renameField.isEditing && hit.isDescendant(of: renameField) ? hit : self  // the field takes its own clicks while it edits
+    }
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
     override func mouseDown(with event: NSEvent) {
+        if renameField.isEditing { return }
         if event.modifierFlags.contains(.control) { onContextMenu?(event.locationInWindow); return }  // Control-click is a right click
         if showsResetGlyph, resetGlyphRect.contains(convert(event.locationInWindow, from: nil)) { onReset?(); return }
         onSelect?()

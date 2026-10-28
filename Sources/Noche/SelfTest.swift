@@ -15,7 +15,7 @@ final class SelfTest {
     static let windowFrame = NSRect(x: 300, y: 4, width: 2200, height: 1436)
 
     /// The app's own time limit for a check, in seconds (scripts/app-test.sh allows 20 s more before it kills the app).
-    static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : 40 }
+    static func limit(of check: String) -> TimeInterval { check == "quit-100" || check == "groups" ? 90 : 40 }  // groups walks every group action in one window
 
     /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
     static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") }
@@ -160,6 +160,10 @@ final class SelfTest {
             case "sidebar-geometry": await sidebarGeometry()
             case "sidebar-columns": await sidebarColumns()
             case "sidebar-scale": await sidebarScale()
+            case "groups": await groups()
+            case "group-colors": await groupColors()
+            case "group-menus": await groupMenus()
+            case "rename-tab": await renameTab()
             case "pin-toggle": await pinToggle()
             case "pin-dormant": await pinDormant()
             case "pin-reset": await pinReset()

@@ -94,6 +94,9 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     /// window.open, target=_blank) never takes one. The restored window's first tab is created with the window: it is |initialPending|.
     var pendingByTab: [Int: PendingTab] = [:]
     var initialPending: PendingTab?
+    /// New Tab in Group and Duplicate (a group): the group an engine tab joins once it arrives. |template| makes the group when it is not in the list yet.
+    struct GroupJoin { let group: GroupID; let template: TabGroup? }
+    var groupJoins: [Int: GroupJoin] = [:]
     var restoreRest: [PendingTab] = []
     var firstAdded = false
     var skipActivation: TabID?           // the restore's own activation of the selected tab is not the user using it
@@ -252,6 +255,10 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         sidebar.onReset = { [weak self] id in self?.resetToPinned(id) }
         sidebar.onTabMenu = { [weak self] id, p in self?.row(of: id).map { self?.showTabMenu(row: $0, at: p) } }
         sidebar.onToggleGroup = { [weak self] g in self?.toggleGroup(g) }
+        sidebar.onGroupMenu = { [weak self] g, p in self?.showGroupMenu(group: g, at: p) }
+        sidebar.onRenameTab = { [weak self] id, text in self?.renameTab(id, to: text) }
+        sidebar.onRenameGroup = { [weak self] g, text in self?.renameGroup(g, to: text) }
+        sidebar.groupColor = { [weak self] g in self?.group(withID: g)?.colorIndex ?? 0 }
         sidebar.onEmptyMenu = { [weak self] p in self?.showSidebarMenu(at: p) }
         toolbar.toggle.onClick = { [weak self] in self?.toggleSidebar() }
         toolbar.back.onClick = { [weak self] in self?.goBack() }

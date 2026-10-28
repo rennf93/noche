@@ -37,6 +37,8 @@ public enum SettingKeys {
         SettingKey(name: BookmarksBarMode.settingKey, type: .choice(BookmarksBarMode.allCases.map(\.rawValue)), defaultValue: BookmarksBarMode.newTabOnly.rawValue),
         // Minutes a background tab may sit unused before the app discards its page (B: README builder calls).
         SettingKey(name: "discardAfterMinutes", type: .int(1...525_600), defaultValue: "120"),
+        // "Add emoji to new tab groups" (M83, B): a new group takes an emoji from `GroupEmoji.list`. Off by default.
+        SettingKey(name: "emojiForNewGroups", type: .bool, defaultValue: "0"),
     ]
 
     /// The discard threshold in minutes: the stored value when it is valid for the key's range, else the default (120).

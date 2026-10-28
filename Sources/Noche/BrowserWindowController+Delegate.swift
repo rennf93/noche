@@ -48,6 +48,7 @@ extension BrowserWindowController {
         }
         list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: false, activate: active)
         if let at = pending?.index { list.move(added.id, to: at) }  // the index is inside the tab's own container (|containerIndex|)
+        if let join = groupJoins.removeValue(forKey: tab.identifier) { joinGroup(added.id, join) }
         if let restore {
             if !restoreStarted {
                 restoreStarted = true

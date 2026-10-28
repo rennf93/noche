@@ -21,16 +21,20 @@ enum SidebarContent {
     case group(name: String, icon: String?, colorIndex: Int, collapsed: Bool, hasActive: Bool)
 }
 
-/// Draws the outline around each expanded group (the header and its children), under the rows.
+/// Draws the outline around each expanded group (the header and its children), under the rows, in the group's color.
 final class GroupBoxesView: NSView {
     override var isFlipped: Bool { true }
-    var boxes: [CGRect] = [] { didSet { if boxes != oldValue { needsDisplay = true } } }
+    struct Box: Equatable { var frame: CGRect; var colorIndex: Int }
+    private static let neutral = BarHook.on("GRP_NOTINT")  // negative control: every outline stays neutral
+    var boxes: [Box] = [] { didSet { if boxes != oldValue { needsDisplay = true } } }
+    /// The outline color of each box, in order.
+    var strokes: [NSColor] { boxes.map { ChromeStyle.groupOutline(colorIndex: $0.colorIndex) } }
     override func draw(_ dirtyRect: NSRect) {
-        for box in boxes where box.intersects(dirtyRect) {
-            let path = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: ChromeStyle.rowRadius, yRadius: ChromeStyle.rowRadius)
+        for box in boxes where box.frame.intersects(dirtyRect) {
+            let path = NSBezierPath(roundedRect: box.frame.insetBy(dx: 0.5, dy: 0.5), xRadius: ChromeStyle.rowRadius, yRadius: ChromeStyle.rowRadius)
             ChromeStyle.groupFill.setFill()
             path.fill()
-            ChromeStyle.groupOutline.setStroke()
+            (Self.neutral ? ChromeStyle.groupOutline : ChromeStyle.groupOutline(colorIndex: box.colorIndex)).setStroke()
             path.stroke()
         }
     }
@@ -69,6 +73,10 @@ final class SidebarView: DragView {
     var onTabMenu: ((TabID, NSPoint) -> Void)?      // the tab, click in window coordinates
     var onReset: ((TabID) -> Void)?                 // the return glyph of a pinned tab off its pinned page
     var onToggleGroup: ((GroupID) -> Void)?
+    var onGroupMenu: ((GroupID, NSPoint) -> Void)?  // the group, click in window coordinates
+    var onRenameTab: ((TabID, String) -> Void)?
+    var onRenameGroup: ((GroupID, String) -> Void)?
+    var groupColor: (GroupID) -> Int = { _ in 0 }   // a group's colorIndex, for its outline
     var onEmptyMenu: ((NSPoint) -> Void)?
 
     override init(frame: NSRect) {
@@ -124,6 +132,36 @@ final class SidebarView: DragView {
         put(boxesView, document.bounds)
     }
 
+    /// The realized view of |entry| after scrolling it into view; nil when the entry is not in the layout.
+    private func reveal(_ match: (SidebarEntry) -> Bool) -> NSView? {
+        guard let p = layout.placements.first(where: { match($0.entry) }) else { return nil }
+        document.scrollToVisible(p.frame.offsetBy(dx: 0, dy: -Self.strip).insetBy(dx: 0, dy: -6))
+        realize(reconfigure: true)
+        return realized[p.entry]
+    }
+
+    /// The row's name becomes an inline field. False when the group is not in the layout.
+    @discardableResult
+    func beginRename(group g: GroupID) -> Bool {
+        guard let v = reveal({ $0 == .group(g) }) as? GroupRowView else { return false }
+        v.beginRename()
+        return true
+    }
+
+    /// A tab row's title becomes an inline field (a grid tile has no title to edit: false, the caller asks another way).
+    @discardableResult
+    func beginRename(tab id: TabID) -> Bool {
+        guard let v = reveal({ if case .tab(id, _) = $0 { true } else { false } }) as? TabRowView else { return false }
+        v.beginRename()
+        return true
+    }
+
+    /// The realized view of a tab or tile (an anchor for popovers), scrolled into view.
+    func anchor(tab id: TabID) -> NSView? { reveal({ if case .tab(id, _) = $0 { true } else if case .gridTile(id) = $0 { true } else { false } }) }
+    func anchor(group g: GroupID) -> NSView? { reveal({ $0 == .group(g) }) }
+    /// The realized group row views (checks read their icon tint and name).
+    func groupRow(_ g: GroupID) -> GroupRowView? { realized[.group(g)] as? GroupRowView }
+
     /// A right click on no row (the rows take their own): the sidebar's menu.
     override func rightMouseDown(with event: NSEvent) { onEmptyMenu?(event.locationInWindow) }
 
@@ -149,7 +187,6 @@ final class SidebarView: DragView {
             entries = new
             layoutWidth = bounds.width
             layout = SidebarLayout(entries: new, width: Self.fixedWidth ? ChromeStyle.sidebarWidth : bounds.width)  // negative control: a resize does not reflow the grid
-            boxesView.boxes = layout.boxes.map { $0.frame.offsetBy(dx: 0, dy: -Self.strip) }
             for p in layout.placements {
                 switch p.entry {
                 case .divider: divider.frame = p.frame.offsetBy(dx: 0, dy: -Self.strip)
@@ -158,6 +195,7 @@ final class SidebarView: DragView {
                 }
             }
         }
+        boxesView.boxes = layout.boxes.map { .init(frame: $0.frame.offsetBy(dx: 0, dy: -Self.strip), colorIndex: groupColor($0.group)) }  // a color change moves no entry
         updateScroll()
         if let selected, selected != lastSelected, !Self.noReveal,
            let p = layout.placements.first(where: {
@@ -212,6 +250,8 @@ final class SidebarView: DragView {
             let v = spareGroups.popLast() ?? GroupRowView(frame: .zero)
             v.clearHover()
             v.onClick = { [weak self, weak v] in if let g = v?.groupID { self?.onToggleGroup?(g) } }
+            v.onContextMenu = { [weak self, weak v] p in if let g = v?.groupID { self?.onGroupMenu?(g, p) } }
+            v.onRename = { [weak self, weak v] text in if let g = v?.groupID { self?.onRenameGroup?(g, text) } }
             view = v
         default:
             let v = spareTabs.popLast() ?? TabRowView(frame: .zero)
@@ -220,6 +260,7 @@ final class SidebarView: DragView {
             v.onClose = { [weak self, weak v] in if let id = v?.tabID { self?.onClose?(id) } }
             v.onContextMenu = { [weak self, weak v] p in if let id = v?.tabID { self?.onTabMenu?(id, p) } }
             v.onReset = { [weak self, weak v] in if let id = v?.tabID { self?.onReset?(id) } }
+            v.onRename = { [weak self, weak v] text in if let id = v?.tabID { self?.onRenameTab?(id, text) } }
             view = v
         }
         document.addSubview(view)

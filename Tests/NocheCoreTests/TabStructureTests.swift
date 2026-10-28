@@ -116,6 +116,26 @@ final class TabStructureTests: XCTestCase {
         XCTAssertEqual(l.topOrder.first, .group(g3))
         XCTAssertFalse(item(l, t[0]).inGrid)
     }
+    func testEmptyGroupColorAndIcon() {
+        var (l, t) = list(2)
+        let g = l.createEmptyGroup(name: "Reading")!
+        XCTAssertEqual(l.dayOrder, [.group(g), .tab(t[0]), .tab(t[1])])
+        XCTAssertEqual(l.groups.first?.name, "Reading")
+        XCTAssertFalse(l.groups[0].isCollapsed)
+        XCTAssertNil(l.createEmptyGroup(groupID: g))
+        l.setGroupColor(g, 5)
+        XCTAssertEqual(l.groups[0].colorIndex, 5)
+        l.setGroupColor(g, 99)
+        XCTAssertEqual(l.groups[0].colorIndex, 7)
+        l.setGroupColor(g, -3)
+        XCTAssertEqual(l.groups[0].colorIndex, 0)
+        l.setGroupIcon(g, "star")
+        XCTAssertEqual(l.groups[0].icon, "star")
+        l.setGroupIcon(g, "")
+        XCTAssertNil(l.groups[0].icon)
+        l.setGroup(t[1], g)  // an empty group takes a tab like any other
+        XCTAssertEqual(item(l, t[1]).groupID, g)
+    }
     func testCreateGroupFromAGroupedTabGoesRightAfterThatGroup() {
         var (l, t) = list(3)
         let g = l.createGroup(with: t[0])!

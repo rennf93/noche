@@ -25,6 +25,13 @@ public struct TabGroup: Equatable, Sendable {
     }
 }
 
+/// The emoji a new group gets when "Add emoji to new tab groups" is on (fixed list, spec note section 2).
+public enum GroupEmoji {
+    public static let list = ["📚", "💼", "🎮", "🎵", "🛒", "✈️", "🧪", "🎨", "📰", "🌱", "☕️", "💡"]
+    /// The |n|-th group made takes the |n|-th emoji, wrapping (negative counts clamp to the first).
+    public static func pick(_ n: Int) -> String { list[max(n, 0) % list.count] }
+}
+
 /// One entry of a container that mixes loose tabs and groups (the persistent area and the day list).
 public enum TopRef: Hashable, Sendable {
     case tab(TabID)

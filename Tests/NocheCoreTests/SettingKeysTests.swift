@@ -2,6 +2,14 @@ import XCTest
 @testable import NocheCore
 
 final class SettingKeysTests: XCTestCase {
+    func testEmojiForNewGroupsKeyAndPick() {
+        XCTAssertEqual(SettingKeys.key("emojiForNewGroups")?.defaultValue, "0")
+        XCTAssertTrue(SettingKeys.isValid("emojiForNewGroups", "1") && !SettingKeys.isValid("emojiForNewGroups", "2"))
+        XCTAssertEqual(GroupEmoji.pick(0), GroupEmoji.list[0])
+        XCTAssertEqual(GroupEmoji.pick(GroupEmoji.list.count), GroupEmoji.list[0])
+        XCTAssertEqual(GroupEmoji.pick(-5), GroupEmoji.list[0])
+        XCTAssertEqual(Set(GroupEmoji.list).count, GroupEmoji.list.count)
+    }
     func testEveryDefaultIsValidAndNamesAreUnique() {
         XCTAssertEqual(Set(SettingKeys.all.map(\.name)).count, SettingKeys.all.count)
         for k in SettingKeys.all { XCTAssertTrue(k.isValid(k.defaultValue), "\(k.name) default \(k.defaultValue)") }

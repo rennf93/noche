@@ -137,12 +137,14 @@ extension SelfTest {
         let want = ["Pin", "---", "Chat With This Tab", "Open as Split", "---", "Duplicate", "New Group with Tab", "Move to Group", "Move to Profile", "---",
                     "Copy Link", "---", "Rename...", "Change Icon...", "Edit Pinned Page", "---", "Close"]
         guard titles(m.menu) == want else { return finish(false, "tab menu \(titles(m.menu)), want \(want)") }
-        guard enabledTitles(m.menu) == ["Pin", "Duplicate", "Copy Link", "Close"] else { return finish(false, "enabled items \(enabledTitles(m.menu)), want Pin, Duplicate, Copy Link, Close") }
+        guard enabledTitles(m.menu) == ["Pin", "Duplicate", "New Group with Tab", "Copy Link", "Rename...", "Change Icon...", "Close"] else {
+            return finish(false, "enabled items \(enabledTitles(m.menu)), want Pin, Duplicate, New Group with Tab, Copy Link, Rename..., Change Icon..., Close (Move to Group waits for a group)")
+        }
         guard sameKey(item(m.menu, "Copy Link"), menuItem("Copy URL")), sameKey(item(m.menu, "Close"), menuItem("Close Tab")),
               sameKey(item(m.menu, "New Group with Tab"), menuItem("New Group with Tab")) else { return finish(false, "key equivalents differ from the menu bar's") }
         guard win.activeTab === active else { return finish(false, "a right click changed the selection") }
         BrowserWindowController.actionCounts = [:]
-        ContextMenus.dismiss(choosing: item(m.menu, "Rename..."))  // a disabled item does nothing
+        ContextMenus.dismiss(choosing: item(m.menu, "Chat With This Tab"))  // a disabled item does nothing
         guard BrowserWindowController.actionCounts.isEmpty, rowCount == 3 else { return finish(false, "a disabled item acted: \(BrowserWindowController.actionCounts)") }
         // Control-click on a row is a right click: the menu is requested and the tab is not selected.
         ContextMenus.dismiss(choosing: nil)
@@ -168,7 +170,7 @@ extension SelfTest {
         ContextMenus.dismiss(choosing: item(x.menu, "Close"))
         guard await until(10, { rowCount == 3 && !win.tabs.contains { $0 === t1 } }) else { return finish(false, "Close left \(rowCount) rows, tab still there: \(win.tabs.contains { $0 === t1 })") }
         guard win.activeTab === activeNow, violations.isEmpty else { return finish(false, "Close changed the selection or \(violations)") }
-        finish(true, "tab row menu in the section 3 order with Pin, Duplicate, Copy Link and Close enabled and the rest disabled, keys equal the menu bar's, a right click does not select, Copy Link and Duplicate and Close act on the right-clicked tab \(violations)")
+        finish(true, "tab row menu in the section 3 order with Pin, Duplicate, New Group with Tab, Copy Link, Rename..., Change Icon... and Close enabled and the rest disabled, keys equal the menu bar's, a right click does not select, Copy Link and Duplicate and Close act on the right-clicked tab \(violations)")
     }
 
     func ctxSidebar() async {
@@ -183,11 +185,11 @@ extension SelfTest {
         }
         guard let a = await open() else { return finish(false, "no sidebar menu from a right click on empty space") }
         guard titles(a.menu) == want else { return finish(false, "sidebar menu \(titles(a.menu)), want \(want)") }
-        guard enabledTitles(a.menu) == ["New Tab", "Bookmark All Tabs", "Auto-Hide Tabs", "Close All Tabs"] else { return finish(false, "enabled items \(enabledTitles(a.menu)) with a page loaded and nothing closed yet") }
+        guard enabledTitles(a.menu) == ["New Tab", "New Group", "Bookmark All Tabs", "Auto-Hide Tabs", "Close All Tabs"] else { return finish(false, "enabled items \(enabledTitles(a.menu)) with a page loaded and nothing closed yet") }
         for t in ["New Tab", "Reopen Closed Tab", "Show Tabs in Sidebar", "Auto-Hide Tabs", "Close All Tabs"] where !sameKey(item(a.menu, t), menuItem(t)) { return finish(false, "\(t) key differs from the menu bar's") }
         guard item(a.menu, "Show Tabs in Sidebar")?.state == .on, item(a.menu, "Auto-Hide Tabs")?.state == .off else { return finish(false, "check marks: Show Tabs in Sidebar on, Auto-Hide Tabs off") }
         BrowserWindowController.actionCounts = [:]
-        ContextMenus.dismiss(choosing: item(a.menu, "New Group"))
+        ContextMenus.dismiss(choosing: item(a.menu, "New Profile..."))
         guard BrowserWindowController.actionCounts.isEmpty, rowCount == 1 else { return finish(false, "a disabled item acted: \(BrowserWindowController.actionCounts)") }
         // New Tab
         guard let b = await open() else { return finish(false, "no menu for New Tab") }
@@ -210,7 +212,7 @@ extension SelfTest {
         guard let e = await open() else { return finish(false, "no menu for Auto-Hide Tabs") }
         ContextMenus.dismiss(choosing: item(e.menu, "Auto-Hide Tabs"))
         guard ctl.sidebarHidden, ctl.sidebarMenuEntries().first(where: { $0.title == "Auto-Hide Tabs" })?.checked == true else { return finish(false, "Auto-Hide Tabs did not hide the sidebar (hidden \(ctl.sidebarHidden))") }
-        finish(violations.isEmpty, "empty-space menu in the section 3 order, New Tab, Close All Tabs (then disabled on one blank tab), Reopen Closed Tab and Auto-Hide Tabs work, the rest disabled, keys equal the menu bar's \(violations)")
+        finish(violations.isEmpty, "empty-space menu in the section 3 order, New Tab, New Group, Close All Tabs (then disabled on one blank tab), Reopen Closed Tab and Auto-Hide Tabs work, the rest disabled, keys equal the menu bar's \(violations)")
     }
 }
 #endif

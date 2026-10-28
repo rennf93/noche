@@ -14,6 +14,7 @@ struct CtxEntry {
     var submenu = false           // a submenu header (its items arrive with the feature)
     var children: [CtxEntry]?     // a live submenu's items; the header is enabled by |enabled|
     var separator = false
+    var view: NSView?             // a row drawn by a view (the group menu's color swatches)
     static let sep = CtxEntry(title: "", separator: true)
     static func later(_ title: String, _ milestone: String, id: String? = nil, submenu: Bool = false, checked: Bool = false) -> CtxEntry {
         CtxEntry(title: title, id: id, checked: checked, milestone: milestone, submenu: submenu)
@@ -165,6 +166,7 @@ enum ContextMenus {
 #endif
             if let run { item.representedObject = Run { run() } }
             item.isEnabled = e.children != nil ? e.enabled : run != nil && e.enabled && !e.submenu
+            if let v = e.view { item.view = v; item.isEnabled = true }
             menu.addItem(item)
         }
         return menu
@@ -186,6 +188,11 @@ extension BrowserWindowController {
         guard i < list.items.count else { return }
         let t = list.items[i]
         ContextMenus.present(ContextMenus.menu(tabMenuEntries(for: t)), kind: "tab", in: self, at: point) {}
+    }
+
+    func showGroupMenu(group g: GroupID, at point: NSPoint) {
+        guard group(withID: g) != nil else { return }
+        ContextMenus.present(ContextMenus.menu(groupMenuEntries(for: g)), kind: "group", in: self, at: point) {}
     }
 
     func showSidebarMenu(at point: NSPoint) {
@@ -222,13 +229,48 @@ extension BrowserWindowController {
                 E(title: "Reset to Pinned Page", run: { [weak self] in self?.resetToPinned(id) }, enabled: off),
                 E(title: "Copy Pinned URL", run: { [weak self] in self?.copyPinnedURL(id) })])
             : .later("Edit Pinned Page", "M1.6", submenu: true)
-        var middle: [E] = [duplicate, .later("New Group with Tab", "M1.6", id: "tabs.newGroupWithTabs"), .later("Move to Group", "M1.6", submenu: true),
-                           .later("Move to Profile", "M1.7", submenu: true), .sep, copyLink]
+        // New Group with Tab and Move to Group (the groups of this window, the tab's own checked).
+        let newGroup = E(title: "New Group with Tab", id: "tabs.newGroupWithTabs") { [weak self] in self?.newGroupWithTab(id) }
+        let groups = list.groups
+        let moveTo = E(title: "Move to Group", run: {}, enabled: !groups.isEmpty, children: groups.map { g in
+            E(title: g.name, run: { [weak self] in self?.moveToGroup(id, g.id) }, checked: t.groupID == g.id)
+        })
+        var middle: [E] = [duplicate, newGroup, moveTo, .later("Move to Profile", "M1.7", submenu: true), .sep, copyLink]
 #if NOCHE_TESTHOOKS
         if ContextMenus.env("NOCHE_TEST_CTX_TABORDER") { middle[0] = copyLink; middle[5] = duplicate }  // negative control: Copy Link and Duplicate trade places
 #endif
+        let rename = E(title: "Rename...") { [weak self] in self?.beginRename(tab: id) }
+        let icon = E(title: "Change Icon...") { [weak self] in self?.changeIcon(tab: id) }
         return [pin, .sep, .later("Chat With This Tab", "M2"), .later("Open as Split", "M1.10"), .sep] + middle
-            + [.sep, .later("Rename...", "M1.6"), .later("Change Icon...", "M1.6"), editPinned, .sep, close]
+            + [.sep, rename, icon, editPinned, .sep, close]
+    }
+
+    /// The group row's menu (live-ui.md section 3). Chat With, Move to Window and Move to Profile wait for their features (Move to Window for
+    /// Task 5b); the rest is live. The separators are a builder call: Pin | New Tab in Group, Chat With | Separate Tabs ... Copy All Links |
+    /// the swatches | Rename, Change Icon | Move to Bookmark Bar | Delete.
+    func groupMenuEntries(for g: GroupID) -> [CtxEntry] {
+        typealias E = CtxEntry
+        guard let grp = group(withID: g) else { return [] }
+        let kids = members(of: g)
+        let pin = E(title: grp.isPinned ? "Unpin" : "Pin") { [weak self] in self?.togglePin(group: g) }
+        let swatches = SwatchRowView(selected: grp.colorIndex)
+        swatches.onPick = { [weak self] i in self?.setGroupColor(g, i) }
+        var rename = E(title: "Rename...") { [weak self] in self?.beginRename(group: g) }
+        var icon = E(title: "Change Icon...") { [weak self] in self?.changeIcon(group: g) }
+#if NOCHE_TESTHOOKS
+        if ContextMenus.env("NOCHE_TEST_CTX_GROUPORDER") { swap(&rename, &icon) }  // negative control: Rename and Change Icon trade places
+#endif
+        return [pin, .sep,
+                E(title: "New Tab in Group", id: "file.newTabInGroup") { [weak self] in self?.newTabInGroup(g) },
+                .later("Chat With \"\(grp.name)\"", "M2"), .sep,
+                E(title: "Separate Tabs") { [weak self] in self?.separateTabs(g) },
+                E(title: "Duplicate") { [weak self] in self?.duplicateGroup(g) },
+                .later("Move to Window", "M1.6", submenu: true),
+                .later("Move to Profile", "M1.7", submenu: true),
+                E(title: "Copy All Links", run: { [weak self] in self?.copyAllLinks(g) }, enabled: !kids.isEmpty),
+                .sep, E(title: "Colors", view: swatches), .sep, rename, icon, .sep,
+                E(title: "Move to Bookmark Bar", run: { [weak self] in self?.moveGroupToBookmarkBar(g) }, enabled: kids.contains { isWeb($0.url) }),
+                E(title: "Delete") { [weak self] in self?.deleteGroup(g) }]
     }
 
     func sidebarMenuEntries() -> [CtxEntry] {
@@ -242,7 +284,7 @@ extension BrowserWindowController {
 #endif
         let bookmarkAll = CtxEntry(title: "Bookmark All Tabs", run: { [weak self] in self?.bookmarkAllTabs() }, enabled: !bookmarkableTabs.isEmpty)
         return [tableRow("file.newTab") { [weak self] in self?.newTab() }, reopen, .sep,
-                .later("New Group", "M1.6"), .later("New Live Group", "M1.6", submenu: true), .later("New Profile...", "M1.7"), .sep,
+                CtxEntry(title: "New Group", run: { [weak self] in self?.newGroup() }), .later("New Live Group", "M1.6", submenu: true), .later("New Profile...", "M1.7"), .sep,
                 bookmarkAll, .sep,
                 .later("Show Tabs in Sidebar", "M1.6", id: "view.showTabsInSidebar", checked: true),
                 tableRow("view.autoHideTabs") { [weak self] in self?.toggleSidebar() }, .sep, closeAll]

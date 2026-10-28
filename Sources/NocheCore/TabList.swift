@@ -456,6 +456,27 @@ public struct TabList: Equatable, Sendable {
     @discardableResult
     public mutating func unpinGroup(_ id: GroupID) -> Bool { moveGroup(id, to: .day(0)) }
 
+    /// An empty, expanded group at the top of the day list (the sidebar menu's New Group). A known id changes nothing.
+    @discardableResult
+    public mutating func createEmptyGroup(name: String = "Untitled", groupID: GroupID = GroupID()) -> GroupID? {
+        guard groupIndex(groupID) == nil else { return nil }
+        var m = model()
+        m.put(.group(groupID), at: .day(0))
+        groups.append(TabGroup(id: groupID, name: name, colorIndex: 0, icon: nil, isCollapsed: false, isPinned: false))
+        commit(m)
+        return groupID
+    }
+
+    /// The group's color, an index into the 8 swatches (out of range is clamped).
+    public mutating func setGroupColor(_ id: GroupID, _ colorIndex: Int) {
+        if let g = groupIndex(id) { groups[g].colorIndex = min(max(colorIndex, 0), 7) }
+    }
+
+    /// The group's icon (an emoji or a symbol name); nil or empty goes back to the default.
+    public mutating func setGroupIcon(_ id: GroupID, _ icon: String?) {
+        if let g = groupIndex(id) { groups[g].icon = icon?.isEmpty == false ? icon : nil }
+    }
+
     public mutating func collapse(_ id: GroupID, _ collapsed: Bool = true) {
         if let g = groupIndex(id) { groups[g].isCollapsed = collapsed }
     }

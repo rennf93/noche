@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return w
     }
     lazy var bookmarksMenuDelegate = BookmarksMenuDelegate(app: self)
+    lazy var moveToGroupDelegate = MoveToGroupMenuDelegate(app: self)
     /// View > Show Bookmarks Bar (stored in the `setting` table as `bookmarksBar`, loaded when the store opens).
     var barMode = BookmarksBarMode.newTabOnly
     var writer: StoreWriter?
@@ -277,6 +278,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func javaScriptConsole(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_CONSOLE", note: "javaScriptConsole") }
     @objc func duplicateTab(_ s: Any?) { active?.duplicateTab() }
     @objc func pinTab(_ s: Any?) { active?.togglePin() }
+    @objc func newGroupWithTab(_ s: Any?) { active?.newGroupWithTab() }
+    @objc func newTabInGroup(_ s: Any?) { active?.newTabInGroup() }
+    @objc func renameTab(_ s: Any?) { if let c = active, let id = c.list.activeID { c.beginRename(tab: id) } }
+    @objc func changeTabIcon(_ s: Any?) { if let c = active, let id = c.list.activeID { c.changeIcon(tab: id) } }
     /// History and Downloads are Noche's own windows.
     @objc func showHistory(_ s: Any?) { if !closing { history.show() } }
     @objc func showDownloads(_ s: Any?) { if !closing { downloads.show() } }
