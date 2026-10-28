@@ -263,7 +263,7 @@ extension BrowserWindowController {
         return [pin, .sep,
                 E(title: "New Tab in Group", id: "file.newTabInGroup") { [weak self] in self?.newTabInGroup(g) },
                 .later("Chat With \"\(grp.name)\"", "M2"), .sep,
-                E(title: "Separate Tabs") { [weak self] in self?.separateTabs(g) },
+                E(title: "Separate Tabs") { [weak self] in if !BarHook.on("GRP_NOSEP") { self?.separateTabs(g) } },  // the hook: the menu item does nothing
                 E(title: "Duplicate") { [weak self] in self?.duplicateGroup(g) },
                 .later("Move to Window", "M1.6", submenu: true),
                 .later("Move to Profile", "M1.7", submenu: true),

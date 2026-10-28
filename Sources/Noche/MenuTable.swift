@@ -81,6 +81,12 @@ enum MenuTable {
     private static func later(_ title: String, _ id: String?, _ milestone: String) -> E { E(title: title, id: id, milestone: milestone) }
     private static func later(_ title: String, _ milestone: String) -> E { E(title: title, milestone: milestone) }
     private static func menu(_ title: String, _ items: [E], role: E.Role? = nil) -> E { E(title: title, submenu: items, role: role) }
+    /// Tabs > Move to Group: filled when it opens. The action is a placeholder that gives the item a rule: disabled while the window has no group (the hook: always on).
+    private static let moveToGroup: E = {
+        var e = app("Move to Group", nil, #selector(AppDelegate.moveToGroupMenu(_:)), enabled: { !($0.window?.list.groups.isEmpty ?? true) || BarHook.on("GRP_MTGON") })
+        e.submenu = []
+        return e
+    }()
 
     static let bar: [MenuEntry] = [
         menu("Noche", [
@@ -227,7 +233,7 @@ enum MenuTable {
             app("Duplicate", "tabs.duplicateTab", #selector(AppDelegate.duplicateTab(_:))),
             sep,
             app("New Group with Tab", "tabs.newGroupWithTabs", #selector(AppDelegate.newGroupWithTab(_:)), enabled: { $0.window?.list.activeID != nil }),
-            menu("Move to Group", []),  // the groups of the window are listed when it opens (MoveToGroupMenuDelegate)
+            moveToGroup,  // the groups of the window are listed when it opens (MoveToGroupMenuDelegate)
             later("Move to Profile", "M1.7"),
             later("Move to Window", "M1.6"),
             sep,

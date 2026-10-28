@@ -21,8 +21,8 @@ extension SelfTest {
             if m.contains(.command) { mods.append("cmd") }
             // AppKit rewrites "[" and "]" to the layout's own keys (the Spanish layout gives "ñ" and "´"): report the US ones.
             let key = ["ñ": "[", "´": "]", "¿": ":", "¡": ";", "`": "'"][i.keyEquivalent] ?? i.keyEquivalent
-            // Task Manager is enabled exactly when the engine can execute IDC_TASK_MANAGER: asserted by menu-diff, not written down.
-            let enabled = i.title == "Task Manager" ? "e" : i.submenu != nil ? "1" : (i.action != nil && i.target == nil ? "r" : (i.isEnabled ? "1" : "0"))
+            // A submenu with an action (Move to Group) is validated like any item. Task Manager is enabled exactly when the engine can execute IDC_TASK_MANAGER: asserted by menu-diff, not written down.
+            let enabled = i.title == "Task Manager" ? "e" : i.submenu != nil && i.action == nil ? "1" : (i.action != nil && i.target == nil ? "r" : (i.isEnabled ? "1" : "0"))
             out.append("\(path)|\(i.title.replacingOccurrences(of: "…", with: "..."))|\(key)|\(key.isEmpty ? "" : mods.joined(separator: "+"))|\(enabled)")
             // The bar lists its menus first; below the bar a submenu's lines follow its own line.
             if path != "bar", let sub = i.submenu, i.title != "Services" { out += menuLines(sub, path: "\(path)/\(i.title)") }

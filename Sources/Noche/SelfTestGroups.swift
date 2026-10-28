@@ -52,6 +52,9 @@ extension SelfTest {
         BrowserWindowController.pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.noche.selftest"))
         BrowserWindowController.pasteboard.clearContents()
         let t = c.list.items.map(\.id)  // A, B, C
+        let moveToGroup = menuItem("Move to Group")
+        moveToGroup?.menu?.update()
+        guard moveToGroup?.isEnabled == false else { return finish(false, "Tabs > Move to Group is enabled in a window with no group") }
         line("info", "step: Ctrl+Cmd+N on B: a group where B was, B in it, its name in e")
         guard await select(c, t[1]) else { return finish(false, "tab B did not activate") }
         guard key("n", code: 45, [.control, .command], menuOnly: true) else { return finish(false, "Ctrl+Cmd+N was not handled") }
@@ -93,7 +96,10 @@ extension SelfTest {
         guard let bar = menuItem("Move to Group")?.submenu else { return finish(false, "no Tabs > Move to Group submenu") }
         bar.update()
         bar.delegate?.menuNeedsUpdate?(bar)  // AppKit asks the delegate just before it shows the menu (update() does not)
-        guard bar.items.map(\.title) == ["Reading"], bar.items.first?.state == .on else { return finish(false, "Tabs > Move to Group lists \(bar.items.map(\.title)), want Reading checked for B") }
+        moveToGroup?.menu?.update()
+        guard bar.items.map(\.title) == ["PINNED", "Reading"], bar.items.first?.isEnabled == false, bar.items.last?.state == .on, moveToGroup?.isEnabled == true else {
+            return finish(false, "Tabs > Move to Group lists \(bar.items.map(\.title)) (header enabled \(String(describing: bar.items.first?.isEnabled)), enabled \(String(describing: moveToGroup?.isEnabled))), want a disabled PINNED header, then Reading checked for B, the item enabled")
+        }
         line("info", "step: New Tab in Group (Opt+Cmd+T): disabled while the active tab ")
         guard await select(c, t[0]) else { return finish(false, "tab A did not activate") }
         let newInGroup = menuItem("New Tab in Group")
@@ -128,6 +134,20 @@ extension SelfTest {
         guard await until(15, { win.tabs.count == 7 && c.list.groups.count == 2 }), let copy = c.list.groups.first(where: { $0.id != g })?.id else { return finish(false, "Duplicate left \(win.tabs.count) engine tabs and \(c.list.groups.count) groups, want 7 and 2") }
         guard await until(15, { c.list.items.filter { $0.groupID == copy }.map(\.url) == urls }) else { return finish(false, "the copy holds \(c.list.items.filter { $0.groupID == copy }.map(\.url)), want \(urls)") }
         guard c.group(withID: copy)?.name == "Reading", c.group(withID: copy)?.colorIndex == c.group(withID: g)?.colorIndex else { return finish(false, "the copy is \(String(describing: c.group(withID: copy)))") }
+        line("info", "step: Duplicate on a pinned group: the copy is pinned too")
+        c.togglePin(group: g)
+        guard await until(5, { c.group(withID: g)?.isPinned == true }), let pdm = await groupMenu(c, g) else { return finish(false, "no pinned group to duplicate") }
+        choose(pdm.menu, "Duplicate")
+        guard await until(15, { win.tabs.count == 10 && c.list.groups.count == 3 }), let pcopy = c.list.groups.first(where: { $0.id != g && $0.id != copy })?.id else { return finish(false, "the pinned Duplicate left \(win.tabs.count) engine tabs and \(c.list.groups.count) groups, want 10 and 3") }
+        guard await until(15, { c.members(of: pcopy).map(\.url) == urls }), c.group(withID: pcopy)?.isPinned == true, c.list.topOrder.contains(.group(pcopy)) else {
+            return finish(false, "the copy of a pinned group is pinned \(String(describing: c.group(withID: pcopy)?.isPinned)), persistent area \(c.list.topOrder), holds \(c.members(of: pcopy).count) tabs")
+        }
+        guard let pxm = await groupMenu(c, pcopy) else { return finish(false, "no menu for the pinned copy") }
+        choose(pxm.menu, "Delete")  // answered yes (Confirm.answer is still true)
+        guard await until(15, { c.group(withID: pcopy) == nil && win.tabs.count == 7 }) else { return finish(false, "deleting the pinned copy left \(win.tabs.count) engine tabs") }
+        c.togglePin(group: g)
+        guard await until(5, { c.group(withID: g)?.isPinned == false }) else { return finish(false, "the group did not unpin") }
+        Confirm.asked = []
         Confirm.answer = false
         guard let xm = await groupMenu(c, copy) else { return finish(false, "no group menu for Delete") }
         choose(xm.menu, "Delete")
@@ -166,7 +186,13 @@ extension SelfTest {
         guard await until(5, { c.sidebar.groupRow(g4)?.renameField.isEditing == true }), let f4 = c.sidebar.groupRow(g4)?.renameField else { return finish(false, "the empty group's name is not in edit") }
         typeName(f4, "Ideas")
         guard c.list.groups[0].name == "Ideas", storedGroups().first?.name == "Ideas" else { return finish(false, "the empty group is named \(c.list.groups[0].name), stored \(storedGroups().map(\.name))") }
-        finish(violations.isEmpty, "Ctrl+Cmd+N groups the active tab with its name in edit (Return commits, Escape cancels), a click collapses and opens it, Move to Group and Opt+Cmd+T (disabled off a group) fill it, Pin and Unpin move it, Copy All Links, Duplicate and Move to Bookmark Bar act, Delete asks first for 3 tabs (refused: nothing closes) and not for 1, Separate Tabs keeps the tabs, the sidebar menu's New Group makes an empty one \(violations)")
+        line("info", "step: a join whose tab closes is dropped.")
+        guard let victim = win.tabs.first(where: { $0 !== c.activeTab }) else { return finish(false, "no tab to close") }
+        c.groupJoins[victim.identifier] = .init(group: g4, template: nil)
+        let before = win.tabs.count
+        c.closeTab(victim)
+        guard await until(10, { win.tabs.count == before - 1 }), c.groupJoins.isEmpty else { return finish(false, "after the tab closed \(c.groupJoins.count) joins are left, want 0") }
+        finish(violations.isEmpty, "Ctrl+Cmd+N groups the active tab with its name in edit (Return commits, Escape cancels), a click collapses and opens it, Move to Group and Opt+Cmd+T (disabled off a group) fill it, Pin and Unpin move it, Copy All Links, Duplicate (a pinned group's copy is pinned) and Move to Bookmark Bar act, Delete asks first for 3 tabs (refused: nothing closes) and not for 1, Separate Tabs keeps the tabs, the sidebar menu's New Group makes an empty one, Tabs > Move to Group is disabled without a group and lists a disabled PINNED header first, a join whose tab closes is dropped \(violations)")
     }
 
     // MARK: group-colors
@@ -182,19 +208,13 @@ extension SelfTest {
         return "scale \(scale) best \(String(describing: best))"
     }
 
-    /// A view that draws the folder symbol in |rgb| the way the group row does, written out here from the hand-listed colors: the reference the
-    /// row's icon is compared with, through the same bitmap path (the bitmap's color space shifts a thin stroke, so a bare color match reads nothing).
-    final class IconReference: NSView {
-        let rgb: UInt32, icon: NSRect
-        /// |icon| is where the row draws the symbol inside a view of |size|: the same fractional position gives the same antialiasing.
-        init(_ rgb: UInt32, size: NSSize, icon: NSRect) { self.rgb = rgb; self.icon = icon; super.init(frame: NSRect(origin: .zero, size: size)); wantsLayer = true }  // layer-backed like the row: the same compositing
-        required init?(coder: NSCoder) { fatalError() }
-        override var isFlipped: Bool { true }
-        override func draw(_ dirtyRect: NSRect) {
-            let color = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
-            guard let base = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 14, weight: .regular)) else { return }
-            NSImage(size: base.size, flipped: false) { r in base.draw(in: r); color.set(); r.fill(using: .sourceAtop); return true }.draw(in: icon)
-        }
+    /// A group row of its own, set up like |row| and tinted with |rgb| (a hand-listed color): the reference the row's icon is compared with. It is the
+    /// same view class drawing the same symbol through the same call, so the comparison needs no tolerance.
+    func referenceRow(like row: GroupRowView, _ rgb: UInt32) -> GroupRowView {
+        let ref = GroupRowView(frame: row.frame)
+        ref.configure(name: row.name, icon: row.icon, colorIndex: 0, collapsed: row.isCollapsed, hasActive: false)
+        ref.tintOverride = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        return ref
     }
 
     /// The open group's outline as drawn from a hand-listed color: a 1 pt rounded stroke at 0.55 over a white 5% fill, the same recipe as the sidebar's box.
@@ -214,8 +234,9 @@ extension SelfTest {
 
     /// The mean color of the at-least-half-opaque pixels of |rect| of |v|, drawn, and how many there are.
     func meanColor(_ v: NSView, in rect: NSRect) -> (rgb: [CGFloat], n: Int) {
-        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return ([0, 0, 0], 0) }
-        v.cacheDisplay(in: v.bounds, to: rep)
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds), let gc = NSGraphicsContext(bitmapImageRep: rep) else { return ([0, 0, 0], 0) }
+        // The view's own draw, not its layer: a hidden window gets no frames, so a layer-backed view's backing store (and any fade of it) is not the view's current drawing.
+        v.displayIgnoringOpacity(v.bounds, in: gc)
         let scale = CGFloat(rep.pixelsWide) / v.bounds.width
         var sum: [CGFloat] = [0, 0, 0], n = 0
         for x in Int(rect.minX * scale)..<Int(rect.maxX * scale) {
@@ -227,13 +248,19 @@ extension SelfTest {
         return (n == 0 ? sum : sum.map { $0 / CGFloat(n) }, n)
     }
 
-    /// The palette index whose reference icon looks most like |rect| of |v|, with the icon's pixel count.
-    func nearestSwatch(_ v: NSView, in rect: NSRect, palette: [UInt32]) -> (index: Int, n: Int, detail: String) {
+    /// The palette index whose reference icon looks most like |rect| of |v| (squared distance of the mean colors, no tolerance), the icon's pixel count,
+    /// and the margin by which the winner beats the runner-up.
+    func nearestSwatch(_ v: GroupRowView, in rect: NSRect, palette: [UInt32]) -> (index: Int, n: Int, distance: CGFloat, margin: CGFloat, detail: String) {
         let got = meanColor(v, in: rect)
-        let refs = palette.map { meanColor(IconReference($0, size: v.bounds.size, icon: rect), in: rect).rgb }
-        // The row's thin stroke is a little paler than the reference's: each reference may be mixed with up to 30% white before the comparison.
-        let d = refs.map { r in stride(from: 0.0, through: 0.3, by: 0.01).map { t in zip(r, got.rgb).map { pow($0 * (1 - t) + t - $1, 2) }.reduce(0, +) }.min()! }
-        return (d.firstIndex(of: d.min()!)!, got.n, "mean \(got.rgb.map { ($0 * 1000).rounded() / 1000 }) distances \(d.map { ($0 * 1000).rounded() / 1000 }) refs \(refs.map { $0.map { ($0 * 1000).rounded() / 1000 } })")
+        let refs = palette.map { rgb -> [CGFloat] in
+            let ref = referenceRow(like: v, rgb)
+            v.superview?.addSubview(ref)  // beside the row: the same appearance and backdrop
+            defer { ref.removeFromSuperview() }
+            return meanColor(ref, in: rect).rgb
+        }
+        let d = refs.map { r in zip(r, got.rgb).map { pow($0 - $1, 2) }.reduce(0, +) }
+        let best = d.firstIndex(of: d.min()!)!, runnerUp = d.enumerated().filter { $0.offset != best }.map(\.element).min()!
+        return (best, got.n, d[best], runnerUp - d[best], "mean \(got.rgb.map { ($0 * 1000).rounded() / 1000 }) distances \(d.map { ($0 * 1000).rounded() / 1000 }) refs \(refs.map { $0.map { ($0 * 1000).rounded() / 1000 } })")
     }
 
     /// The most opaque pixel in a narrow band across the left edge of |box| (the outline's line), unpremultiplied.
@@ -249,6 +276,10 @@ extension SelfTest {
         return best
     }
 
+    /// A reference drawn through the row's own path matches the row within this squared distance, and the winner leads the runner-up by at least |colorMargin|
+    /// (amber and orange, the closest pair, are about 0.05 apart).
+    static let colorExact: CGFloat = 0.002, colorMargin: CGFloat = 0.01
+
     /// Note 1.3 `group-colors`: the 8 swatches of the group menu, in order, set `colorIndex` (stored too) and tint the group's icon and its
     /// outline. The colors are listed here by hand, and read back from the pixels the row and the outline draw.
     func groupColors() async {
@@ -260,6 +291,7 @@ extension SelfTest {
         guard await until(5, { c.sidebar.groupRow(g)?.renameField.isEditing == true }), let field = c.sidebar.groupRow(g)?.renameField else { return finish(false, "the group's name is not in edit") }
         typeName(field, "Colors")
         guard await until(5, { c.sidebar.groupRow(g)?.name == "Colors" && !c.sidebar.boxesView.boxes.isEmpty }) else { return finish(false, "no group row or outline box") }
+        var weakest = CGFloat.greatestFiniteMagnitude  // the smallest margin by which a winner beat its runner-up, icon or outline
         for (i, rgb) in palette.enumerated() {
             guard let m = await groupMenu(c, g), let colors = item(m.menu, "Colors"), let swatches = colors.view as? SwatchRowView else { return finish(false, "swatch \(i): no Colors row with a swatch view in the group menu") }
             guard ChromeStyle.groupColors.count == 8, swatches.selected == (i == 0 ? 0 : i - 1) else { return finish(false, "swatch \(i): the row shows \(swatches.selected) selected, want \(i == 0 ? 0 : i - 1)") }
@@ -270,8 +302,10 @@ extension SelfTest {
             guard await until(5, { c.sidebar.groupRow(g)?.colorIndex == i }), let row = c.sidebar.groupRow(g) else { return finish(false, "swatch \(i): the row did not take the color") }
             // The icon: pixels of the expected color in the icon's rect, and none of any other swatch's.
             let icon = NSRect(x: ChromeStyle.faviconX - ChromeStyle.rowX, y: (row.bounds.height - ChromeStyle.groupIconSize) / 2, width: ChromeStyle.groupIconSize, height: ChromeStyle.groupIconSize)
-            let (nearest, painted, detail) = nearestSwatch(row, in: icon, palette: palette)
-            guard painted >= 3, nearest == i else { return finish(false, "swatch \(i): the icon (\(painted) pixels) looks most like swatch \(nearest) of the hand-listed colors, want \(i) (\(detail))") }
+            row.clearHover()  // the right click that opened the menu left the pointer on the row: its hover fill sits under the icon
+            let (nearest, painted, own, margin, detail) = nearestSwatch(row, in: icon, palette: palette)
+            guard painted >= 3, nearest == i, own <= Self.colorExact, margin >= Self.colorMargin else { return finish(false, "swatch \(i): the icon (\(painted) pixels) looks most like swatch \(nearest) of the hand-listed colors, want \(i), at distance \(own) (want at most \(Self.colorExact)) beating the runner-up by \(margin) (want at least \(Self.colorMargin)) (\(detail))") }
+            weakest = min(weakest, margin)
             // The outline of the open group.
             guard await until(5, { c.sidebar.boxesView.boxes.first?.colorIndex == i }), let box = c.sidebar.boxesView.boxes.first, let px = edge(c.sidebar.boxesView, of: box.frame) else { return finish(false, "swatch \(i): no outline box") }
             if i == 0 {
@@ -279,18 +313,25 @@ extension SelfTest {
             } else {
                 // Compared with the outline drawn here in each hand-listed color at 0.55 (white 5% fill under it), through the same bitmap path.
                 let box0 = NSRect(x: 0, y: 0, width: box.frame.width, height: box.frame.height)
-                let refs = palette.map { edge(OutlineReference($0, size: box0.size), of: box0) }
-                func dist(_ r: NSColor?) -> CGFloat {  // as for the icon: the reference may be mixed with up to 30% white
+                let refs = palette.map { rgb -> NSColor? in
+                    let ref = OutlineReference(rgb, size: box0.size)
+                    c.sidebar.boxesView.superview?.addSubview(ref)  // beside the outlines: the same appearance and backdrop
+                    defer { ref.removeFromSuperview() }
+                    return edge(ref, of: box0)
+                }
+                func dist(_ r: NSColor?) -> CGFloat {  // the same path and recipe as the box: no tolerance
                     guard let r else { return 9 }
-                    return stride(from: 0.0, through: 0.3, by: 0.01).map { t in pow(r.redComponent * (1 - t) + t - px.redComponent, 2) + pow(r.greenComponent * (1 - t) + t - px.greenComponent, 2) + pow(r.blueComponent * (1 - t) + t - px.blueComponent, 2) + pow(r.alphaComponent - px.alphaComponent, 2) }.min()!
+                    return pow(r.redComponent - px.redComponent, 2) + pow(r.greenComponent - px.greenComponent, 2) + pow(r.blueComponent - px.blueComponent, 2) + pow(r.alphaComponent - px.alphaComponent, 2)
                 }
                 let d = refs.map(dist)
-                guard px.alphaComponent > 0.4, d.firstIndex(of: d.min()!) == i else {
-                    return finish(false, "swatch \(i): the outline is rgba \(px.redComponent), \(px.greenComponent), \(px.blueComponent), \(px.alphaComponent) and looks most like swatch \(d.firstIndex(of: d.min()!) ?? -1) of the hand-listed colors at 0.55")
+                let best = d.firstIndex(of: d.min()!)!, runnerUp = d.enumerated().filter { $0.offset != best }.map(\.element).min()!
+                guard px.alphaComponent > 0.4, best == i, d[best] <= Self.colorExact, runnerUp - d[best] >= Self.colorMargin else {
+                    return finish(false, "swatch \(i): the outline is rgba \(px.redComponent), \(px.greenComponent), \(px.blueComponent), \(px.alphaComponent) and looks most like swatch \(best) of the hand-listed colors at 0.55, distance \(d[best]) (want at most \(Self.colorExact)) beating the runner-up by \(runnerUp - d[best]) (want at least \(Self.colorMargin)) (distances \(d.map { ($0 * 1000).rounded() / 1000 }))")
                 }
+                weakest = min(weakest, runnerUp - d[best])
             }
         }
-        finish(violations.isEmpty, "the 8 swatches in order (white, green, blue, purple, amber, pink, red, orange) set colorIndex 0 to 7, stored, and the icon and the outline of the open group draw in that color (read back from the pixels) \(violations)")
+        finish(violations.isEmpty, "the 8 swatches in order (white, green, blue, purple, amber, pink, red, orange) set colorIndex 0 to 7, stored, and the icon and the outline of the open group draw in that color (read back from the pixels, each within \(Self.colorExact) of its reference with no white mixed in, every winner ahead of the runner-up by at least \(weakest), the least margin over the 8 swatches, want \(Self.colorMargin)) \(violations)")
     }
 
     // MARK: group-menus
@@ -395,6 +436,18 @@ extension SelfTest {
             guard await until(5, { self.entry(c, t[0])?.customTitle == nil && c.sidebar.rows.first { $0.tabID == t[0] }?.titleField.stringValue == "Noche App Fixture" }) else {
                 return finish(false, "phase 1: an empty name left \(String(describing: entry(c, t[0])?.customTitle)) and the row \(String(describing: c.sidebar.rows.first { $0.tabID == t[0] }?.titleField.stringValue))")
             }
+            // The page's own title typed over a custom one goes back to following the page (a custom title equal to the page's is none).
+            guard await until(5, { self.entry(c, t[0])?.title == "Noche App Fixture" }), let m4 = await tabMenu(c, t[0]) else { return finish(false, "phase 1: no menu for A before the page-title rename") }
+            choose(m4.menu, "Rename...")
+            guard let f5 = c.sidebar.rows.first(where: { $0.tabID == t[0] })?.renameField, f5.isEditing else { return finish(false, "phase 1: no edit on A for Zed") }
+            typeName(f5, "Zed")
+            guard await until(5, { self.entry(c, t[0])?.customTitle == "Zed" }), let m5 = await tabMenu(c, t[0]) else { return finish(false, "phase 1: A is \(String(describing: entry(c, t[0])?.customTitle)), want Zed") }
+            choose(m5.menu, "Rename...")
+            guard let f6 = c.sidebar.rows.first(where: { $0.tabID == t[0] })?.renameField, f6.isEditing else { return finish(false, "phase 1: no edit on A for the page title") }
+            typeName(f6, "Noche App Fixture")
+            guard await until(5, { self.entry(c, t[0])?.customTitle == nil && c.sidebar.rows.first { $0.tabID == t[0] }?.titleField.stringValue == "Noche App Fixture" }) else {
+                return finish(false, "phase 1: typing the page's own title left the custom title \(String(describing: entry(c, t[0])?.customTitle)) and the row \(String(describing: c.sidebar.rows.first { $0.tabID == t[0] }?.titleField.stringValue)), want none and the page's title")
+            }
             // Pin A: a tile shows no title, its Rename... is a small popover with the same field.
             guard await select(c, t[0]) else { return finish(false, "phase 1: A did not activate") }
             pinKey()
@@ -405,7 +458,7 @@ extension SelfTest {
             guard await until(5, { self.entry(c, t[0])?.customTitle == "Tile" }) else { return finish(false, "phase 1: the tile rename left \(String(describing: entry(c, t[0])?.customTitle))") }
             guard stored(t[0])?.customTitle == "Tile", stored(t[1])?.customTitle == "Mine" else { return finish(false, "phase 1: stored titles \(String(describing: stored(t[0])?.customTitle)), \(String(describing: stored(t[1])?.customTitle))") }
             writer.flush()
-            return finish(violations.isEmpty, "phase 1: Rename... (tab menu, Tabs menu, a pinned tile's popover) set Mine and Tile over the page titles, the page's title changing left Mine, Escape kept it, an empty name cleared Zed, stored \(violations)")
+            return finish(violations.isEmpty, "phase 1: Rename... (tab menu, Tabs menu, a pinned tile's popover) set Mine and Tile over the page titles, the page's title changing left Mine, Escape kept it, an empty name cleared Zed, the page's own title typed over Zed cleared it, stored \(violations)")
         }
         guard await until(30, { self.restoredUp(1) }), let c = ctl else { return finish(false, "phase 2: no restored window") }
         guard await until(20, { c.list.items.count == 2 }) else { return finish(false, "phase 2: \(c.list.items.count) items") }
@@ -414,6 +467,128 @@ extension SelfTest {
         guard await until(20, { !(c.list.items[1].title.isEmpty) }), c.list.items[1].title != "Mine" else { return finish(false, "phase 2: the page's title is \(c.list.items[1].title)") }
         guard await until(5, { c.sidebar.rows.first?.titleField.stringValue == "Mine" }) else { return finish(false, "phase 2: the row shows \(String(describing: c.sidebar.rows.first?.titleField.stringValue)), page title \(c.list.items[1].title), want Mine") }
         finish(violations.isEmpty, "phase 2: the custom titles Tile (pinned, dormant) and Mine (over the page's \(c.list.items[1].title)) survive the relaunch and the row shows Mine \(violations)")
+    }
+    // MARK: group-icons, group-restore-relaunch, group-rename-scroll
+
+    /// Picks |icon| in the open Change Icon picker (a cell, or Remove Icon for nil) the way a click does; false when no picker is open or the picker stays.
+    func pickIcon(_ icon: String?) -> Bool {
+        guard let picker = IconPicker.pending?.view else { return false }
+        if let icon {
+            guard let cell = picker.cells.first(where: { $0.icon == icon }) else { return false }
+            cell.performClick(nil)
+        } else {
+            picker.removeButton.performClick(nil)
+        }
+        return IconPicker.pending == nil
+    }
+
+    /// The icon of tab |id|'s row is the cached image of |icon| (nil: it is not).
+    func rowShows(_ c: BrowserWindowController, _ id: TabID, _ icon: String?) -> Bool {
+        guard let image = c.sidebar.rows.first(where: { $0.tabID == id })?.faviconView.image else { return false }
+        return icon.flatMap { IconRender.cached($0) }.map { image === $0 } ?? true
+    }
+
+    /// Change Icon on a tab and on a group, through the menus: an emoji cell, a symbol cell, then Remove Icon. Each pick sets `customIcon` (the tab) or the
+    /// group's `icon` (list and store) and the row shows it; Remove Icon clears both.
+    func groupIcons() async {
+        guard await ready(), let c = ctl else { return }
+        guard await openTabs(2) else { return finish(false, "extra tabs never appeared") }
+        let t = c.list.items.map(\.id)
+        IconPicker.dismiss()
+        for (label, icon) in [("an emoji", "📌"), ("a symbol", "star")] {
+            line("info", "step: Change Icon on a tab, \(label).")
+            guard let m = await tabMenu(c, t[1]) else { return finish(false, "no tab menu") }
+            choose(m.menu, "Change Icon...")
+            guard IconPicker.pending != nil, pickIcon(icon) else { return finish(false, "Change Icon... did not open a picker with \(icon), or the pick left it open") }
+            guard await until(5, { self.entry(c, t[1])?.customIcon == icon && self.rowShows(c, t[1], icon) }) else {
+                return finish(false, "after picking \(icon) the tab's customIcon is \(String(describing: entry(c, t[1])?.customIcon)) and its row shows it: \(rowShows(c, t[1], icon))")
+            }
+            guard stored(t[1])?.customIcon == icon else { return finish(false, "the stored customIcon is \(String(describing: stored(t[1])?.customIcon)), want \(icon)") }
+        }
+        guard let rm = await tabMenu(c, t[1]) else { return finish(false, "no tab menu for Remove Icon") }
+        choose(rm.menu, "Change Icon...")
+        guard pickIcon(nil), await until(5, { self.entry(c, t[1])?.customIcon == nil && !(self.rowShows(c, t[1], "star")) }), stored(t[1])?.customIcon == nil else {
+            return finish(false, "Remove Icon left customIcon \(String(describing: entry(c, t[1])?.customIcon)), stored \(String(describing: stored(t[1])?.customIcon)), row still the symbol \(rowShows(c, t[1], "star"))")
+        }
+        c.newGroupWithTab(t[0])
+        guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, c.sidebar.groupRow(g).map({ $0.renameField.cancel(); return true }) == true else { return finish(false, "no group") }
+        for (label, icon) in [("an emoji", "🔥"), ("a symbol", "bolt")] {
+            line("info", "step: Change Icon on a group, \(label).")
+            guard let m = await groupMenu(c, g) else { return finish(false, "no group menu") }
+            choose(m.menu, "Change Icon...")
+            guard IconPicker.pending != nil, pickIcon(icon) else { return finish(false, "the group's Change Icon... did not open a picker with \(icon), or the pick left it open") }
+            guard await until(5, { c.list.groups[0].icon == icon && c.sidebar.groupRow(g)?.icon == icon }), storedGroups().first?.icon == icon else {
+                return finish(false, "after picking \(icon) the group's icon is \(String(describing: c.list.groups[0].icon)), its row \(String(describing: c.sidebar.groupRow(g)?.icon)), stored \(String(describing: storedGroups().first?.icon))")
+            }
+        }
+        guard let gm = await groupMenu(c, g) else { return finish(false, "no group menu for Remove Icon") }
+        choose(gm.menu, "Change Icon...")
+        guard pickIcon(nil), await until(5, { c.list.groups[0].icon == nil && c.sidebar.groupRow(g)?.icon == nil }), storedGroups().first?.icon == nil else {
+            return finish(false, "Remove Icon left the group's icon \(String(describing: c.list.groups[0].icon)), row \(String(describing: c.sidebar.groupRow(g)?.icon)), stored \(String(describing: storedGroups().first?.icon))")
+        }
+        finish(violations.isEmpty, "Change Icon... on a tab and on a group (menus, then a picked cell): an emoji and a symbol set customIcon or the group's icon (list, store and the row's image or glyph), Remove Icon clears them \(violations)")
+    }
+
+    /// Two phases. Phase 1: a group is named, colored (pink), given an emoji and collapsed, and a tab gets a symbol icon. Phase 2, after a relaunch: the
+    /// group's name, color, icon and collapsed state, and the tab's icon, are all back, in the list and on the rows.
+    func groupRestore() async {
+        if phase == 1 {
+            guard await ready(), let c = ctl, let win, let writer = app.writer else { return }
+            _ = win.addTab(withURL: fixture("b.html"), activate: false)
+            guard await until(20, { c.list.items.count == 2 && c.list.items.allSatisfy { !$0.title.isEmpty } }) else { return finish(false, "phase 1: titles \(c.list.items.map(\.title))") }
+            let t = c.list.items.map(\.id)
+            guard await select(c, t[0]) else { return finish(false, "phase 1: tab A did not activate") }
+            IconPicker.dismiss()
+            c.newGroupWithTab(t[1])
+            guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, await until(5, { c.sidebar.groupRow(g)?.renameField.isEditing == true }), let field = c.sidebar.groupRow(g)?.renameField else { return finish(false, "phase 1: no group") }
+            typeName(field, "Kept")
+            c.setGroupColor(g, 5)
+            c.changeIcon(group: g)
+            guard pickIcon("🔥") else { return finish(false, "phase 1: the group's picker did not take 🔥") }
+            c.changeIcon(tab: t[0])
+            guard pickIcon("star") else { return finish(false, "phase 1: the tab's picker did not take star") }
+            c.toggleGroup(g)
+            guard await until(5, { c.list.groups[0].isCollapsed && c.list.groups[0].icon == "🔥" && c.list.groups[0].colorIndex == 5 && self.entry(c, t[0])?.customIcon == "star" }) else { return finish(false, "phase 1: the group is \(c.list.groups[0]), tab A's icon \(String(describing: entry(c, t[0])?.customIcon))") }
+            writer.flush()
+            guard let sg = storedGroups().first, sg.name == "Kept", sg.colorIndex == 5, sg.icon == "🔥", sg.isCollapsed, stored(t[0])?.customIcon == "star" else {
+                return finish(false, "phase 1: stored group \(String(describing: storedGroups().first)), tab A's stored icon \(String(describing: stored(t[0])?.customIcon))")
+            }
+            return finish(violations.isEmpty, "phase 1: a group named Kept, pink, with an emoji, collapsed, and a tab with a symbol icon are stored \(violations)")
+        }
+        guard await until(30, { self.restoredUp(1) }), let c = ctl else { return finish(false, "phase 2: no restored window") }
+        guard await until(20, { c.list.items.count == 2 && c.list.groups.count == 1 }) else { return finish(false, "phase 2: \(c.list.items.count) items, \(c.list.groups.count) groups") }
+        let g = c.list.groups[0]
+        guard g.name == "Kept", g.colorIndex == 5 else { return finish(false, "phase 2: the group is \(g.name) with color \(g.colorIndex), want Kept and 5") }
+        guard g.icon == "🔥" else { return finish(false, "phase 2: the group's icon is \(String(describing: g.icon)), want 🔥") }
+        guard g.isCollapsed, c.list.items.filter({ $0.groupID == g.id }).count == 1 else { return finish(false, "phase 2: the group is collapsed \(g.isCollapsed) holding \(c.list.items.filter { $0.groupID == g.id }.count) tabs, want collapsed with 1") }
+        guard let a = c.list.items.first(where: { $0.groupID == nil }), a.customIcon == "star" else { return finish(false, "phase 2: tab A's customIcon is \(String(describing: c.list.items.first { $0.groupID == nil }?.customIcon)), want star") }
+        guard await until(5, { c.sidebar.groupRow(g.id)?.icon == "🔥" && c.sidebar.groupRow(g.id)?.colorIndex == 5 && c.sidebar.groupRow(g.id)?.isCollapsed == true && self.rowShows(c, a.id, "star") }) else {
+            return finish(false, "phase 2: the group's row shows icon \(String(describing: c.sidebar.groupRow(g.id)?.icon)), color \(String(describing: c.sidebar.groupRow(g.id)?.colorIndex)), and tab A's row shows the symbol: \(rowShows(c, a.id, "star"))")
+        }
+        finish(violations.isEmpty, "phase 2: the group Kept (pink, 🔥, collapsed, one tab) and tab A's symbol icon survive the relaunch, in the list and on the rows \(violations)")
+    }
+
+    /// A rename in progress on a group row that scrolls out of the 40 view window is cancelled: 60 tabs under 2 open groups, the first group's name is edited
+    /// to "Half" (no Return), the row scrolls away, and the name is still Reading.
+    func groupRenameScroll() async {
+        guard await ready(), let c = ctl else { return }
+        var items = (0..<60).map { TabItem(id: TabID(), engineID: $0, url: "https://site\($0).example/", title: "Tab \($0)", isLoading: false) }
+        let g = TabGroup(id: GroupID(), name: "Reading", colorIndex: 0, icon: nil, isCollapsed: false, isPinned: false)
+        for i in 0..<2 { items[i].groupID = g.id }
+        guard let seeded = TabList(items: items, groups: [g], topOrder: [], dayOrder: [.group(g.id)] + items[2...].map { .tab($0.id) }, activeID: items[59].id) else { return finish(false, "no seeded list") }
+        c.testSeed(seeded)
+        c.beginRename(group: g.id)
+        guard let field = c.sidebar.groupRow(g.id)?.renameField, field.isEditing else { return finish(false, "the group's name is not in edit") }
+        field.stringValue = "Half"  // typed, not committed
+        let scroll = c.sidebar.scroll
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, c.sidebar.document.frame.height - scroll.bounds.height)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        guard c.sidebar.groupRow(g.id) == nil else { return finish(false, "the group row still has a view at the end of the list") }
+        guard !field.isEditing, c.list.groups[0].name == "Reading" else { return finish(false, "the row scrolled out while editing: the group is named \(c.list.groups[0].name), the field editing \(field.isEditing), want Reading and the edit ended") }
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        guard await until(5, { c.sidebar.groupRow(g.id)?.name == "Reading" && c.sidebar.groupRow(g.id)?.renameField.isEditing == false }) else { return finish(false, "back at the top the row shows \(String(describing: c.sidebar.groupRow(g.id)?.name))") }
+        finish(violations.isEmpty, "a rename typed to Half and not committed is cancelled when the row scrolls out: the name stays Reading, the field is not left in edit, and the row is back as Reading \(violations)")
     }
 }
 #endif

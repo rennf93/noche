@@ -48,6 +48,7 @@ final class GroupBoxesView: NSView {
 final class SidebarView: DragView {
     static let strip: CGFloat = 48
     // Negative controls, read once: the environment is a dictionary built on every read.
+    private static let recycleCommits = BarHook.on("GRP_RECYCLECOMMIT"), groupsUnvirtual = BarHook.on("SB_GROUPSUNVIRTUAL")  // the hooks: a recycled row commits its rename; every row has a view while a group is open
     private static let fixedWidth = BarHook.on("SB_FIXEDWIDTH"), unvirtual = BarHook.on("SB_UNVIRTUAL"), lowRows = BarHook.on("SB_GEOMETRY"), noReveal = BarHook.on("SB_NOREVEAL")
     let lights: [TrafficLightView] = ChromeStyle.trafficColors.map { color in
         let v = TrafficLightView(frame: .zero)
@@ -211,11 +212,13 @@ final class SidebarView: DragView {
     /// changed (a refresh); a scroll only moves views.
     private func realize(reconfigure: Bool) {
         let clip = scroll.contentView.bounds
-        let want = Self.unvirtual ? layout.placements.indices.filter { !([.divider, .newTab].contains(layout.placements[$0].entry)) }  // negative control: every entry has a view
+        let want = Self.unvirtual || (Self.groupsUnvirtual && !layout.boxes.isEmpty) ? layout.placements.indices.filter { !([.divider, .newTab].contains(layout.placements[$0].entry)) }  // negative control: every entry has a view
             : layout.realized(minY: clip.minY + Self.strip, maxY: clip.maxY + Self.strip)
         let keys = Set(want.map { layout.placements[$0].entry })
         for (key, view) in realized where !keys.contains(key) {
             realized[key] = nil
+            // A rename in progress on a row that scrolls out is cancelled (the old name stays), not committed by the view leaving the window.
+            if !Self.recycleCommits { (view as? GroupRowView)?.renameField.cancel(); (view as? TabRowView)?.renameField.cancel() }
             view.removeFromSuperview()
             switch view {
             case let v as TabRowView: spareTabs.append(v)

@@ -35,7 +35,15 @@ final class GroupRowView: NSView {
 
     /// The color the icon is drawn in.
     private static let untinted = BarHook.on("GRP_NOICONTINT")  // negative control: the icon stays white
-    var iconTint: NSColor { ChromeStyle.groupColors[Self.untinted ? 0 : Swift.min(Swift.max(colorIndex, 0), ChromeStyle.groupColors.count - 1)] }
+#if NOCHE_TESTHOOKS
+    var tintOverride: NSColor?  // group-colors draws its references through a row of its own, in a color it lists by hand
+#endif
+    var iconTint: NSColor {
+#if NOCHE_TESTHOOKS
+        if let tintOverride { return tintOverride }
+#endif
+        return ChromeStyle.groupColors[Self.untinted ? 0 : Swift.min(Swift.max(colorIndex, 0), ChromeStyle.groupColors.count - 1)]
+    }
 
     /// The name becomes an inline field (Return commits, Escape cancels).
     func beginRename() {

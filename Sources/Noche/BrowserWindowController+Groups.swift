@@ -56,6 +56,7 @@ extension BrowserWindowController {
         guard let t = join.template, list.createGroup(with: id, name: t.name, groupID: t.id) != nil else { return }
         list.setGroupColor(t.id, t.colorIndex)
         list.setGroupIcon(t.id, t.icon)
+        if t.isPinned, !BarHook.on("GRP_DUPUNPIN") { list.pinGroup(t.id) }  // a copy of a pinned group is pinned (the hook: it lands in the day list)
     }
 
     /// The tab menu's Move to Group: the tab goes to the end of the group, which opens.
@@ -73,7 +74,7 @@ extension BrowserWindowController {
     /// Pin on a day group moves it to the persistent area, Unpin back to the top of the day list.
     func togglePin(group g: GroupID) {
         note("pinGroup")
-        guard let grp = group(withID: g) else { return }
+        guard let grp = group(withID: g), !BarHook.on("GRP_NOPIN") else { return }  // the hook: Pin and Unpin do nothing
         if grp.isPinned { list.unpinGroup(g) } else { list.pinGroup(g) }
         refresh()
         changed()
@@ -90,7 +91,7 @@ extension BrowserWindowController {
     /// Duplicate: a copy of the group (name, color and icon) with a new tab at each member's address.
     func duplicateGroup(_ g: GroupID) {
         note("duplicateGroup")
-        guard let grp = group(withID: g) else { return }
+        guard let grp = group(withID: g), !BarHook.on("GRP_NODUP") else { return }  // the hook: nothing is copied
         let copy = TabGroup(id: GroupID(), name: grp.name, colorIndex: grp.colorIndex, icon: grp.icon, isCollapsed: false, isPinned: grp.isPinned)
         closeNext.removeAll()
         for t in members(of: g) {
@@ -116,7 +117,7 @@ extension BrowserWindowController {
         guard let grp = group(withID: g), let store = app.writer?.store, let bar = (try? store.bookmarkRoots().first).flatMap({ $0 }) else { return }
         let pages = members(of: g).filter { isWeb($0.url) }.map { (title: TabList.displayTitle(for: $0), url: $0.url) }
         guard !pages.isEmpty else { return }
-        do { try store.addFolder(title: grp.name, parentId: bar.id, bookmarks: pages) } catch { return app.logBookmark("group", error) }
+        do { if !BarHook.on("GRP_NOBAR") { try store.addFolder(title: grp.name, parentId: bar.id, bookmarks: pages) } } catch { return app.logBookmark("group", error) }
         app.bookmarksChanged()
         separateTabs(g)
     }
@@ -172,8 +173,10 @@ extension BrowserWindowController {
         note("renameTab")
         guard let t = item(withID: id) else { return }
         let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name == TabList.displayTitle(for: t) { return window.focusActiveContent() }
-        list.setCustomization(id, title: name, icon: t.customIcon)
+        // The page's own title is not a custom one: typing it (over a custom title) goes back to following the page. The hook compares with the shown title.
+        let page = BarHook.on("RENAME_SHOWNCMP") ? TabList.displayTitle(for: t) : t.title
+        if name == TabList.displayTitle(for: t), name != page || t.customTitle == nil { return window.focusActiveContent() }
+        list.setCustomization(id, title: name == page ? "" : name, icon: t.customIcon)
         refresh()
         changed()
         window.focusActiveContent()
@@ -193,7 +196,7 @@ extension BrowserWindowController {
         note("changeIcon")
         guard let anchor = sidebar.anchor(tab: id) else { return }
         IconPicker.present(from: anchor) { [weak self] icon in
-            guard let self, let t = self.item(withID: id) else { return }
+            guard let self, let t = self.item(withID: id), !BarHook.on("GRP_NOICONSET") else { return }  // the hook: the pick is never written
             self.list.setCustomization(id, title: t.customTitle, icon: icon)
             self.refresh()
             self.changed()
@@ -204,7 +207,7 @@ extension BrowserWindowController {
         note("changeIcon")
         guard let anchor = sidebar.anchor(group: g) else { return }
         IconPicker.present(from: anchor) { [weak self] icon in
-            self?.list.setGroupIcon(g, icon)
+            if !BarHook.on("GRP_NOGROUPICON") { self?.list.setGroupIcon(g, icon) }  // the hook: the group's pick is never written
             self?.refresh()
             self?.changed()
         }
@@ -226,7 +229,13 @@ final class MoveToGroupMenuDelegate: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         guard let c = app.active, let id = c.list.activeID else { return }
         let current = c.item(withID: id)?.groupID
-        for g in c.list.groups {
+        // The spec's PINNED header (disabled), then the pinned groups, then the others.
+        if !BarHook.on("GRP_NOPINNEDHDR") {
+            let header = NSMenuItem(title: "PINNED", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+        }
+        for g in c.list.groups.filter(\.isPinned) + c.list.groups.filter({ !$0.isPinned }) {
             let i = NSMenuItem(title: g.name, action: #selector(ContextMenus.Target.fire(_:)), keyEquivalent: "")
             i.target = ContextMenus.target
             i.state = g.id == current ? .on : .off

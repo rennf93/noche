@@ -94,17 +94,20 @@ extension BrowserWindowController {
             if var t = live[id] {
                 if let s = r.items[id] {
                     t.isPinned = s.isPinned; t.inGrid = s.inGrid; t.pinnedURL = s.pinnedURL
-                    t.groupID = s.groupID; t.customTitle = s.customTitle; t.customIcon = s.customIcon
+                    t.groupID = s.groupID; t.customTitle = BarHook.on("RENAME_NORESTORE") ? nil : s.customTitle; t.customIcon = BarHook.on("GRP_NORESTORE") ? nil : s.customIcon  // the hooks: the restore drops the saved titles, or the icons
                 }
                 items.append(t)
             } else if var s = r.items[id] {
+                if BarHook.on("RENAME_NORESTORE") { s.customTitle = nil }
+                if BarHook.on("GRP_NORESTORE") { s.customIcon = nil }
                 s.engineID = nil; s.isLoading = false
                 items.append(s)
             }
         }
         let placed = Set(saved)
         items += list.items.filter { !placed.contains($0.id) }  // tabs the engine added on its own
-        let rebuilt = TabList.restored(items: items, groups: r.groups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID, current: list)
+        let savedGroups = BarHook.on("GRP_NORESTORE") ? r.groups.map { var g = $0; g.icon = nil; g.colorIndex = 0; return g } : r.groups  // the hook: icons and colors are not restored
+        let rebuilt = TabList.restored(items: items, groups: savedGroups, topOrder: r.topOrder, dayOrder: r.dayOrder, activeID: list.activeID, current: list)
         if !rebuilt.intact { FileHandle.standardError.write(Data("NOCHE restore: the saved structure was refused; kept every saved tab, groups and order may be lost\n".utf8)) }
         list = rebuilt.list
         for t in list.items where t.engineID == nil { loadDormantIcon(t.id) }
@@ -140,6 +143,7 @@ extension BrowserWindowController {
             }
         }
         tabs[tab.identifier] = nil
+        if !BarHook.on("GRP_JOINLEAK") { groupJoins[tab.identifier] = nil }  // a tab that closes before it joins never will (the hook keeps the entry)
         if let id = ids[tab.identifier] { leftAt[id] = nil }
         ids[tab.identifier] = nil
         typedLoads[tab.identifier] = nil

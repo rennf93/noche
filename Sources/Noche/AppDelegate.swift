@@ -280,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func pinTab(_ s: Any?) { active?.togglePin() }
     @objc func newGroupWithTab(_ s: Any?) { active?.newGroupWithTab() }
     @objc func newTabInGroup(_ s: Any?) { active?.newTabInGroup() }
+    @objc func moveToGroupMenu(_ s: Any?) {}  // the item opens its submenu; the action only lets the table decide whether it is enabled
     @objc func renameTab(_ s: Any?) { if let c = active, let id = c.list.activeID { c.beginRename(tab: id) } }
     @objc func changeTabIcon(_ s: Any?) { if let c = active, let id = c.list.activeID { c.changeIcon(tab: id) } }
     /// History and Downloads are Noche's own windows.

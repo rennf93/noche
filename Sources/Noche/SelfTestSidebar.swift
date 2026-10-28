@@ -128,7 +128,34 @@ extension SelfTest {
             if name == "top", ctl.frame(ofIdentifier: "sidebar.tab.400") != nil { bad.append("sidebar.tab.400 has a view at the top of the list: an unrealized row must have none") }
             if name == "end", ctl.frame(ofIdentifier: "sidebar.tab.0") != nil { bad.append("sidebar.tab.0 has a view at the end of the list") }
         }
-        finish(bad.isEmpty && violations.isEmpty, "500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll; with the capture's 12 pins above 500 day tabs at most \(rowsMost) row views and \(viewsMost) views in all (tiles extra) \(bad) \(violations)")
+        // Groups (M1.6 Task 4): 500 tabs in 20 open groups with one group's rename active. Realized rows (tab and group rows) stay at 40, refreshes keep
+        // the 4 ms p95, and the rename ends when its row scrolls out.
+        let gs = (0..<20).map { TabGroup(id: GroupID(), name: "Group \($0)", colorIndex: $0 % 8, icon: nil, isCollapsed: false, isPinned: false) }
+        var grouped = (0..<500).map { TabItem(id: TabID(), engineID: $0, url: "https://site\($0).example/", title: "Tab \($0)", isLoading: false) }
+        for i in grouped.indices { grouped[i].groupID = gs[i / 25].id }
+        ctl.testSeed(TabList(items: grouped, groups: gs, topOrder: [], dayOrder: gs.map { .group($0.id) }, activeID: grouped[0].id)!)
+        ctl.beginRename(group: gs[10].id)
+        guard let rename = ctl.sidebar.groupRow(gs[10].id)?.renameField, rename.isEditing else { return finish(false, "groups scenario: the rename of group 10 did not start") }
+        if ctl.sidebar.realizedCount > 40 { bad.append("groups scenario with a rename active: \(ctl.sidebar.realizedCount) views, want at most 40") }
+        var gTimes: [Double] = []
+        for i in 0..<60 {
+            ctl.list.update(grouped[(i * 11) % 500].id, url: "https://site.example/", title: "Group title \(i)", isLoading: i % 3 == 0)
+            let t0 = mach_absolute_time()
+            ctl.refreshNow()
+            gTimes.append(ms(mach_absolute_time() - t0))
+        }
+        gTimes.sort()
+        let gP95 = gTimes[Int(Double(gTimes.count) * 0.95)]
+        if gP95 >= 4 { bad.append("groups scenario: refresh p95 \(String(format: "%.2f", gP95)) ms, want under 4") }
+        var groupsMost = 0
+        for (name, offset) in [("top", CGFloat(0)), ("middle", ((scroll.documentView?.frame.height ?? 0) / 2).rounded()), ("end", max(0, ctl.sidebar.document.frame.height - scroll.bounds.height))] {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            groupsMost = max(groupsMost, ctl.sidebar.realizedCount)
+            if ctl.sidebar.realizedCount > 40 { bad.append("groups scenario at the \(name): \(ctl.sidebar.realizedCount) views, want at most 40") }
+        }
+        if rename.isEditing { bad.append("groups scenario: the rename of group 10 is still in edit after its row scrolled away") }
+        finish(bad.isEmpty && violations.isEmpty, "500 tabs at height \(Int(H)): refresh p95 \(String(format: "%.2f", p95)) ms, at most \(most) views at any scroll position, \(pooled) in the document after a full scroll; with the capture's 12 pins above 500 day tabs at most \(rowsMost) row views and \(viewsMost) views in all (tiles extra); with 500 tabs in 20 open groups and a rename active at most \(groupsMost) views and a refresh p95 of \(String(format: "%.2f", gP95)) ms, the rename cancelled by the scroll \(bad) \(violations)")
     }
 
     /// T2.5 `min-width`: the window's minimum content width is the sidebar (197) plus a card of 284 (the find pill's 260 floor and its two
