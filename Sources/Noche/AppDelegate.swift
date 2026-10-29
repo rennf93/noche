@@ -421,6 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #endif
         newWindow(url: "about:blank", frame: frame, id: c.id, restore: restore)
         if !BarHook.on("MOVE_NOCARRY") { controllers.last?.afterRestore = c.afterRestore }  // a source still waits for this window's first save (the hook: the revival drops it)
+        c.afterRestore = nil  // the revived window alone runs it: the old controller's fallback must not
         return true
     }
 

@@ -378,7 +378,10 @@ extension SelfTest {
         guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: 3, wheel2: 0, wheel3: 0) else { return finish(false, "no scroll event") }
         cg.flags = .maskCommand
         guard let ev = NSEvent(cgEvent: cg) else { return finish(false, "no NSEvent") }
+        let soon0 = BrowserWindowController.testZoomSoonSyncs
         NSApp.sendEvent(ev)
+        // The pill can also follow from a chrome sync or a finished load: the Cmd+scroll path itself must have run its sync.
+        guard await until(5, { BrowserWindowController.testZoomSoonSyncs > soon0 }) else { return finish(false, "the Cmd+scroll event never reached the pill's zoom sync (syncZoomSoon ran \(BrowserWindowController.testZoomSoonSyncs - soon0) times, pill hidden=\(pill.isHidden))") }
         guard await until(5, { !pill.isHidden && (pill.accessibilityValue() as? String) == "120%" }) else {
             return finish(false, "after a Cmd+scroll event with the engine at level 1.0 the pill shows hidden=\(pill.isHidden) '\(pill.accessibilityValue() ?? "nil")', want 120%")
         }

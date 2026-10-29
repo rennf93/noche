@@ -118,6 +118,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
 
     func focusField() {
         guard isOpen, let ns = owner.nsWindow else { return }
+        if !BarHook.on("SEARCH_BARKEEPS") { owner.madeSearch?.close(restoreFocus: false) }  // one card at a time owns the keys (the hook: Search Tabs stays open)
         // Already editing: asking again would end the editing first, and that closes an overlay.
         if view.field.currentEditor() == nil, !BarHook.on("BAR_NOFOCUS") { ns.makeFirstResponder(view.field) }
         view.field.currentEditor()?.selectAll(nil)

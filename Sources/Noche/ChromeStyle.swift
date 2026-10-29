@@ -154,6 +154,7 @@ enum ChromeStyle {
     static let searchHeaderFont = NSFont.systemFont(ofSize: 11, weight: .semibold)  // B
     static let switcherTileWidth: CGFloat = 120, switcherTileHeight: CGFloat = 92, switcherGap: CGFloat = 8, switcherPad: CGFloat = 12  // B
     static let switcherIconSize: CGFloat = 32, switcherLimit = 8                  // B size, spec: up to 8 tiles
+    static let switcherMinTileWidth: CGFloat = 72                                 // B: the narrowest a tile gets before the strip scrolls
     static let switcherShowDelay: TimeInterval = 0.2                              // spec: a tap shorter than 200 ms switches without the strip
     static let switcherFont = NSFont.systemFont(ofSize: 12)                       // B
     static let barMotionDuration: TimeInterval = 0.107

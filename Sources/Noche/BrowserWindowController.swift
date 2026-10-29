@@ -329,6 +329,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     func refreshNow() {
         refreshQueued = false
         guard installed else { return }
+        madeSwitcher?.reload()
         sidebar.setEntries(list.layout(), selected: list.activeID)
         let tab = activeTab
         toolbar.back.isEnabled = tab?.canGoBack ?? false

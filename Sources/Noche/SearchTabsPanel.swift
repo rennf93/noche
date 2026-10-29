@@ -151,7 +151,9 @@ final class SearchTabsController: NSObject, NSTextFieldDelegate {
 
     func open() {
         owner.note("searchTabs")
-        if let bar = owner.madeCommandBar, bar.isOpen, bar.placement == .overlay { bar.close(restoreFocus: false) }
+        if let bar = owner.madeCommandBar, bar.isOpen {  // one card at a time owns the keys: an overlay bar closes, the New Tab card gives up its hold
+            if bar.placement == .overlay { bar.close(restoreFocus: false) } else { bar.unfocusCard(restoreFocus: false) }
+        }
         if !isOpen {
             isOpen = true
             owner.overlay.addSubview(view, positioned: .below, relativeTo: owner.border)
@@ -163,11 +165,13 @@ final class SearchTabsController: NSObject, NSTextFieldDelegate {
         setQuery("")
         if let ns = owner.nsWindow { ns.makeFirstResponder(view.field) }
         view.field.currentEditor()?.selectAll(nil)
+        if !BarHook.on("SEARCH_NOKEYS") { owner.window.keysHeld = true }  // like the command bar: the engine's focus requests are refused until the close (the hook: no hold)
     }
 
     func close(restoreFocus: Bool = true) {
         guard isOpen else { return }
         isOpen = false
+        owner.window.keysHeld = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         let editing = view.field.currentEditor() != nil
@@ -274,8 +278,10 @@ final class SearchTabsController: NSObject, NSTextFieldDelegate {
     /// Closes the selected result's tab when it is an open one; the row goes at once.
     @discardableResult
     func closeSelected() -> Bool {
-        guard results.indices.contains(selected), case .live(let id) = results[selected].source, let item = owner.item(withID: id), let tab = owner.engineTab(item) else { return false }
-        owner.closeTab(tab)
+        guard results.indices.contains(selected), case .live(let id) = results[selected].source, let item = owner.item(withID: id), let row = owner.list.items.firstIndex(where: { $0.id == id }) else { return false }
+        // The sidebar's own close path: an open tab closes, a dormant one leaves like a closed tab; a pinned dormant tile stays (it wakes on a click).
+        guard owner.engineTab(item) != nil || (!item.isPinned && !BarHook.on("SEARCH_NODORMANTCLOSE")) else { return false }  // the hook: only a loaded tab closes
+        owner.closeRow(row)
         results.remove(at: selected)
         selected = Swift.min(selected, Swift.max(0, results.count - 1))
         render()

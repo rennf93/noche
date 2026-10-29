@@ -11,10 +11,14 @@ extension SelfTest {
     func sendCtrlUp() {
         guard let ns = ctl?.nsWindow, let ev = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                                                windowNumber: ns.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59) else { return keyLog.append("no flagsChanged event") }
+        TabSwitcherController.testControl = false  // a hidden run has no real Control key: the check lets go of it
         NSApp.sendEvent(ev)
     }
 
-    func ctrlTab(_ forward: Bool = true) { sendKey("\t", code: 48, forward ? [.control] : [.control, .shift]) }
+    func ctrlTab(_ forward: Bool = true) {
+        TabSwitcherController.testControl = true
+        sendKey("\t", code: 48, forward ? [.control] : [.control, .shift])
+    }
 
     // MARK: search-tabs
 
@@ -71,7 +75,20 @@ extension SelfTest {
         // Escape closes and leaves the active tab alone.
         card.open()
         card.setQuery("gam")
+        // With the card open the engine's system focus requests are refused and the field keeps the keys; after the close they are not refused.
+        let refused0 = win.testFocusRefused
+        guard win.keysHeld, win.testSystemFocusRequest(), win.testFocusRefused == refused0 + 1, card.view.field.currentEditor() != nil else {
+            return finish(false, "with Search Tabs open the keys are held \(win.keysHeld), an engine focus request was refused \(win.testFocusRefused - refused0) times (want 1), the field is first responder \(card.view.field.currentEditor() != nil)")
+        }
         guard command(#selector(NSResponder.cancelOperation(_:))), !card.isOpen, c.list.activeID == t[1] else { return finish(false, "Escape left the card open (\(card.isOpen)) or changed the active tab") }
+        guard !win.keysHeld, !win.testSystemFocusRequest() else { return finish(false, "after Escape the keys are still held (\(win.keysHeld))") }
+
+        // Cmd+L with the card open: the command bar takes over, the card closes, and the keys follow what is open.
+        card.open()
+        guard win.keysHeld, await openBar() else { return finish(false, "Cmd+L with Search Tabs open did not open the command bar (card open \(card.isOpen))") }
+        guard !card.isOpen, win.keysHeld else { return finish(false, "with the bar open the card is open \(card.isOpen) and the keys are held \(win.keysHeld), want the card closed and the keys held by the bar") }
+        press(.escape); press(.escape)
+        guard await until(3, { !self.barOpen() }), !card.isOpen, !win.keysHeld else { return finish(false, "after Escape the bar is open \(barOpen()), the card \(card.isOpen), the keys held \(win.keysHeld), want none") }
 
         // Cmd+Delete closes an open tab and its row goes at once.
         card.open()
@@ -102,7 +119,32 @@ extension SelfTest {
         guard kinds() == ["closed"], command(#selector(NSResponder.insertNewline(_:))) else { return finish(false, "'grand' lists \(kinds()), want the closed row") }
         guard await until(15, { self.entry(c, t[2]).flatMap { c.engineTab($0) } != nil && c.list.activeID == t[2] }) else { return finish(false, "the closed tab did not reopen as the active tab") }
         guard await until(8, { ((try? writer.store.closedTabs(matching: "grand")) ?? []).isEmpty }) else { return finish(false, "the reopened tab is still on the closed list") }
-        finish(violations.isEmpty, "Shift+Cmd+A opens the card; 'gam' ranks [gamma ray, my game, grand mal]; Up and Down clamp, Return activates, Escape closes, Cmd+Delete closes an open tab; an empty query lists open tabs, then Archived, then Recently Closed; Return restores the archived tab and reopens the closed one (the store clears both) \(violations)")
+
+        // Cmd+Delete on a dormant open row (a pinned tab whose engine tab closed, then unpinned) closes it through the sidebar's own path: it lands on the closed list.
+        c.togglePin(of: t[3])
+        guard await until(5, { self.entry(c, t[3])?.isPinned == true }), let pinnedTab = entry(c, t[3]).flatMap({ c.engineTab($0) }) else { return finish(false, "no pinned tab to make dormant") }
+        c.closeTab(pinnedTab)
+        guard await until(10, { self.entry(c, t[3])?.engineID == nil && self.entry(c, t[3]) != nil }) else { return finish(false, "'gamma ray' did not go dormant") }
+        c.togglePin(of: t[3])
+        guard await until(5, { self.entry(c, t[3])?.isPinned == false }) else { return finish(false, "'gamma ray' did not unpin") }
+        card.open()
+        card.setQuery("gamma")
+        guard ids() == [t[3]], kinds() == ["live"], command(#selector(NSResponder.deleteToBeginningOfLine(_:))), card.results.isEmpty else {
+            return finish(false, "Cmd+Delete on the dormant open row 'gamma ray' left \(card.results.count) results (rows \(ids().count)), want 0")
+        }
+        guard await until(8, { c.item(withID: t[3]) == nil && self.app.writer?.peekClosed()?.tab.id == t[3] }) else {
+            return finish(false, "the dormant row is still in the list (\(c.item(withID: t[3]) != nil)) or not on the closed list (\(String(describing: self.app.writer?.peekClosed()?.tab.title)))")
+        }
+        card.close(restoreFocus: false)
+
+        // The same on a New Tab page: the card gives up its hold when Search Tabs opens, Cmd+L closes Search Tabs and the card holds the keys, Escape lets them go.
+        guard cmdT(), await until(10, { c.newTabShown && self.barOpen() }) else { return finish(false, "no New Tab card (shown \(c.newTabShown), bar \(barOpen()))") }
+        card.open()
+        guard card.isOpen, win.keysHeld, win.testSystemFocusRequest() else { return finish(false, "with Search Tabs open over the New Tab card the card is open \(card.isOpen) and the keys are held \(win.keysHeld)") }
+        guard await openBar(), !card.isOpen, win.keysHeld else { return finish(false, "Cmd+L on a New Tab page with Search Tabs open left the card open \(card.isOpen), keys held \(win.keysHeld)") }
+        press(.escape)
+        guard await until(3, { !win.keysHeld }), !card.isOpen else { return finish(false, "after Escape on the New Tab card the keys are held \(win.keysHeld) (card open \(card.isOpen))") }
+        finish(violations.isEmpty, "Shift+Cmd+A opens the card; 'gam' ranks [gamma ray, my game, grand mal]; Up and Down clamp, Return activates, Escape closes, Cmd+Delete closes an open tab (a dormant one too); the card holds the keys from open to close; an empty query lists open tabs, then Archived, then Recently Closed; Return restores the archived tab and reopens the closed one (the store clears both) \(violations)")
     }
 
     // MARK: ctrl-tab
@@ -168,11 +210,98 @@ extension SelfTest {
         guard await until(5, { sw.isShown }), sw.view.tiles.count == 8, sw.order.count == 8 else { return finish(false, "ten tabs: the strip holds \(sw.view.tiles.count) tiles, want 8") }
         sendCtrlUp()
         guard await until(5, { !sw.isActive }) else { return finish(false, "no release after ten tabs") }
+        let shown0 = sw.shownCount
+
+        // A tap whose Ctrl release came before the session could watch for it (the key and the release in one run-loop turn) commits at once and leaves no session.
+        guard let current = c.list.activeID else { return finish(false, "no active tab") }
+        let before = [current] + c.list.mru(limit: 8).filter { $0 != current }
+        press(); sendCtrlUp()
+        guard await until(5, { !sw.isActive }), await active(before[1]), sw.shownCount == shown0 else {
+            return finish(false, "the key and the Ctrl release back to back left the session active \(sw.isActive), active tab \(String(describing: activeIndex(c))), want the previous tab \(String(describing: c.list.items.firstIndex { $0.id == before[1] })) and no session")
+        }
+
+        // A tab closes during the session: the highlight stays on the tab it was on (the strip drops the gone tile) and release commits that tab.
+        press(); press()
+        guard await until(5, { sw.isShown }), let goneAhead = sw.order.dropFirst().first, let keep = sw.selectedID, goneAhead != keep, let aheadItem = entry(c, goneAhead), let aheadTab = c.engineTab(aheadItem) else { return finish(false, "no session to close a tab in") }
+        c.closeTab(aheadTab)
+        guard await until(10, { c.item(withID: goneAhead) == nil }), await until(5, { sw.view.tiles.count == 7 }) else { return finish(false, "the closed tab stayed in the strip (\(sw.view.tiles.count) tiles)") }
+        guard sw.view.tiles.indices.contains(sw.view.selected), sw.view.tiles[sw.view.selected].id == keep else {
+            return finish(false, "after a tab ahead of the selection closed the highlight is on tile \(sw.view.selected) (\(sw.view.tiles.indices.contains(sw.view.selected) ? String(describing: c.item(withID: sw.view.tiles[sw.view.selected].id)?.customTitle ?? c.item(withID: sw.view.tiles[sw.view.selected].id)?.title) : "none")), want the selected tab")
+        }
+        sendCtrlUp()
+        guard await until(5, { !sw.isActive }), await active(keep) else { return finish(false, "release after a tab closed activated \(String(describing: activeIndex(c))), want the selected tab") }
+
+        // The selected tab itself closes: the highlight and the commit go to the next live tab of the strip.
+        press(); press()
+        guard await until(5, { sw.isShown }), let gone = sw.selectedID, let goneIndex = sw.order.firstIndex(of: gone), let goneTab = entry(c, gone).flatMap({ c.engineTab($0) }) else { return finish(false, "no session to close the selected tab in") }
+        let next = sw.order[(goneIndex + 1) % sw.order.count]
+        c.closeTab(goneTab)
+        guard await until(10, { c.item(withID: gone) == nil }), await until(5, { sw.view.tiles.count == 7 }), sw.view.tiles.indices.contains(sw.view.selected), sw.view.tiles[sw.view.selected].id == next else {
+            return finish(false, "after the selected tab closed the highlight is on tile \(sw.view.selected) of \(sw.view.tiles.count), want the next live tab (7 tiles)")
+        }
+        sendCtrlUp()
+        guard await until(5, { !sw.isActive }), await active(next) else { return finish(false, "release after the selected tab closed activated \(String(describing: activeIndex(c))), want the next live tab") }
+
+        // A narrow window: the strip fits, every drawn tile is on screen and the selected one stays visible as Tab advances to the 8th tile (and wraps).
+        guard let ns = c.nsWindow else { return finish(false, "no window") }
+        let f0 = ns.frame
+        ns.setFrame(NSRect(x: f0.minX, y: f0.minY, width: ChromeStyle.minimumWindowWidth, height: f0.height), display: false)
+        guard await until(5, { c.overlay.bounds.width <= ChromeStyle.minimumWindowWidth + 1 }) else { return finish(false, "the window did not narrow (overlay \(c.overlay.bounds.width))") }
+        func onScreen(_ r: NSRect) -> Bool { c.overlay.bounds.insetBy(dx: -0.5, dy: -0.5).contains(sw.view.convert(r, to: c.overlay)) }
+        func visible(_ step: String) -> String? {
+            let sel = sw.view.selected
+            if !sw.view.drawnRange.contains(sel) || !onScreen(sw.view.tileFrame(sel)) { return "\(step): the selected tile \(sel) of \(sw.view.tiles.count) is at \(sw.view.convert(sw.view.tileFrame(sel), to: c.overlay)) (drawn \(sw.view.drawnRange)), outside the \(c.overlay.bounds.width) wide window" }
+            if let bad = sw.view.drawnRange.first(where: { !onScreen(sw.view.tileFrame($0)) }) { return "\(step): drawn tile \(bad) is at \(sw.view.convert(sw.view.tileFrame(bad), to: c.overlay)), outside the \(c.overlay.bounds.width) wide window" }
+            if sw.view.drawnRange.count > 1, sw.view.tileFrame(sw.view.drawnRange.lowerBound).width < ChromeStyle.switcherMinTileWidth - 0.5 { return "\(step): tiles are narrower than the minimum" }
+            return nil
+        }
+        press()
+        guard await until(5, { sw.isShown }), sw.view.tiles.count == 8 else { return finish(false, "narrow window: the strip shows \(sw.view.tiles.count) tiles, want 8 (isShown \(sw.isShown))") }
+        if let why = visible("press 1") { return finish(false, why) }
+        for n in 2...8 {
+            press()
+            guard sw.view.tiles.indices.contains(sw.view.selected), sw.view.tiles[sw.view.selected].id == sw.selectedID else { return finish(false, "press \(n): the highlight is not on the selected tab") }
+            if let why = visible("press \(n)") { return finish(false, why) }
+        }
+        sendCtrlUp()
+        guard await until(5, { !sw.isActive }) else { return finish(false, "no release in the narrow window") }
+        ns.setFrame(f0, display: false)
+
+        // Shift+Tab after the selected tab closed: the order loses the gone tile, so a step back lands on the tile before the highlight.
+        press(); press()
+        guard await until(5, { sw.isShown }), let gone2 = sw.selectedID, let goneTab2 = entry(c, gone2).flatMap({ c.engineTab($0) }) else { return finish(false, "no session for the Shift+Tab step") }
+        c.closeTab(goneTab2)
+        guard await until(10, { c.item(withID: gone2) == nil }), await until(5, { !sw.view.tiles.contains { $0.id == gone2 } }), sw.view.selected > 0 else { return finish(false, "the strip after the selected tab closed: \(sw.view.tiles.count) tiles, highlight \(sw.view.selected)") }
+        let ahead = sw.view.tiles[sw.view.selected - 1].id
+        press(false)
+        _ = await until(2, { sw.selectedID == ahead })  // the claimed key arrives on a later main-queue turn
+        guard sw.selectedID == ahead, sw.view.tiles[sw.view.selected].id == ahead else { return finish(false, "Shift+Tab after the selected tab closed highlights tile \(sw.view.selected) (\(String(describing: sw.selectedID))), want the tile before the highlight") }
+        sendCtrlUp()
+        guard await until(5, { !sw.isActive }), await active(ahead) else { return finish(false, "release after Shift+Tab activated \(String(describing: activeIndex(c))), want the tile before") }
+
+        // A dormant tab closed during the session: its tile goes at once.
+        guard let cur = c.list.activeID else { return finish(false, "no active tab") }
+        guard let y = c.list.mru(limit: 8).first(where: { $0 != cur }) else { return finish(false, "no second tab") }
+        c.togglePin(of: y)
+        guard await until(5, { self.entry(c, y)?.isPinned == true }), let yTab = entry(c, y).flatMap({ c.engineTab($0) }) else { return finish(false, "no pinned tab to make dormant") }
+        c.closeTab(yTab)
+        guard await until(10, { self.entry(c, y)?.engineID == nil && self.entry(c, y) != nil }) else { return finish(false, "the tab did not go dormant") }
+        c.togglePin(of: y)
+        guard await until(5, { self.entry(c, y)?.isPinned == false }), let yItem = entry(c, y) else { return finish(false, "the dormant tab did not unpin") }
+        press(); press()
+        guard await until(5, { sw.isShown }), sw.view.tiles.contains(where: { $0.id == y }), let keep3 = sw.selectedID, keep3 != y else { return finish(false, "no session with the dormant tab in the strip (selected \(String(describing: sw.selectedID)))") }
+        try? await Task.sleep(nanoseconds: 600_000_000)  // the 200 ms show timer has fired: only the list change can redraw the strip now
+        let tiles0 = sw.view.tiles.count
+        c.closeDormant(yItem)
+        guard await until(5, { !sw.view.tiles.contains { $0.id == y } && sw.view.tiles.count == tiles0 - 1 }) else { return finish(false, "a dormant tab closed during the session stays drawn (\(sw.view.tiles.count) of \(tiles0) tiles)") }
+        guard sw.view.tiles[sw.view.selected].id == keep3 else { return finish(false, "the highlight left the selected tab") }
+        sendCtrlUp()
+        guard await until(5, { !sw.isActive }), await active(keep3) else { return finish(false, "release after the dormant tab closed activated the wrong tab") }
 
         // Every press came through the bridge's claim.
         let claims = NCWindow.testPreemptedKeys() - claims0
         guard claims == presses else { return finish(false, "the bridge claimed \(claims) Ctrl+Tab presses, want \(presses)") }
-        finish(violations.isEmpty, "a quick tap switches to the previous tab with no strip, two presses with Ctrl held reach the one before, release commits, Ctrl+Shift+Tab goes backward, the strip shows after 200 ms and holds 8 tiles, the command bar gives way, Next Tab keeps list order; \(claims) presses claimed by the bridge \(violations)")
+        finish(violations.isEmpty, "a quick tap switches to the previous tab with no strip, two presses with Ctrl held reach the one before, release commits, Ctrl+Shift+Tab goes backward, the strip shows after 200 ms and holds 8 tiles, the command bar gives way, Next Tab keeps list order, a release that came before the session was watching commits at once, the highlight follows the selected tab when a tab closes, Shift+Tab steps over live tiles after the selected tab closed, a dormant tab closing during a session drops its tile, the strip fits a window of minimum width with the selected tile on screen at every press; \(claims) presses claimed by the bridge \(violations)")
     }
 
     // MARK: shortcuts-order

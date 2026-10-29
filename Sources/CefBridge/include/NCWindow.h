@@ -163,6 +163,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger testRequestFocusCalls, testSetFocusCalls;
 /// Test support: the engine's OnGotFocus report that follows a hand-back's RequestFocus (a hidden window gets none: the engine only reports while it can take the keys).
 - (void)testReportGotFocus;
+/// Test support: the engine's system focus request (OnSetFocus, source system); YES when the window refuses it (the keys are held).
+- (BOOL)testSystemFocusRequest;
 #endif
 @end
 

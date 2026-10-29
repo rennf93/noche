@@ -400,6 +400,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (NSInteger)testRequestFocusCalls { return _requestCalls; }
 - (NSInteger)testSetFocusCalls { return _setFocusCalls; }
 - (void)testReportGotFocus { _requestIssued = YES; [self browserGotFocus]; }
+- (BOOL)testSystemFocusRequest { return [self refusesFocusFrom:FOCUS_SOURCE_SYSTEM]; }
 #endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {

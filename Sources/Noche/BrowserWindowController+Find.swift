@@ -108,8 +108,14 @@ extension BrowserWindowController: NSTextFieldDelegate {
     }
 
     /// After a pinch or Cmd+scroll event: the level now, and once more when the engine has applied it.
+#if NOCHE_TESTHOOKS
+    static var testZoomSoonSyncs = 0
+#endif
     func syncZoomSoon() {
         if BarHook.on("ZOOM_NOFOLLOW") { return }  // negative control: the pill ignores pinch and Cmd+scroll
+#if NOCHE_TESTHOOKS
+        Self.testZoomSoonSyncs += 1  // the scroll path ran: the pill can also follow from a chrome sync or a finished load, so the check counts this path itself
+#endif
         syncZoom()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in MainActor.assumeIsolated { self?.syncZoom() } }
     }
