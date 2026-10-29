@@ -205,6 +205,20 @@ final class StoreSidebarTests: XCTestCase {
         XCTAssertTrue(try store.hasClosedTabs())
     }
 
+    func testClosedTabsMatchLikeSearchTabsAndKeepTheTabsOwnStamp() throws {
+        let store = try makeStore()
+        var l = TabList()
+        let a = tab(1, title: "GitHub"), b = tab(2, title: "my github notes"), c = tab(3, title: "Other")
+        for t in [a, b, c] { l.insertNew(t, opener: nil, addToTop: false, activate: false) }
+        let win = UUID()
+        try store.save(snapshot(l, id: win))
+        for t in [c, b, a] { try store.recordClosed(t, windowID: win, index: 0) }  // a closed last, but c was used last
+        XCTAssertEqual(try store.closedTabs(matching: "").map(\.tab.id), [c.id, b.id, a.id])  // empty query: every rank 0, the tab's own stamp decides, not the close time
+        XCTAssertEqual(try store.closedTabs(matching: "github").map(\.tab.id), [a.id, b.id])  // prefix before substring
+        XCTAssertEqual(try store.closedTabs(matching: "zzz"), [])
+        XCTAssertEqual(try store.closedTabs(matching: "").first?.tab.lastActiveAt, c.lastActiveAt)
+    }
+
     func testRetentionTombstonesAfterThirtyDays() throws {
         let c = Clock()
         let store = try makeStore(c)

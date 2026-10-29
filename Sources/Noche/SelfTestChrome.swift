@@ -278,7 +278,14 @@ extension SelfTest {
     /// Also here: a row's favicon goes back to the placeholder when the next page has none.
     func a11yLabels() async {
         guard await ready(), let ctl, let win, let tab = win.activeTab else { return }
-        guard await openTabs(2) else { return finish(false, "2 rows never appeared") }
+        // Negative control: the second tab's page has another title, so the wait below never settles.
+        let second = ProcessInfo.processInfo.environment["NOCHE_TEST_A11Y_OTHERTITLE"] == "1" ? "b.html" : ""
+        guard await openTabs(2, page: second) else { return finish(false, "2 rows never appeared") }
+        // The title lands after the row appears and the row refreshes a turn later: wait for both before comparing.
+        guard await until(10, { ctl.list.items.count == 2 && ctl.list.items.allSatisfy { $0.title == "Noche App Fixture" }
+                && ctl.sidebar.rows.count == 2 && ctl.sidebar.rows.enumerated().allSatisfy { $0.element.accessibilityLabel() == ctl.list.displayTitle(of: ctl.list.items[$0.offset].id) } }) else {
+            return finish(false, "the rows never showed the fixture page title: list \(ctl.list.items.map(\.title)), rows \(ctl.sidebar.rows.map { $0.accessibilityLabel() ?? "nil" })")
+        }
         var bad: [String] = []
         func expect(_ name: String, _ v: NSView, _ label: String) {
             if v.accessibilityRole() != .button { bad.append("\(name) role \(v.accessibilityRole()?.rawValue ?? "nil")") }

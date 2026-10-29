@@ -48,7 +48,7 @@ NS_SWIFT_UI_ACTOR
 /// Called synchronously inside CEF's command handler. YES: Noche handled it, CEF must not.
 - (BOOL)window:(NCWindow *)window shouldHandleChromeCommand:(NSInteger)commandId;
 - (void)windowDidClose:(NCWindow *)window;
-/// A key the engine would take as its own accelerator, which Noche owns instead. The page never sees it: the monitor takes it ahead of the window and the renderer.
+/// A key the engine would take as its own accelerator, which Noche owns instead (Ctrl+Tab and Ctrl+Shift+Tab, the Tab Switcher's, among them). The page never sees it: the monitor takes it ahead of the window and the renderer.
 /// Delivered on a later main-queue turn; the bridge has already told the engine the key is handled.
 - (void)window:(NCWindow *)window handlePreemptedKey:(NSEvent *)event;
 /// Asked on the main thread for an Escape key with no modifiers, ahead of the engine: YES claims it (it then arrives as handlePreemptedKey), NO leaves it to the page and the engine.
@@ -161,6 +161,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger testFocusSystemRequests, testFocusOtherRequests, testFocusRefused;
 /// Test support: how many times the hand-back actually called the engine's Views RequestFocus and the host's SetFocus.
 @property(nonatomic, readonly) NSInteger testRequestFocusCalls, testSetFocusCalls;
+/// Test support: the engine's OnGotFocus report that follows a hand-back's RequestFocus (a hidden window gets none: the engine only reports while it can take the keys).
+- (void)testReportGotFocus;
 #endif
 @end
 

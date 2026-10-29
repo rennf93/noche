@@ -399,6 +399,7 @@ class NCWindowDelegate_ : public CefWindowDelegate {
 - (NSInteger)testFocusRefused { return _focusRefused; }
 - (NSInteger)testRequestFocusCalls { return _requestCalls; }
 - (NSInteger)testSetFocusCalls { return _setFocusCalls; }
+- (void)testReportGotFocus { _requestIssued = YES; [self browserGotFocus]; }
 #endif
 
 - (instancetype)initWithURL:(NSString*)url frame:(NSRect)frame mode:(NCWindowMode)mode delegate:(id<NCWindowDelegate>)delegate {
@@ -1086,6 +1087,15 @@ static NSInteger g_preempted = 0;
   });
   NSString* key = event.charactersIgnoringModifiers.lowercaseString;
   if (NC_TEST_FLAG("NOCHE_TEST_NO_PREEMPT")) return NO;  // negative control: the engine's accelerators run first
+  // Ctrl+Tab and Ctrl+Shift+Tab: Chromium maps them to IDC_SELECT_NEXT_TAB and _PREVIOUS (its own strip order, no key-up to commit on); Noche's Tab Switcher
+  // owns them, in whatever view has the keys (the monitor sees chrome and page alike). Held keys repeat the claim, so each press advances the switcher.
+  if (event.keyCode == 48 && (m == NSEventModifierFlagControl || m == (NSEventModifierFlagControl | shift)) && !NC_TEST_FLAG("NOCHE_TEST_NO_TABCLAIM")) {  // the flag is a negative control: the engine takes Ctrl+Tab
+#ifdef NOCHE_TESTHOOKS
+    g_preempted++;
+#endif
+    [self post:^(id<NCWindowDelegate> d) { [d window:self handlePreemptedKey:event]; }];
+    return YES;
+  }
   // Escape: Chromium enables IDC_CLOSE_FIND_OR_STOP only for its own find bar or a running load (browser_command_controller.cc:2726-2728), so on an idle page
   // it never reaches OnChromeCommand: Noche's find pill closes through this claim, which the delegate grants only while the pill shows.
   const BOOL escape = event.keyCode == 53 && m == 0;

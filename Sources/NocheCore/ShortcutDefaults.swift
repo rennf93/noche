@@ -65,8 +65,8 @@ extension ShortcutDefaults {
             ("tabs.duplicateTab", "Duplicate Tab", nil, nil),
             ("tabs.resetPinnedTab", "Reset Pinned Tab to Base URL", nil, "Arrives in M1.6"),
             ("tabs.newGroupWithTabs", "New Group with Tabs", Chord("n", k | c), nil),
-            ("tabs.switcherForward", "Tab Switcher (forward)", Chord("tab", k), "Arrives in M1.6"),
-            ("tabs.switcherBackward", "Tab Switcher (backward)", Chord("tab", k | s), "Arrives in M1.6"),
+            ("tabs.switcherForward", "Tab Switcher (forward)", Chord("tab", k), nil),
+            ("tabs.switcherBackward", "Tab Switcher (backward)", Chord("tab", k | s), nil),
         ])
         add("Bookmarks", [
             ("bookmarks.add", "Add to Bookmarks...", Chord("d", c), nil),

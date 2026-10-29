@@ -83,8 +83,9 @@ extension BrowserWindowController {
             // the items in neither window: the rows are keyed by id and a save of the new window re-homes them first.
             let app = self.app, source = id
             if !BarHook.on("MOVE_NOHOLD") { app.writer?.hold(source, until: new.id) }  // the hook: never held
-            new.afterRestore = { [weak self, weak new] in
-                guard let w = app.writer, let new else { return }
+            let newID = new.id  // keyed by id: a revived window (same id, another controller) carries this closure
+            new.afterRestore = { [weak self] in
+                guard let w = app.writer, let new = app.controllers.first(where: { $0.id == newID }) else { return }
                 w.saveNow([new.id])
                 guard w.release(source, after: new.id) else { return }
                 guard let self, !self.windowClosing else { return }

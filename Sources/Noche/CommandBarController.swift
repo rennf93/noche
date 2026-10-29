@@ -136,6 +136,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
     private func guardRuns() -> Bool {
         let now = ProcessInfo.processInfo.systemUptime, w: NCWindow = owner.window, t = w.lastFocusHandback
         if now < t + Self.keysGuardSpan { return true }
+        if BarHook.on("BAR_GUARDCAP"), now < t + Self.keysGuardCap { return true }  // negative control: the guard runs to its cap whatever the engine reported
         if BarHook.on("BAR_NOGOTFOCUS") { return false }  // negative control: only the fixed span
         if w.focusHandbackPending, now < t + Self.keysGuardCap { return true }
         return w.lastGotFocus >= t && now < w.lastGotFocus + Self.keysGuardTail

@@ -466,6 +466,16 @@ final class TabStructureTests: XCTestCase {
         XCTAssertEqual(l.searchTabs(query: "  qp "), [a.id])  // trimmed, subsequence
         XCTAssertEqual(l.searchTabs(query: "nomatch"), [])
     }
+    func testVisibleItemsSkipCollapsedChildrenButKeepDormantAndHeadersOutOfTheCount() {
+        var (l, t) = list(5)
+        l.setEngineID(t[3], nil)  // a dormant tab is a row
+        let g = l.createGroup(with: t[1])!
+        _ = l.setGroup(t[2], g)
+        XCTAssertEqual(l.visibleItems.map(\.id), l.items.map(\.id))  // an open group hides nothing
+        l.collapse(g)
+        XCTAssertEqual(l.visibleItems.map(\.id), l.items.map(\.id).filter { $0 != t[1] && $0 != t[2] })
+        XCTAssertTrue(l.visibleItems.contains { $0.id == t[3] && $0.engineID == nil })
+    }
     func testSearchArchivedComesAfterLiveAndEmptyQueryIsMRU() {
         var (l, t) = list(3)
         l.markActive(t[2], at: t0.addingTimeInterval(500))

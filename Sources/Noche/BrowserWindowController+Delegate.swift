@@ -225,6 +225,7 @@ extension BrowserWindowController {
     /// A key the bridge claimed before the page: the claimed Escape closes the find pill, any other chord goes through the main menu.
     func window(_ window: NCWindow, handlePreemptedKey event: NSEvent) {
         if event.keyCode == 53 { closeFind(); return }  // the claimed Escape (windowShouldClaimEscape)
+        if event.keyCode == 48 { switcherPress(forward: !event.modifierFlags.contains(.shift)); return }  // the claimed Ctrl+Tab and Ctrl+Shift+Tab
         _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
     }
 
@@ -281,6 +282,8 @@ extension BrowserWindowController {
         animationTimer?.invalidate()
         discardTimer?.invalidate()
         madeCommandBar?.teardown()
+        madeSwitcher?.teardown()
+        madeSearch?.teardown()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         if app.revive(self) { return }

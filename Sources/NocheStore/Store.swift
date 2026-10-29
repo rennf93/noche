@@ -265,7 +265,7 @@ public final class Store: Sendable {
                   closedAt = excluded.closedAt, closedIndex = excluded.closedIndex, closedWindowId = excluded.closedWindowId,
                   updatedAt = excluded.updatedAt, deletedAt = NULL
                 """, arguments: [tab.id.raw.uuidString, windowID.uuidString, tab.groupID?.raw.uuidString, tab.url, tab.title, index, tab.isPinned,
-                                 tab.pinnedURL, tab.inGrid, tab.customTitle, tab.customIcon, t, t, index, windowID.uuidString, t, t])
+                                 tab.pinnedURL, tab.inGrid, tab.customTitle, tab.customIcon, tab.lastActiveAt.timeIntervalSince1970, t, index, windowID.uuidString, t, t])  // the tab's own stamp: Search Tabs ranks by it
             let keep = Self.closedRequest().select(Column("id")).limit(Self.closedCap)
             try TabRow.all().live().filter(Column("closedAt") != nil).filter(!keep.contains(Column("id")))
                 .updateAll(db, Column("deletedAt").set(to: t), Column("updatedAt").set(to: t))
@@ -313,6 +313,19 @@ public final class Store: Sendable {
             return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
         }
         return nil
+    }
+
+    /// Recently closed tabs matching |query| (same matching and ranking as Search Tabs; empty: all), within a rank the most recently used first.
+    public func closedTabs(matching query: String) throws -> [ClosedTab] {
+        let all = try db.read { try Self.closedRequest().fetchAll($0) }.compactMap { r -> ClosedTab? in
+            guard let item = r.item, let closedAt = r.closedAt, let wid = r.closedWindowId.flatMap(UUID.init(uuidString:)) else { return nil }
+            return ClosedTab(tab: item, windowID: wid, index: r.closedIndex ?? r.position, closedAt: Date(timeIntervalSince1970: closedAt))
+        }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return all.enumerated().compactMap { i, c -> (Int, Date, Int, ClosedTab)? in
+            let title = c.tab.customTitle?.isEmpty == false ? c.tab.customTitle! : c.tab.title
+            return TabSearch.rank(q, title: title, url: c.tab.url).map { ($0, c.tab.lastActiveAt, i, c) }
+        }.sorted { $0.0 != $1.0 ? $0.0 < $1.0 : ($0.1 != $1.1 ? $0.1 > $1.1 : $0.2 < $1.2) }.map(\.3)
     }
 
     public func hasClosedTabs() throws -> Bool {

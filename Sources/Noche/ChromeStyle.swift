@@ -147,6 +147,15 @@ enum ChromeStyle {
     static let barInputFontNewTab = NSFont.systemFont(ofSize: 14)
     static let barInputFontOverlay = NSFont.systemFont(ofSize: 13)
     static let barRowFont = NSFont.systemFont(ofSize: 13)
+    // M1.6 Search Tabs and Tab Switcher (the command bar's fill, border, radius and row colors above; B = a builder constant, docs/app/README.md "M1.6 Search Tabs and Tab Switcher")
+    static let searchWidth: CGFloat = 560, searchTop: CGFloat = 96                // B
+    static let searchInputHeight: CGFloat = 52, searchRowHeight: CGFloat = 40     // B input, M row (spec: rows 40)
+    static let searchHeaderHeight: CGFloat = 26, searchMaxLines = 9, searchPad: CGFloat = 8  // B: lines are rows and section headers; the card scrolls past 9
+    static let searchHeaderFont = NSFont.systemFont(ofSize: 11, weight: .semibold)  // B
+    static let switcherTileWidth: CGFloat = 120, switcherTileHeight: CGFloat = 92, switcherGap: CGFloat = 8, switcherPad: CGFloat = 12  // B
+    static let switcherIconSize: CGFloat = 32, switcherLimit = 8                  // B size, spec: up to 8 tiles
+    static let switcherShowDelay: TimeInterval = 0.2                              // spec: a tap shorter than 200 ms switches without the strip
+    static let switcherFont = NSFont.systemFont(ofSize: 12)                       // B
     static let barMotionDuration: TimeInterval = 0.107
 
     // M1.4 find pill and zoom pill: builder calls (no capture exists; docs/app/README.md "Builder calls and rulings"), colors from the command bar's.

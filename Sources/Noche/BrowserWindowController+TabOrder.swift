@@ -12,7 +12,7 @@ extension BrowserWindowController {
         return known + window.tabs.filter { t in !known.contains { $0 === t } }
     }
 
-    /// Cmd+1 to Cmd+8 and Cmd+9: the tab at |index| of the list (nil: the last).
+    /// Cmd+1 to Cmd+8 and Cmd+9: the tab at |index| of the visible rows (nil: the last).
     func selectTab(at index: Int?) {
         note("selectTab")
         closeNext.removeAll()
@@ -24,7 +24,8 @@ extension BrowserWindowController {
             intendedActive = strip[i]; window.activateTab(strip[i]); return
         }
 #endif
-        let items = list.items
+        // The rows the sidebar shows, in its order: group headers are not tabs (no number), a collapsed group's children are not rows, a dormant tab is (Cmd+N wakes it).
+        let items = BarHook.on("NO_VISIBLE_ORDER") ? list.items : list.visibleItems  // the hook: the flat list, hidden children counted
         guard let i = index.map({ min($0, items.count - 1) }) ?? items.indices.last, items.indices.contains(i) else { return }
         activate(items[i])
     }

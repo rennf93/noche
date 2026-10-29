@@ -135,7 +135,7 @@ Tabs|Go Forward|]|cmd|0
 Tabs|Next Tab|]|shift+cmd|1
 Tabs|Previous Tab|[|shift+cmd|1
 Tabs|---|||-
-Tabs|Search Tabs...|a|shift+cmd|0
+Tabs|Search Tabs...|a|shift+cmd|1
 Tabs|Pin|d|shift+cmd|1
 Tabs|Duplicate|||1
 Tabs|---|||-
@@ -172,5 +172,7 @@ command|Select Tab 6|6|cmd|1
 command|Select Tab 7|7|cmd|1
 command|Select Tab 8|8|cmd|1
 command|Select Last Tab|9|cmd|1
+command|Tab Switcher (forward)|tab|ctrl|1
+command|Tab Switcher (backward)|tab|ctrl+shift|1
 command|Move Tab Forward|pagedown|ctrl+shift|1
 command|Move Tab Backward|pageup|ctrl+shift|1

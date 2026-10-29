@@ -191,6 +191,10 @@ public struct TabList: Equatable, Sendable {
     private func index(of id: TabID) -> Int? { items.firstIndex { $0.id == id } }
     private func groupIndex(_ id: GroupID) -> Int? { groups.firstIndex { $0.id == id } }
 
+    /// The tabs a sidebar shows as rows, in row order (grid tiles, the persistent area, the day list): |items| without the children of collapsed groups.
+    /// Dormant tabs are rows too. Cmd+1 to Cmd+9 count these.
+    public var visibleItems: [TabItem] { items.filter { !isHidden($0) } }
+
     private func isHidden(_ t: TabItem) -> Bool {
         t.groupID.flatMap { g in groups.first { $0.id == g }?.isCollapsed } ?? false
     }

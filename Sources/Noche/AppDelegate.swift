@@ -286,6 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func goForward(_ s: Any?) { active?.goForward() }
     @objc func nextTab(_ s: Any?) { active?.selectNextTab() }
     @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
+    @objc func searchTabs(_ s: Any?) { active?.toggleSearchTabs() }
     @objc func closeAllTabs(_ s: Any?) { active?.closeAllTabs() }
     @objc func copyURLMarkdown(_ s: Any?) { active?.copyURLMarkdown() }
     @objc func printPage(_ s: Any?) { active?.printPage() }
@@ -419,6 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         lastReviveFrame = frame
 #endif
         newWindow(url: "about:blank", frame: frame, id: c.id, restore: restore)
+        if !BarHook.on("MOVE_NOCARRY") { controllers.last?.afterRestore = c.afterRestore }  // a source still waits for this window's first save (the hook: the revival drops it)
         return true
     }
 

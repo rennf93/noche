@@ -61,6 +61,21 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         madeCommandBar = c
         return c
     }
+    /// The Ctrl+Tab strip and the Search Tabs card, built on first use like the bar.
+    var madeSwitcher: TabSwitcherController?
+    var tabSwitcher: TabSwitcherController {
+        if let c = madeSwitcher { return c }
+        let c = TabSwitcherController(owner: self)
+        madeSwitcher = c
+        return c
+    }
+    var madeSearch: SearchTabsController?
+    var searchTabsCard: SearchTabsController {
+        if let c = madeSearch { return c }
+        let c = SearchTabsController(owner: self)
+        madeSearch = c
+        return c
+    }
     var newTabShown = false
     var newTabTabID: TabID?
     var reportedActive: TabID?   // the tab the bridge last announced as active (or the window's first)

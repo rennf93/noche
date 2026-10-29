@@ -54,8 +54,8 @@ final class ShortcutsTests: XCTestCase {
         "Tabs|tabs.duplicateTab|Duplicate Tab|-",
         "Tabs|tabs.resetPinnedTab*|Reset Pinned Tab to Base URL|-",
         "Tabs|tabs.newGroupWithTabs|New Group with Tabs|⌃⌘N",
-        "Tabs|tabs.switcherForward*|Tab Switcher (forward)|⌃⇥",
-        "Tabs|tabs.switcherBackward*|Tab Switcher (backward)|⌃⇧⇥",
+        "Tabs|tabs.switcherForward|Tab Switcher (forward)|⌃⇥",
+        "Tabs|tabs.switcherBackward|Tab Switcher (backward)|⌃⇧⇥",
         "Bookmarks|bookmarks.add|Add to Bookmarks...|⌘D",
         "Bookmarks|bookmarks.manage|Manage Bookmarks|⌥⌘B",
         "History|history.show|Show History...|⌘Y",
@@ -269,7 +269,8 @@ final class ShortcutsTests: XCTestCase {
     func testMilestoneCaptions() {
         func m(_ id: String) -> String? { ShortcutDefaults.table.first { $0.id == id }?.milestone }
         for id in ["tabs.previousProfile", "tabs.nextProfile", "window.openProfileSwitcher"] { XCTAssertEqual(m(id), "Arrives in M1.7") }
-        for id in ["tabs.switcherForward", "tabs.switcherBackward", "tabs.resetPinnedTab"] { XCTAssertEqual(m(id), "Arrives in M1.6") }
+        for id in ["tabs.resetPinnedTab"] { XCTAssertEqual(m(id), "Arrives in M1.6") }
+        for id in ["tabs.switcherForward", "tabs.switcherBackward"] { XCTAssertNil(m(id)) }  // live since M1.6 Task 6
         XCTAssertEqual(m("file.newChat"), "Arrives in M2")
         XCTAssertEqual(m("file.sendChatPromptNow"), "Arrives in M2")
         XCTAssertEqual(m("file.openDailyBrief"), "Arrives in M3")

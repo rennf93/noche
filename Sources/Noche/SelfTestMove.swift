@@ -183,7 +183,7 @@ extension SelfTest {
         guard await discardedMoves(b) else { return }
         guard await groupToNewWindow() else { return }
         guard await heldSourceSteps() else { return }
-        finish(violations.isEmpty, "Tabs > Move to Window and the group menu list this window (checked, off), the others by title and New Window per profile (only the own one live); a loaded tab, a tile, a dormant tab (loads nothing), a tab out of a group (loose), a group with its tabs and a tab to a new window arrive with their ids, titles and state, B in front; a window left with a pin gets a blank tab, A's last tab closes it; nothing is a closed tab; the store holds each item once after the debounce; a discarded tab moves dormant, a group goes to a new window, and a window that gave to new windows is never saved or dropped before each of them has saved (another tab closing, its own close, two moves) \(violations)")
+        finish(violations.isEmpty, "Tabs > Move to Window and the group menu list this window (checked, off), the others by title and New Window per profile (only the own one live); a loaded tab, a tile, a dormant tab (loads nothing), a tab out of a group (loose), a group with its tabs and a tab to a new window arrive with their ids, titles and state, B in front; a window left with a pin gets a blank tab, A's last tab closes it; nothing is a closed tab; the store holds each item once after the debounce; a discarded tab moves dormant, a group goes to a new window, and a window that gave to new windows is never saved or dropped before each of them has saved (another tab closing, its own close, two moves), also when the engine closes a restoring new window and it is revived \(violations)")
     }
 
     final class Saves { var list: [(UUID, UUID?)] = [] }
@@ -353,6 +353,28 @@ extension SelfTest {
         c.move(.tab(q[1]), to: a)
         guard await arrived(q[1], in: a, loaded: true, active: true, state: "the tab moved into the released window") else { return false }
         await closeWindows([a, c, e4])
+
+        // 5. The engine closes the new window while it restores and it keeps a pinned tab: the window is revived under its id and its first save frees the source (ruling M103).
+        line("info", "step: the new window is closed by the engine while it restores")
+        BrowserWindowController.restoreFallback = 15   // the old window's own fallback (a later turn of its restore) must not end the wait in place of the revived window
+        guard let (s5, w) = await source("h5-", 4), let g5 = pairGroup(s5, w[1], w[2], "h5-group") else { finish(false, "no fifth held source"); return false }
+        writer.saveNow([s5.id])
+        n0 = app.controllers.count
+        s5.move(.group(g5), to: nil)
+        guard app.controllers.count == n0 + 1, let e5 = app.controllers.last, e5.restoring, writer.holds[s5.id] == [e5.id] else { finish(false, "no restoring new window the source waits for"); return false }
+        guard await until(15, { e5.list.items.count == 1 && e5.window.tabs.count == 1 }), let first = e5.list.items.first, let engine = e5.engineTab(first) else { finish(false, "the new window's first tab never arrived"); return false }
+        e5.togglePin(of: first.id)
+        guard await until(5, { e5.list.items.first?.isPinned == true }), e5.restoring else { finish(false, "the first tab did not pin while the window restored (restoring \(e5.restoring))"); return false }
+        s5.renameTab(w[0], to: "h5-after-move"); s5.changed()   // a change in the held source after the move
+        engine.close()   // the engine's own close, as reviveWindow does
+        guard await until(20, { guard let n = self.app.controllers.first(where: { $0.id == e5.id }), n !== e5 else { return false }; return !n.restoring }), let n5 = app.controllers.first(where: { $0.id == e5.id }) else {
+            finish(false, "the new window was not revived and finished restoring (the source is held for \(String(describing: writer.holds[s5.id])))"); return false
+        }
+        guard await until(4, { writer.holds[s5.id] == nil }) else { finish(false, "the revived window's first save did not free the source: holds \(String(describing: writer.holds[s5.id])) (revived restoring \(n5.restoring))"); return false }
+        guard await until(8, { self.storedWindows().first { $0.id == s5.id }?.tabs.first { $0.id == w[0] }?.customTitle == "h5-after-move" }) else {
+            finish(false, "the source's change after the move is not in the store: \(storedWindows().first { $0.id == s5.id }?.tabs.compactMap(\.customTitle) ?? [])"); return false
+        }
+        await closeWindows([s5, n5])
         return true
     }
 

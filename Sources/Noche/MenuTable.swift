@@ -234,7 +234,7 @@ enum MenuTable {
             app("Next Tab", "tabs.nextTab", #selector(AppDelegate.nextTab(_:))),
             app("Previous Tab", "tabs.previousTab", #selector(AppDelegate.previousTab(_:))),
             sep,
-            later("Search Tabs...", "tabs.searchTabs", "M1.6"),
+            app("Search Tabs...", "tabs.searchTabs", #selector(AppDelegate.searchTabs(_:))),
             app("Pin", "tabs.pinTab", #selector(AppDelegate.pinTab(_:)), enabled: { $0.window?.list.activeID != nil },
                 titleRule: { $0.window?.activeIsPinned == true ? "Unpin" : "Pin" }),  // the table's title is the default; validation sets the live one
             app("Duplicate", "tabs.duplicateTab", #selector(AppDelegate.duplicateTab(_:))),
@@ -291,6 +291,8 @@ enum MenuTable {
         MenuCommand(title: "Select Tab \(n)", id: "tabs.selectTab.\(n)") { $0.active?.selectTab(at: n - 1) }
     } + [
         MenuCommand(title: "Select Last Tab", id: "tabs.selectLastTab") { $0.active?.selectTab(at: nil) },
+        MenuCommand(title: "Tab Switcher (forward)", id: "tabs.switcherForward") { $0.active?.switcherPress(forward: true) },
+        MenuCommand(title: "Tab Switcher (backward)", id: "tabs.switcherBackward") { $0.active?.switcherPress(forward: false) },
         MenuCommand(title: "Move Tab Forward", id: "tabs.moveTabForward") { $0.active?.moveTab(1) },
         MenuCommand(title: "Move Tab Backward", id: "tabs.moveTabBackward") { $0.active?.moveTab(-1) },
     ]
