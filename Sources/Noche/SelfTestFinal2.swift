@@ -150,7 +150,7 @@ extension SelfTest {
             return
         }
         guard await until(20, { self.restoredUp(1) }) else { return finish(false, "phase 2: \(app.controllers.count) windows, want 1") }
-        if !closeLast { guard await until(20, { self.urls(self.ctl!) == [self.fixture(""), self.fixture("b.html")] }) else { return finish(false, "phase 2: the window came back with \(ctl.map { urls($0) } ?? []), want the fixture and b.html (the tab opened during the quit wait)") } }
+        if !closeLast { guard await until(20, { self.urls(self.ctl!) == [self.fixture("b.html"), self.fixture("")] }) else { return finish(false, "phase 2: the window came back with \(ctl.map { urls($0) } ?? []), want b.html (the tab opened during the quit wait, at the top) and the fixture") } }
         guard await until(20, { dc.items.contains { $0.suggestedName == "127.0.0.1" } }), let restored = dc.items.first(where: { $0.suggestedName == "127.0.0.1" }) else { return finish(false, "phase 2: the download did not come back") }
         finish(restored.state == .paused && restored.receivedBytes > 0 && violations.isEmpty, "phase 2: the download came back \(restored.state == .paused ? "paused" : "NOT paused (state \(restored.state.rawValue))") with \(restored.receivedBytes) bytes\(closeLast ? " after the last window was closed during the quit wait" : ", the tab opened during the quit wait was saved") \(violations)")
     }

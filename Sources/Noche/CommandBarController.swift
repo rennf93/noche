@@ -217,6 +217,8 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         guard isOpen, event.window === owner.nsWindow else { return }
         endKeysGuard()
         if view.bounds.contains(view.convert(event.locationInWindow, from: nil)) { return }
+        // Search Tabs open over this card holds the keys: a click in it (or elsewhere, which closes it) is not this card's to answer.
+        if owner.madeSearch?.isOpen == true, !BarHook.on("SEARCH_CLICKINSEARCH") { return }  // the hook: the card unfocuses and takes the keys away
         if placement == .overlay { close(restoreFocus: false) } else { unfocusCard(restoreFocus: false) }
     }
 

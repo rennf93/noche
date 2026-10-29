@@ -186,7 +186,11 @@ final class SearchTabsController: NSObject, NSTextFieldDelegate {
 
     private func mouseDown(_ event: NSEvent) {
         guard isOpen, event.window === owner.nsWindow else { return }
-        if !view.bounds.contains(view.convert(event.locationInWindow, from: nil)) { close(restoreFocus: false) }
+        guard !view.bounds.contains(view.convert(event.locationInWindow, from: nil)) else { return }
+        // A click into the New Tab card hands it the keys (its focusField closes this card).
+        if let bar = owner.madeCommandBar, bar.isOpen, bar.placement == .newTab, bar.view.bounds.contains(bar.view.convert(event.locationInWindow, from: nil)),
+           !BarHook.on("SEARCH_CLICKINBAR") { return bar.focusField() }  // the hook: the card just closes
+        close(restoreFocus: false)
     }
 
     // MARK: results

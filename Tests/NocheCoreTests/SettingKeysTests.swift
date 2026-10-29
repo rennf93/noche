@@ -56,4 +56,22 @@ final class SettingKeysTests: XCTestCase {
         let k = SettingKey(name: "t", type: .text, defaultValue: "")
         XCTAssertTrue(k.isValid("a=b"))
     }
+    func testTabBehaviorKeysAndReaders() {
+        XCTAssertEqual(SettingKeys.key("addNewTabsToTop")?.defaultValue, "1")
+        XCTAssertEqual(SettingKeys.key("warnBeforeClosingLastTab")?.defaultValue, "1")
+        XCTAssertEqual(SettingKeys.key("autoGroupMeetings")?.defaultValue, "0")
+        for (stored, want) in [(nil, true), ("0", false), ("1", true), ("2", true), ("", true)] as [(String?, Bool)] {
+            XCTAssertEqual(SettingKeys.bool("addNewTabsToTop", stored: stored), want, "stored \(stored ?? "nil")")
+        }
+        XCTAssertFalse(SettingKeys.bool("autoGroupMeetings", stored: nil))
+        XCTAssertTrue(SettingKeys.bool("autoGroupMeetings", stored: "1"))
+        let args = ["Noche", "--selftest-setting", "addNewTabsToTop=0", "--selftest-setting", "warnBeforeClosingLastTab=0", "--selftest-setting", "autoGroupMeetings=1", "--selftest-setting", "addNewTabsToTop=2"]
+        XCTAssertEqual(SettingKeys.flagSettings(args).map { "\($0.0)=\($0.1)" }, ["addNewTabsToTop=0", "warnBeforeClosingLastTab=0", "autoGroupMeetings=1"])
+    }
+    func testDownloadsRemovedAndNewWindowProfileAreInTheTable() {
+        XCTAssertEqual(SettingKeys.key(SettingKeys.downloadsRemoved)?.defaultValue, "")
+        XCTAssertEqual(SettingKeys.key(SettingKeys.newWindowProfile)?.defaultValue, "")
+        XCTAssertEqual(SettingKeys.text(SettingKeys.downloadsRemoved, stored: nil), "")
+        XCTAssertEqual(SettingKeys.text(SettingKeys.newWindowProfile, stored: "p1"), "p1")
+    }
 }

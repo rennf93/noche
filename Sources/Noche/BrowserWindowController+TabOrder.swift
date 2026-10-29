@@ -53,6 +53,7 @@ extension BrowserWindowController {
     func closeActiveTab() {
         note("closeTab")
         guard let active = survivor(from: intendedActive ?? activeTab) else { return }
+        if warnsBeforeClosing(active), !Confirm.ask(.init(message: "Close the last tab?", detail: "This closes the window.", button: "Close Tab")) { return }
         if let blank = keepEngineTab(closing: active) {
             closeNext[active.identifier] = blank
         } else {
@@ -66,6 +67,20 @@ extension BrowserWindowController {
         if Self.holdNextClose { Self.holdNextClose = false; Self.heldClose = { active.close() }; return }  // pin-dormant: the close happens when the check says
 #endif
         active.close()
+    }
+
+    /// Whether closing |tab| closes the last tab of the profile: no other tab, live or dormant, pinned or grouped, in any window of the app (a
+    /// tab already closing does not count), and |tab| is not a pinned one (it stays as a dormant tile). Off with `warnBeforeClosingLastTab`.
+    func warnsBeforeClosing(_ tab: NCTab) -> Bool {
+        guard flag("warnBeforeClosingLastTab") || BarHook.on("WARN_IGNORESETTING"), !BarHook.on("WARN_NEVER"),  // the hooks: always asked, never asked
+              let me = ids[tab.identifier].flatMap({ item(withID: $0) }), BarHook.on("WARN_PINNED") || !goesDormant(me) else { return false }
+        func holdsOthers(_ c: BrowserWindowController) -> Bool {
+            c.list.items.contains { t in
+                let e = c.engineTab(t)
+                return e !== tab && !(e.map { c.isClosing($0) } ?? BarHook.on("WARN_NODORMANT"))  // the hook: a dormant tab does not count
+            }
+        }
+        return !holdsOthers(self) && (BarHook.on("WARN_ONLYTHISWINDOW") || app.controllers.allSatisfy { $0 === self || !holdsOthers($0) })  // the hook: other windows do not count
     }
 
     func selectNextTab() { note("nextTab"); step(1) }

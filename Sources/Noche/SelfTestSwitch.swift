@@ -40,7 +40,7 @@ extension SelfTest {
     func searchTabs() async {
         guard await ready(), let c = ctl, let win, let writer = app.writer else { return }
         guard await openTabs(5, page: "b.html"), await until(20, { c.list.items.allSatisfy { !$0.title.isEmpty } }) else { return finish(false, "five tabs never appeared") }
-        let t = c.list.items.map(\.id)
+        let t = Array(c.list.items.map(\.id).reversed())  // opening order (new tabs open at the top of the list, T7.6)
         for (id, name) in zip(t, ["alpha", "my game", "grand mal", "gamma ray", "zeta"]) { c.renameTab(id, to: name) }
         let card = c.searchTabsCard
         let tool = NSTextView()
@@ -106,7 +106,7 @@ extension SelfTest {
 
         card.open()
         card.setQuery("")
-        guard kinds() == ["live", "live", "archived", "closed", "closed"], card.results.map(\.title).suffix(3) == ["zeta", "grand mal", "alpha"] else { return finish(false, "an empty query lists \(kinds()) \(card.results.map(\.title)), want two open tabs, then archived 'zeta', then the closed 'grand mal' and 'alpha' (closed by Cmd+Delete, the most recently used first)") }
+        guard kinds() == ["live", "live", "archived", "closed", "closed"], card.results.map(\.title).suffix(3) == ["zeta", "grand mal", "alpha"] else { return finish(false, "an empty query lists \(kinds()) \(card.results.map(\.title)), want two open tabs, then archived 'zeta', then the closed 'grand mal' and 'alpha' (closed by Cmd+Delete, the most recently used first;)") }
         guard card.lines.contains(.header("Archived")), card.lines.contains(.header("Recently Closed")) else { return finish(false, "the card's lines are \(card.lines), want both section headers") }
         
         // Return on the archived row restores it into this window; on the closed row reopens it.
@@ -144,7 +144,23 @@ extension SelfTest {
         guard await openBar(), !card.isOpen, win.keysHeld else { return finish(false, "Cmd+L on a New Tab page with Search Tabs open left the card open \(card.isOpen), keys held \(win.keysHeld)") }
         press(.escape)
         guard await until(3, { !win.keysHeld }), !card.isOpen else { return finish(false, "after Escape on the New Tab card the keys are held \(win.keysHeld) (card open \(card.isOpen))") }
-        finish(violations.isEmpty, "Shift+Cmd+A opens the card; 'gam' ranks [gamma ray, my game, grand mal]; Up and Down clamp, Return activates, Escape closes, Cmd+Delete closes an open tab (a dormant one too); the card holds the keys from open to close; an empty query lists open tabs, then Archived, then Recently Closed; Return restores the archived tab and reopens the closed one (the store clears both) \(violations)")
+        // One card owns the keys: a click inside Search Tabs (over the New Tab card, whose click monitor is still installed) leaves the keys with Search Tabs; a click
+        // into the New Tab card closes Search Tabs and the card holds them.
+        let bar = c.madeCommandBar
+        card.open()
+        let field = card.view.field
+        guard let barView = bar?.view else { return finish(false, "no card views") }
+        let inSearch = mouseDown(at: field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil))
+        try? await Task.sleep(for: .milliseconds(200))
+        guard inSearch != nil, card.isOpen, win.keysHeld, field.currentEditor() != nil, win.testSystemFocusRequest() else {
+            return finish(false, "after a click inside Search Tabs over the New Tab card: open \(card.isOpen), keys held \(win.keysHeld), its field is first responder \(field.currentEditor() != nil), an engine focus request refused \(win.testSystemFocusRequest()), want all true")
+        }
+        let inBar = mouseDown(at: barView.convert(NSPoint(x: barView.bounds.width - 8, y: 20), to: nil))
+        try? await Task.sleep(for: .milliseconds(200))
+        guard inBar != nil, !card.isOpen, win.keysHeld, barEditor != nil, win.testSystemFocusRequest() else {
+            return finish(false, "after a click into the New Tab card with Search Tabs open: Search Tabs open \(card.isOpen), keys held \(win.keysHeld), the card's field is first responder \(barEditor != nil), an engine focus request refused \(win.testSystemFocusRequest()), want closed and the rest true")
+        }
+        finish(violations.isEmpty, "Shift+Cmd+A opens the card; 'gam' ranks [gamma ray, my game, grand mal]; Up and Down clamp, Return activates, Escape closes, Cmd+Delete closes an open tab (a dormant one too); the card holds the keys from open to close, also after a click inside it with the New Tab card open behind (and a click into that card closes Search Tabs and gives it the keys); an empty query lists open tabs, then Archived, then Recently Closed; Return restores the archived tab and reopens the closed one (the store clears both) \(violations)")
     }
 
     // MARK: ctrl-tab

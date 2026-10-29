@@ -46,7 +46,11 @@ extension BrowserWindowController {
                 added.groupID = saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
             }
         }
-        list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: false, activate: active)
+        // A tab the engine appended (no tab after it in the strip that the list knows: a burst of tabs arrives after later ones joined the strip; none
+        // restored or reopened) opens at the top of the day list unless addNewTabsToTop is off. A popup or a reopened tab in the middle keeps its place.
+        let appended = at.map { i in !strip[(i + 1)...].contains { ids[$0.identifier] != nil } } ?? true
+        let toTop = pending == nil && appended && (BarHook.on("NEWTAB_ALWAYSTOP") || (flag("addNewTabsToTop") && !BarHook.on("NEWTAB_APPEND")))
+        list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: toTop, activate: active)
         if let at = pending?.index { list.move(added.id, to: at) }  // the index is inside the tab's own container (|containerIndex|)
         if let join = groupJoins.removeValue(forKey: tab.identifier) { joinGroup(added.id, join) }
         if let restore {

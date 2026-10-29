@@ -195,24 +195,29 @@ extension SelfTest {
         guard let b = await open() else { return finish(false, "no menu for New Tab") }
         ContextMenus.dismiss(choosing: item(b.menu, "New Tab"))
         guard await until(10, { rowCount == 2 && win.tabs.count == 2 }) else { return finish(false, "New Tab left \(rowCount) rows") }
-        // Close All Tabs: one blank tab is left, the closed ones go on the reopen list.
+        // Close All Tabs: the day tabs close and one blank tab is left, the closed ones go on the reopen list.
         guard let c = await open() else { return finish(false, "no menu for Close All Tabs") }
         guard item(c.menu, "Close All Tabs")?.isEnabled == true else { return finish(false, "Close All Tabs disabled with 2 tabs") }
         ContextMenus.dismiss(choosing: item(c.menu, "Close All Tabs"))
         guard await until(15, { rowCount == 1 && win.tabs.count == 1 && ctl.list.items[0].url == "about:blank" && app.writer?.hasClosed == true }) else {
             return finish(false, "Close All Tabs left \(rowCount) rows \(ctl.list.items.map(\.url)), closed list \(String(describing: app.writer?.hasClosed))")
         }
-        // With one blank tab it is disabled; Reopen Closed Tab is enabled now and brings a tab back.
-        guard let d = await open() else { return finish(false, "no menu after Close All Tabs") }
-        guard item(d.menu, "Close All Tabs")?.isEnabled == false else { return finish(false, "Close All Tabs is enabled with one blank tab") }
+        // The blank tab is a day tab (enabled); pinned it is none, and the row is disabled. Reopen Closed Tab is enabled now and brings a tab back.
+        guard let d0 = await open() else { return finish(false, "no menu after Close All Tabs") }
+        guard item(d0.menu, "Close All Tabs")?.isEnabled == true else { return finish(false, "Close All Tabs is disabled with one blank day tab") }
+        ContextMenus.dismiss(choosing: nil)
+        ctl.togglePin()
+        guard await until(5, { ctl.list.items.first?.isPinned == true }) else { return finish(false, "the blank tab did not pin") }
+        guard let d = await open() else { return finish(false, "no menu after pinning the blank tab") }
+        guard item(d.menu, "Close All Tabs")?.isEnabled == false else { return finish(false, "Close All Tabs is enabled with no day tab") }
         guard item(d.menu, "Reopen Closed Tab")?.isEnabled == true else { return finish(false, "Reopen Closed Tab is disabled with closed tabs on the list") }
         ContextMenus.dismiss(choosing: item(d.menu, "Reopen Closed Tab"))
-        guard await until(10, { rowCount == 2 && win.tabs.count == 2 }) else { return finish(false, "Reopen Closed Tab left \(rowCount) rows") }
+        guard await until(10, { rowCount == 1 && win.tabs.count == 2 && ctl.list.items.count == 2 }) else { return finish(false, "Reopen Closed Tab left \(rowCount) rows, \(win.tabs.count) tabs") }
         // Auto-Hide Tabs is the sidebar toggle and shows its checkmark.
         guard let e = await open() else { return finish(false, "no menu for Auto-Hide Tabs") }
         ContextMenus.dismiss(choosing: item(e.menu, "Auto-Hide Tabs"))
         guard ctl.sidebarHidden, ctl.sidebarMenuEntries().first(where: { $0.title == "Auto-Hide Tabs" })?.checked == true else { return finish(false, "Auto-Hide Tabs did not hide the sidebar (hidden \(ctl.sidebarHidden))") }
-        finish(violations.isEmpty, "empty-space menu in the section 3 order, New Tab, New Group, Close All Tabs (then disabled on one blank tab), Reopen Closed Tab and Auto-Hide Tabs work, the rest disabled, keys equal the menu bar's \(violations)")
+        finish(violations.isEmpty, "empty-space menu in the section 3 order, New Tab, New Group, Close All Tabs (then disabled when the only tab is pinned), Reopen Closed Tab and Auto-Hide Tabs work, the rest disabled, keys equal the menu bar's \(violations)")
     }
 }
 #endif

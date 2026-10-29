@@ -43,7 +43,7 @@ File|Open Command Bar|l|cmd|1
 File|---|||-
 File|Close Window|w|shift+cmd|1
 File|Close Tab|w|cmd|1
-# Close All Tabs: the capture shows it disabled with one blank tab; this window has the fixture page, so it is enabled here (menu-disabled covers the blank state).
+# Close All Tabs: disabled with no day tab; this window has a day tab (the fixture page), so it is enabled here (menu-disabled covers the disabled state).
 File|Close All Tabs|k|shift+cmd|1
 File|Clean Up Tabs|k|opt+cmd|0
 File|---|||-

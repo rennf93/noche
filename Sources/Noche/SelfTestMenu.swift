@@ -155,22 +155,28 @@ extension SelfTest {
         key("r", code: 15, menuOnly: true)
         try? await Task.sleep(for: .milliseconds(300))
         guard BrowserWindowController.actionCounts == ["reload": 1] else { return finish(false, "positive control: Cmd+R acted \(BrowserWindowController.actionCounts), want [reload: 1]") }
-        // The blank state: with one blank tab Close All Tabs would close nothing, so the row is disabled and its key does nothing.
+        // A lone blank tab is a day tab: Close All Tabs is enabled (it swaps the tab for a new blank one).
         ctl.window.activeTab?.loadURL("about:blank")
-        guard await until(10, { ctl.hasOnlyBlankTab }) else { return finish(false, "the tab never became blank (\(ctl.window.activeTab?.url ?? "nil"))") }
+        guard await until(10, { ctl.list.items.count == 1 && ctl.list.items[0].url == "about:blank" }) else { return finish(false, "the tab never became blank (\(ctl.window.activeTab?.url ?? "nil"))") }
         _ = menuLines(bar, path: "bar")
-        guard let closeAll = menuItem("Close All Tabs"), !closeAll.isEnabled else { return finish(false, "Close All Tabs is enabled in a window with one blank tab") }
-        BrowserWindowController.actionCounts = [:]
-        key("k", code: 40, [.command, .shift], menuOnly: true)
-        try? await Task.sleep(for: .milliseconds(300))
-        guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "Close All Tabs acted on a blank tab: \(BrowserWindowController.actionCounts)") }
+        guard menuItem("Close All Tabs")?.isEnabled == true else { return finish(false, "Close All Tabs is disabled with one blank day tab") }
         // The New Tab surface hides the page: Find has nothing to search there and Print would print the hidden blank page.
         guard await until(10, { ctl.newTabShown }) else { return finish(false, "the New Tab surface never showed for the blank tab") }
         _ = menuLines(bar, path: "bar")
         for t in ["Find...", "Find Next", "Find Previous", "Use Selection for Find", "Print..."] {
             guard let i = menuItem(t), !i.isEnabled else { return finish(false, "\(t) is enabled on the New Tab surface") }
         }
-        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab Close All Tabs, the four Find items and Print are disabled and its key does nothing \(violations)")
+        // No day tab (the only tab is pinned): Close All Tabs would close nothing, so the row is disabled and its key does nothing.
+        guard let only = ctl.list.activeID else { return finish(false, "no active tab to pin") }
+        ctl.togglePin(of: only)
+        guard await until(5, { ctl.list.items.first?.isPinned == true }) else { return finish(false, "the tab did not pin") }
+        _ = menuLines(bar, path: "bar")
+        guard let closeAll = menuItem("Close All Tabs"), !closeAll.isEnabled else { return finish(false, "Close All Tabs is enabled in a window with no day tab") }
+        BrowserWindowController.actionCounts = [:]
+        key("k", code: 40, [.command, .shift], menuOnly: true)
+        try? await Task.sleep(for: .milliseconds(300))
+        guard BrowserWindowController.actionCounts.isEmpty else { return finish(false, "Close All Tabs acted with no day tab: \(BrowserWindowController.actionCounts)") }
+        finish(violations.isEmpty, "\(disabled.count) disabled items with a key equivalent (\(handled) swallowed by the menu) ran no action, logged no Chrome command and changed no window; the positive control Cmd+R reloaded once; with one blank tab the four Find items and Print are disabled; Close All Tabs is enabled on a lone blank day tab and disabled, its key doing nothing, when the only tab is pinned \(violations)")
     }
 
     /// The items with no shortcut, plus Appearance. (The keyed ones are in shortcuts-once.)

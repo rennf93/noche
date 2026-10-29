@@ -41,13 +41,32 @@ public enum SettingKeys {
         SettingKey(name: "emojiForNewGroups", type: .bool, defaultValue: "0"),
         // "Haptic feedback when reordering tabs" (spec note section 2, default on): a tap each time a sidebar drag's insertion slot changes.
         SettingKey(name: "hapticReorder", type: .bool, defaultValue: "1"),
+        // "Add new tabs to the top" (M1.6 Task 7, default on): a new tab opens at the top of the day list; off, at the end (after its opener).
+        SettingKey(name: "addNewTabsToTop", type: .bool, defaultValue: "1"),
+        // "Warn before closing last tab" (default on): Cmd+W on the last tab of the profile asks first.
+        SettingKey(name: "warnBeforeClosingLastTab", type: .bool, defaultValue: "1"),
+        // "Automatically group tabs for meetings" (G4): the key only, nothing reads it until M1.8 (Settings) and M3 (calendar access).
+        SettingKey(name: "autoGroupMeetings", type: .bool, defaultValue: "0"),
+        // Finished downloads the person removed from the list, one "engine id|address" per line (DownloadsController).
+        SettingKey(name: downloadsRemoved, type: .text, defaultValue: ""),
+        // The profile "New windows open with" (ProfileStore): a profile id; empty means the first live profile.
+        SettingKey(name: newWindowProfile, type: .text, defaultValue: ""),
     ]
 
-    /// Whether a drag taps the trackpad: the stored value when it is valid, else the default (on).
-    public static func hapticReorder(stored: String?) -> Bool {
-        let k = key("hapticReorder")!
+    public static let downloadsRemoved = "downloadsRemoved"
+    public static let newWindowProfile = "newWindowProfileId"
+
+    /// A bool key: the stored value when it is valid, else the table's default.
+    public static func bool(_ name: String, stored: String?) -> Bool {
+        let k = key(name)!
         return (stored.flatMap { k.isValid($0) ? $0 : nil } ?? k.defaultValue) == "1"
     }
+
+    /// A text key: the stored value, else the table's default.
+    public static func text(_ name: String, stored: String?) -> String { stored ?? key(name)!.defaultValue }
+
+    /// Whether a drag taps the trackpad: the stored value when it is valid, else the default (on).
+    public static func hapticReorder(stored: String?) -> Bool { bool("hapticReorder", stored: stored) }
 
     /// The discard threshold in minutes: the stored value when it is valid for the key's range, else the default (120).
     public static func discardAfterMinutes(stored: String?) -> Int {

@@ -276,7 +276,7 @@ extension BrowserWindowController {
     func sidebarMenuEntries() -> [CtxEntry] {
         var closeAll = tableRow("file.closeAllTabs") { [weak self] in self?.closeAllTabs() }  // its enable rule is the table's
 #if NOCHE_TESTHOOKS
-        if ContextMenus.env("NOCHE_TEST_CTX_CLOSEALLBLANK") { closeAll.enabled = true }  // negative control: enabled on a lone blank tab
+        if ContextMenus.env("NOCHE_TEST_CTX_CLOSEALLBLANK") { closeAll.enabled = true }  // negative control: enabled with no day tabs
 #endif
         var reopen = tableRow("file.reopenClosedTab") { [weak self] in self?.app.reopenClosedTab(nil) }
 #if NOCHE_TESTHOOKS

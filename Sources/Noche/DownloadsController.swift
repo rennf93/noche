@@ -1,5 +1,6 @@
 import AppKit
 import CefBridge
+import NocheCore
 import NocheStore
 
 /// The profile's downloads as the UI sees them: the observer of `NCDownloads` (installed once at startup, before any window is restored, so
@@ -29,9 +30,9 @@ final class DownloadsController: NSObject, NCDownloadsObserver {
 
     /// The profile's store, set once it is open (before the engine announces its restored downloads).
     var store: Store? {
-        didSet { removedList = (((try? store?.setting(Self.removedKey)) ?? nil).map { $0.split(separator: "\n").map(String.init) } ?? []); removed = Set(removedList) }
+        didSet { removedList = SettingKeys.text(Self.removedKey, stored: ((try? store?.setting(Self.removedKey)) ?? nil)).split(separator: "\n").map(String.init); removed = Set(removedList) }
     }
-    private static let removedKey = "downloadsRemoved"
+    private static let removedKey = SettingKeys.downloadsRemoved
     /// Finished downloads the person removed from the list, as "engine id|address", oldest first. The engine has no call that forgets a download: it
     /// announces every download of the profile's history again at each launch (ids and names are the same as before), so the removal is kept here, in the
     /// store's `setting` table, and those announcements are dropped. The address is part of the key so that an id reused after the engine's history was

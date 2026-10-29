@@ -22,24 +22,40 @@ extension BrowserWindowController {
         intendedActive = window.addTab(withURL: shownURL(tab), activate: true)
     }
 
-    /// The window holds one blank tab: Close All Tabs would close nothing (the menu rule, live-ui.md shows it disabled then).
-    var hasOnlyBlankTab: Bool {
-        let open = orderedTabs().filter { !isClosing($0) }
-        return open.count == 1 && open[0].url == "about:blank"
+    /// More day tabs than this and Close All Tabs asks first.
+    static let closeAllConfirmAbove = 5
+
+    /// The engine tabs of the day tabs (unpinned, ungrouped) that are not closing: what Close All Tabs closes, and the rule that enables it.
+    var closableDayTabs: [NCTab] {
+        list.items.filter { !$0.isPinned && $0.groupID == nil }.compactMap { engineTab($0) }.filter { !isClosing($0) }
     }
 
-    /// File > Close All Tabs: every tab of the window closes but one blank tab (a lone blank tab is left as it is).
+    /// File > Close All Tabs: the day tabs close (asked first above |closeAllConfirmAbove|); pinned tabs and groups stay. The window keeps an
+    /// engine tab: one blank tab opens first when nothing else would be left. Only this window's tabs count.
     func closeAllTabs() {
         note("closeAllTabs")
 #if NOCHE_TESTHOOKS
         if ProcessInfo.processInfo.environment["NOCHE_TEST_NO_CLOSEALL"] == "1" { return }  // negative control
 #endif
-        if hasOnlyBlankTab { return }
-        let open = orderedTabs().filter { !isClosing($0) }
+        let day = BarHook.on("CLOSEALL_ALL") ? orderedTabs().filter { !isClosing($0) } : closableDayTabs  // the hook: pinned and grouped tabs close too
+        guard !day.isEmpty else { return }
+        if day.count > Self.closeAllConfirmAbove, !BarHook.on("CLOSEALL_NOCONFIRM"),  // the hook: no question is asked
+           !Confirm.ask(.init(message: "Close \(day.count) tabs?", detail: "Pinned tabs and groups stay open.", button: "Close Tabs")) { return }
+        let others = orderedTabs().filter { t in !isClosing(t) && !day.contains { $0 === t } }
+        let active = intendedActive ?? activeTab
         closeNext.removeAll()
-        intendedActive = window.addTab(withURL: "about:blank", activate: true)
+        if others.isEmpty, !BarHook.on("CLOSEALL_NOBLANK") {  // the hook: the window is left with no engine tab
+            intendedActive = window.addTab(withURL: "about:blank", activate: true)
+        } else if let active, let next = others.first, day.contains(where: { $0 === active }) {
+            closeNext[active.identifier] = next
+        }
         let now = ProcessInfo.processInfo.systemUptime
-        for tab in open { closing[tab.identifier] = now; tab.close() }
+        for tab in day { closing[tab.identifier] = now; tab.close() }
+    }
+
+    /// A bool setting of the profile: the stored value, the table's default when unset or invalid.
+    func flag(_ key: String) -> Bool {
+        SettingKeys.bool(key, stored: (try? app.writer?.store.setting(key)).flatMap { $0 })
     }
 
     /// Edit > Copy URL as Markdown: `[title](url)` (see `MarkdownLink` for the escaping).

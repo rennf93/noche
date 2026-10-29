@@ -33,7 +33,7 @@ struct ProfileRow: Codable, FetchableRecord, TableRecord {
 }
 
 extension Store {
-    static let newWindowProfileKey = "newWindowProfileId"
+    static let newWindowProfileKey = SettingKeys.newWindowProfile
 
     /// Live profiles in list order.
     public func profiles() throws -> [Profile] { try db.read { try Self.liveProfiles($0).map(\.profile) } }
@@ -186,7 +186,7 @@ extension Store {
 
     /// Stored "New windows open with" profile, or the first live profile when none is stored or it is gone.
     public func newWindowProfileId() throws -> String? {
-        let stored = try setting(Self.newWindowProfileKey)
+        let stored = SettingKeys.text(Self.newWindowProfileKey, stored: try setting(Self.newWindowProfileKey))
         let live = try profiles()
         return live.first { $0.id == stored }?.id ?? live.first?.id
     }

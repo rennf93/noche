@@ -127,7 +127,7 @@ enum MenuTable {
             app("Close Window", "file.closeWindow", #selector(AppDelegate.closeWindowMenu(_:))),
             app("Close Tab", "file.closeTab", #selector(AppDelegate.closeTab(_:))),
             app("Close All Tabs", "file.closeAllTabs", #selector(AppDelegate.closeAllTabs(_:)),
-                enabled: { $0.window.map { !$0.hasOnlyBlankTab } ?? false }),  // disabled when it would close nothing (live-ui.md: "(d)")
+                enabled: { $0.window.map { !$0.closableDayTabs.isEmpty || BarHook.on("CLOSEALL_ENABLED") } ?? false }),  // disabled when there are no day tabs
             later("Clean Up Tabs", "file.cleanUpTabs", "M1.6"),
             sep,
             app("Share...", "file.share", #selector(AppDelegate.share(_:)),
