@@ -9,6 +9,9 @@ import NocheStore
 extension BrowserWindowController {
     /// Every window is the default profile until M1.7 gives windows their own: a move and a merge stay inside one.
     var profileID: String { "default" }
+    /// This window gave items to a new window that has not saved yet: it is not a destination or a merge target until it has (a short wait, normally
+    /// about a second), because its own save is held and would leave what arrives in no window.
+    var isHeld: Bool { app.writer?.holds[id] != nil }
     func sameProfile(_ other: BrowserWindowController) -> Bool { other.profileID == profileID }
 
     enum Movable { case tab(TabID), group(GroupID) }
@@ -52,17 +55,17 @@ extension BrowserWindowController {
             p.own ? E(title: p.name, run: { [weak self] in self?.move(what, to: nil) }) : .later(p.name, "M1.7")
         }
         return [E(title: windowMenuTitle, run: {}, enabled: false, checked: true)]
-            + others.map { w in E(title: w.windowMenuTitle, run: { [weak self, weak w] in if let w { self?.move(what, to: w) } }, enabled: !w.restoring) }
+            + others.map { w in E(title: w.windowMenuTitle, run: { [weak self, weak w] in if let w { self?.move(what, to: w) } }, enabled: !w.restoring && !w.isHeld) }
             + [.sep, E(title: "New Window", run: {}, children: profiles)]
     }
 
     // MARK: moving
 
-    /// Moves a tab or a group to |target|, or to a new window with nil. Nothing happens for a window that is still restoring or closing.
+    /// Moves a tab or a group to |target|, or to a new window with nil. Nothing happens for a window that is still restoring, closing or held.
     func move(_ what: Movable, to target: BrowserWindowController?) {
         note("moveToWindow")
         if BarHook.on("MOVE_NOOP") { return }  // negative control: the menu item does nothing
-        guard !restoring, !windowClosing, !app.closing, target.map({ $0 !== self && !$0.restoring && !$0.windowClosing && sameProfile($0) }) ?? true,
+        guard !restoring, !windowClosing, !app.closing, target.map({ $0 !== self && !$0.restoring && !$0.windowClosing && (!$0.isHeld || BarHook.on("MOVE_HELDDEST")) && sameProfile($0) }) ?? true,
               let d = leave(what) else { return }
         let giving = list.items.isEmpty
         if let target {
@@ -217,7 +220,7 @@ extension AppDelegate {
     /// Window > Merge All Windows: the front window is the target; every other window of its profile moves in, front to back, all dormant
     /// (their engine tabs close with the windows), so only the target's own loaded tabs stay loaded.
     func mergeAllWindows() {
-        guard !closing, let target = active, !target.restoring, !target.windowClosing else { return }
+        guard !closing, let target = active, !target.restoring, !target.windowClosing, !target.isHeld || BarHook.on("MERGE_HELDTARGET") else { return }
         let sources = windowsFrontToBack.filter { $0 !== target && target.sameProfile($0) && !$0.restoring && !$0.windowClosing }
         guard !sources.isEmpty else { return }
         BrowserWindowController.note("mergeAllWindows")
@@ -229,7 +232,7 @@ extension AppDelegate {
     }
 
     /// The windows of the front window's profile (a merge needs two).
-    func canMerge(_ w: BrowserWindowController) -> Bool { controllers.filter { w.sameProfile($0) && !$0.windowClosing && (!$0.restoring || BarHook.on("MERGE_COUNTRESTORING")) }.count >= 2 }  // a restoring window is not merged: Merge would do nothing
+    func canMerge(_ w: BrowserWindowController) -> Bool { !w.isHeld && controllers.filter { w.sameProfile($0) && !$0.windowClosing && (!$0.restoring || BarHook.on("MERGE_COUNTRESTORING")) }.count >= 2 }  // a restoring window is not merged: Merge would do nothing
 
     /// The profiles the New Window submenu lists: the store's, the window's own marked. Without a store (it failed to open) the default one.
     var profileChoices: [(name: String, own: Bool)] {

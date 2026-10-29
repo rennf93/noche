@@ -270,6 +270,7 @@ extension SelfTest {
         var n0 = app.controllers.count
         s.move(.group(g), to: nil)
         guard app.controllers.count == n0 + 1, let e = app.controllers.last, e.restoring, let closing = entry(s, t[3]).flatMap({ s.engineTab($0) }) else { finish(false, "no restoring new window for the group"); return false }
+        guard writer.holds[s.id] == [e.id] else { finish(false, "the source is not held for its new window (holds \(String(describing: writer.holds[s.id])))"); return false }
         s.closeTab(closing)
         guard await until(5, { writer.peekClosed()?.tab.id == t[3] }) else { finish(false, "the closed tab was not recorded"); return false }
         guard e.restoring, liveInStore([t[1], t[2]]) else { finish(false, "after another tab closed in the source, the store holds the group's tabs in no window (new window restoring \(e.restoring))"); return false }
@@ -318,6 +319,40 @@ extension SelfTest {
             finish(false, "the saves were \(marks.list.map { $0.0 == s3.id ? "S" : $0.0 == first.id ? "E1" : $0.0 == second.id ? "E2" : "?" }) with the moved tabs in the store after each: \(marks.list.map(\.1)); want E1, E2, S and true each (the source waits for both)"); return false
         }
         await closeWindows([s3, first, second])
+
+        // 4. A held window is not a destination or a merge target (ruling M102) until its new window has saved.
+        line("info", "step: a held window as destination and as merge target")
+        guard let (a, r) = await source("r-a", 4), let ga2 = pairGroup(a, r[1], r[2], "r-group"), let (c, q) = await source("r-c", 2) else { finish(false, "no windows for the held destination"); return false }
+        writer.saveNow([a.id, c.id])
+        n0 = app.controllers.count
+        a.move(.group(ga2), to: nil)
+        guard app.controllers.count == n0 + 1, let e4 = app.controllers.last, e4.restoring, a.isHeld else { finish(false, "the window is not held for its new window"); return false }
+        // (a) its row in another window's Move to Window submenu is disabled, and a forced move changes nothing.
+        let rowA = c.moveToWindowEntries(.tab(q[1])).first { $0.title == a.windowMenuTitle && $0.checked != true }
+        guard let rowA, !rowA.enabled else { finish(false, "the held window's row in the Move to Window submenu is \(String(describing: c.moveToWindowEntries(.tab(q[1])).map { "\($0.title):\($0.enabled)" })), want it disabled"); return false }
+        c.move(.tab(q[1]), to: a)
+        try? await Task.sleep(for: .milliseconds(500))
+        guard e4.restoring, c.list.items.contains(where: { $0.id == q[1] }), !a.list.items.contains(where: { $0.id == q[1] }), liveInStore([q[1]]) else {
+            finish(false, "a move into the held window changed things: the tab is in C \(c.list.items.contains { $0.id == q[1] }), in A \(a.list.items.contains { $0.id == q[1] }), in the store \(liveInStore([q[1]])) (the store holds it in no window)"); return false
+        }
+        // (b) Merge All Windows is disabled with the held window in front, and a forced merge changes nothing.
+        becomeKey(a)
+        guard let merge = menuItem("Merge All Windows") else { finish(false, "no Merge All Windows"); return false }
+        merge.menu?.update()
+        let shape = app.controllers.map { $0.list.items.count }
+        guard app.active === a, !merge.isEnabled else { finish(false, "Merge All Windows is enabled with the held window in front (enabled \(merge.isEnabled))"); return false }
+        app.mergeAllWindows()
+        try? await Task.sleep(for: .milliseconds(500))
+        guard e4.restoring, app.controllers.map({ $0.list.items.count }) == shape, liveInStore([q[0], q[1]]) else {
+            finish(false, "a forced merge into the held window changed the windows from \(shape) to \(app.controllers.map { $0.list.items.count }) (store holds C's tabs: \(liveInStore([q[0], q[1]])))"); return false
+        }
+        // (c) once the new window has saved, both work again.
+        guard await until(15, { !e4.restoring && !a.isHeld }) else { finish(false, "the window stayed held"); return false }
+        merge.menu?.update()
+        guard merge.isEnabled, c.moveToWindowEntries(.tab(q[1])).first(where: { $0.title == a.windowMenuTitle && $0.checked != true })?.enabled == true else { finish(false, "after the release the held window's row or Merge All Windows is still disabled"); return false }
+        c.move(.tab(q[1]), to: a)
+        guard await arrived(q[1], in: a, loaded: true, active: true, state: "the tab moved into the released window") else { return false }
+        await closeWindows([a, c, e4])
         return true
     }
 
