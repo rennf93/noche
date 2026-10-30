@@ -223,6 +223,12 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 /// Attaches (or detaches) the tab's cross-origin iframe targets over the DevTools channel (Target.setAutoAttach, flat sessions). The completion
 /// gets the session ids attached then, usable as |sessionId| above, or an error (and none).
 - (void)attachChildTargets:(BOOL)on timeout:(NSTimeInterval)timeout completion:(void (^)(NSArray<NSString *> *sessionIds, NSString *_Nullable error))completion;
+/// The flat sessions attached now (the tab's own auto attach and any a child session's auto attach made), nested ones included.
+@property (nonatomic, readonly) NSArray<NSString *> *childSessionIds;
+/// Any DevTools method with |paramsJSON| (a JSON object) on a flat |sessionId| (nil: the tab's own page) and a |timeout| in seconds (0: none).
+/// |resultJSON| is the JSON of the whole `result` object (not only a Runtime value); on a timeout it is nil and the error is "timed out"
+/// (a late reply is dropped), on a CDP error nil and the CDP message. The completion runs exactly once.
+- (void)callDevToolsMethod:(NSString *)method paramsJSON:(NSString *)paramsJSON sessionId:(nullable NSString *)sessionId timeout:(NSTimeInterval)timeout completion:(void (^)(NSString *_Nullable resultJSON, NSString *_Nullable error))completion;
 @end
 
 NS_ASSUME_NONNULL_END

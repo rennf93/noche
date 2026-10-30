@@ -65,7 +65,8 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
 @implementation NCTab {
   CefRefPtr<CefRegistration> _registration;
   NSMutableDictionary<NSNumber*, NCEvalCompletion>* _pending;
-  NSMutableDictionary<NSString*, NSNumber*>* _childSessions;  // flat sessions of attached iframe targets
+  NSMutableDictionary<NSString*, NSNumber*>* _childSessions;  // flat sessions of attached iframe targets (every session's, nested ones too)
+  NSMutableSet<NSNumber*>* _wholeResult;                      // ids of |callDevToolsMethod:| calls: their reply is the whole |result|
   int _nextId;
   NSInteger _faviconGeneration;
   BOOL _waitingForDevTools;  // the 10 s of polling ran out with the DevTools still open
@@ -103,6 +104,7 @@ static BOOL g_force_html_fullscreen = NO;
     _title = @"";
     _pending = [NSMutableDictionary dictionary];
     _childSessions = [NSMutableDictionary dictionary];
+    _wholeResult = [NSMutableSet set];
   }
   return self;
 }
@@ -246,6 +248,23 @@ static BOOL g_force_html_fullscreen = NO;
         completion:^(NSString* json, NSString* error) { completion(error ? @[] : [self->_childSessions allKeys], error); }];
 }
 
+- (NSArray<NSString*>*)childSessionIds { return [_childSessions allKeys]; }
+
+- (void)callDevToolsMethod:(NSString*)method
+                paramsJSON:(NSString*)paramsJSON
+                 sessionId:(NSString*)sessionId
+                   timeout:(NSTimeInterval)timeout
+                completion:(NCEvalCompletion)completion {
+  id params = [NSJSONSerialization JSONObjectWithData:[paramsJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  if (![params isKindOfClass:NSDictionary.class]) {
+    dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"bad params"); });
+    return;
+  }
+  const int rid = _nextId + 1;  // the id |sendMethod:| is about to use
+  [_wholeResult addObject:@(rid)];
+  [self sendMethod:method params:params sessionId:sessionId timeout:timeout completion:completion];
+}
+
 // One CDP command, with its completion run exactly once: by the reply, by |timeout| seconds (0: none) with nil and "timed out" (the entry is
 // removed, so a late reply finds none and is dropped), or by the tab closing.
 - (void)sendMethod:(NSString*)method
@@ -275,6 +294,7 @@ static BOOL g_force_html_fullscreen = NO;
       NCEvalCompletion cb = self->_pending[@(rid)];
       if (!cb) return;
       [self->_pending removeObjectForKey:@(rid)];
+      [self->_wholeResult removeObject:@(rid)];
       cb(nil, @"timed out");
     });
   }
@@ -294,6 +314,8 @@ static BOOL g_force_html_fullscreen = NO;
   NCEvalCompletion cb = _pending[key];
   if (!cb) return NO;
   [_pending removeObjectForKey:key];
+  const BOOL whole = [_wholeResult containsObject:key];
+  [_wholeResult removeObject:key];
   // Completions never run inside the CEF callback that carries the reply.
   void (^done)(NSString*, NSString*) = ^(NSString* json, NSString* error) {
     dispatch_async(dispatch_get_main_queue(), ^{ cb(json, error); });
@@ -303,6 +325,11 @@ static BOOL g_force_html_fullscreen = NO;
     return YES;
   }
   NSDictionary* result = j[@"result"];
+  if (whole) {
+    NSData* all = [NSJSONSerialization dataWithJSONObject:(result ?: @{}) options:0 error:nil];
+    done(all ? [[NSString alloc] initWithData:all encoding:NSUTF8StringEncoding] : @"{}", nil);
+    return YES;
+  }
   if (NSDictionary* ex = result[@"exceptionDetails"]) {
     done(nil, ex[@"exception"][@"description"] ?: ex[@"text"] ?: @"exception");
     return YES;
@@ -322,6 +349,7 @@ static BOOL g_force_html_fullscreen = NO;
   _browser = nullptr;
   NSArray<NCEvalCompletion>* callbacks = _pending.allValues;
   [_pending removeAllObjects];
+  [_wholeResult removeAllObjects];
   for (NCEvalCompletion cb in callbacks) dispatch_async(dispatch_get_main_queue(), ^{ cb(nil, @"tab closed"); });
 }
 

@@ -154,12 +154,15 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var leftAt: [TabID: Date] = [:]
     var discardTimer: Timer?
     var sweeping = false   // a discard sweep is running (its media questions are asynchronous)
+    var staleSessionsLogged = Set<String>()   // child sessions a media question found gone, said once each
 #if NOCHE_TESTHOOKS
     /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
     /// every time it moved, and where Copy URL writes.
     static var actionCounts: [String: Int] = [:]
     /// Test support: every tab the discard policy asked the engine to discard (the engine refuses some itself, so the policy is read here).
     static var discardCalls: [TabID] = []
+    /// Test support: how many child sessions were attached to the tab at each |discardCalls| entry (T7.11: none).
+    static var discardSessions: [Int] = []
     static var commandLog: [Int] = []
     static var pasteboard = NSPasteboard.general
     /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
