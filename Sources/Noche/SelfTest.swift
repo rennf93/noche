@@ -307,7 +307,9 @@ final class SelfTest {
     }
 
     func sample() {
-        maxOwnWindows = max(maxOwnWindows, ownWindows())
+        let own = ownWindows()
+        if own > 1, own > maxOwnWindows { line("info", "own windows \(own): \(ownWindowInfo())") }  // which window the second one is
+        maxOwnWindows = max(maxOwnWindows, own)
         func note(_ s: String) { if violations.count < 5, !violations.contains(s) { violations.append(s) } }
         if NSApp.isActive { note("NSApp.isActive") }
         // TUINSWindow is macOS's own text-input window (it sits at alpha 1 and is not ours); every other window counts. Our own windows at alpha 1 are caught by hidden's
@@ -354,8 +356,21 @@ final class SelfTest {
         return all.filter { w in
             guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b), !textInput.contains((w[kCGWindowNumber as String] as? Int) ?? -1) else { return false }
+            // The suggestion popup (SPRoundedWindow) is sometimes listed here before NSApp tracks it: a pop-up level window that is not on screen is the same popup.
+            if (w[kCGWindowLayer as String] as? Int) == 101, (w[kCGWindowIsOnscreen as String] as? Bool) != true { return false }
             return r.width >= 400 && r.height >= 300
         }.count
+    }
+
+    func ownWindowInfo() -> String {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let classes = Dictionary(NSApp.windows.map { (Int($0.windowNumber), NSStringFromClass(type(of: $0))) }, uniquingKeysWith: { a, _ in a })
+        let all = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
+        return all.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == pid }.compactMap { w in
+            guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b), r.width >= 400, r.height >= 300 else { return nil }
+            let n = (w[kCGWindowNumber as String] as? Int) ?? -1
+            return "\(classes[n] ?? "untracked") \(Int(r.width))x\(Int(r.height)) onscreen \(w[kCGWindowIsOnscreen as String] as? Bool ?? false) layer \(w[kCGWindowLayer as String] as? Int ?? -1)"
+        }.joined(separator: "; ")
     }
 
     /// A person who quits as soon as the first page loaded must not crash the engine (its startup tasks are still pending);

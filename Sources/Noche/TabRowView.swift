@@ -74,7 +74,7 @@ final class TabRowView: NSView {
         titleField.frame = NSRect(x: tx, y: y, width: bounds.width - tx, height: 18)
         fade.frame = titleField.bounds
         let w = max(titleField.bounds.width, 1)
-        fade.locations = [0, NSNumber(value: Double(max(0, w - ChromeStyle.titleFade) / w)), 1]
+        fade.locations = [0, NSNumber(value: Double(max(0, w - ChromeStyle.titleFade * (BarHook.on("TITLE_FADE") ? 2 : 1)) / w)), 1]
     }
 
     private var shown: (title: String, favicon: NSImage?, selected: Bool, level: Int, dormant: Bool, canReset: Bool)?

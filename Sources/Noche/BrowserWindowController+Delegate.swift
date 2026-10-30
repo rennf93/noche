@@ -144,7 +144,7 @@ extension BrowserWindowController {
         if let p = previous, let pid = ids[p.identifier] { leftAt[pid] = Date() }
         if let id = ids[tab.identifier] {
             // Using a tab stamps it; the restore's own activation (and the engine re-announcing the active tab) does not.
-            if id == skipActivation { skipActivation = nil; list.activate(id) } else if list.activeID != id { list.markActive(id, at: Date()) }
+            if id == skipActivation { skipActivation = nil; list.activate(id) } else if list.activeID != id, !BarHook.on("EXT_NOSYNC") { list.markActive(id, at: Date()) }  // the hook: an engine-side activation does not reach the list
         }
         if intendedActive === tab { intendedActive = nil }
         refresh()
@@ -198,6 +198,7 @@ extension BrowserWindowController {
 #else
         windowClosing = false
 #endif
+        if BarHook.on("CLOSE_KEEPSTALE") { return }  // negative control: the cancelled close stays pending (the next Cmd+W is handed on)
         closing[tab.identifier] = nil
         closeNext[tab.identifier] = nil
     }
