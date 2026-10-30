@@ -127,6 +127,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var restoreFallback: TimeInterval = 15
     /// Test support (pin-launch-held): the restore never asks the engine for its last tab, as if it had not arrived.
     static var holdLastRestoreTab = false
+    static var newTabKind = ""  // new-tab-top: the kind of tab the step opens, for the pairs
     /// Test support (pin-dormant): the next close Noche starts is held, with the tab already marked closing, until |releaseHeldClose|.
     static var holdNextClose = false
     static var heldClose: (() -> Void)?

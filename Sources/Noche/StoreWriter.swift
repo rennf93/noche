@@ -133,7 +133,7 @@ final class StoreWriter {
     /// Quit: with `close` the windows are dropped (the closed list stays), otherwise every window is written. Nothing is written afterwards.
     func quit() {
         guard !frozen else { return }
-        let close = ((try? store.setting("quitBehavior")) ?? nil) == "close"
+        let close = SettingKeys.value("quitBehavior", stored: (try? store.setting("quitBehavior")).flatMap { $0 }) == "close"
         if close {
             // A pending debounced save would write the window again (deletedAt NULL) and bring its tabs back.
 #if NOCHE_TESTHOOKS

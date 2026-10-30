@@ -33,7 +33,7 @@ extension SelfTest {
         let held = all.flatMap { try? store.bookmarkChildren(of: $0.id) } ?? []
         guard held.count == 1 else { return finish(false, "the folder All holds \(held.count) bookmarks for two tabs of one page, want 1") }
         guard copies().count == 4 else { return finish(false, "before Remove: \(copies().count) copies (\(copies().map { $0.title })), want 4 (bar, Variant spelling, Deep copy, All)") }
-        ctl.selectRow(0)
+        ctl.selectRow(ctl.list.items.firstIndex { $0.engineID == tab.identifier } ?? 0)  // the first tab's row (the list is newest first)
         guard await until(5, { win.activeTab === tab }) else { return finish(false, "the first tab is not active") }
         guard cmdD(), await until(5, { !ed.isHidden && { if case .edit = ed.mode { return true } else { return false } }() }) else { return finish(false, "the second Cmd+D showed no edit card (mode \(ed.mode))") }
         ed.remove.performClick(nil)

@@ -36,7 +36,11 @@ extension SelfTest {
     func moveWindow() async {
         if phase == 2 { return await moveWindowRelaunch() }
         guard await ready(), let a = ctl, let win, let writer = app.writer else { return }
-        guard await openTabs(9, page: "b.html"), await until(20, { a.list.items.allSatisfy { !$0.title.isEmpty } }) else { return finish(false, "nine tabs never appeared") }
+        guard await openTabs(9, page: "b.html") else { return finish(false, "nine tabs never appeared") }
+        // The window's own first tab (the bottom row, N below) is on the fixture's root page: every tab is on b.html, as N must be when it moves out.
+        let first = loads
+        win.tabs.first?.loadURL(fixture("b.html"))
+        guard await until(20, { self.loads > first && a.list.items.allSatisfy { $0.url.hasSuffix("b.html") && !$0.isLoading && !$0.title.isEmpty } }) else { return finish(false, "the nine tabs are not all on b.html") }
         let t = a.list.items.map(\.id)
         let (a0, l, p, d, x, y, h1, h2, n) = (t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8])
         for (id, name) in [(a0, "m-a0"), (l, "m-loaded"), (p, "m-tile"), (d, "m-dormant"), (x, "m-in"), (y, "m-peer"), (h1, "m-h1"), (h2, "m-h2"), (n, "m-new")] { a.renameTab(id, to: name) }
@@ -60,7 +64,7 @@ extension SelfTest {
         c.renameTab(c.list.items[0].id, to: "m-c0")
         let c0 = c.list.items[0].id
         guard let _ = c.window.addTab(withURL: fixture("b.html"), activate: false), await until(15, { c.list.items.count == 2 && c.window.tabs.count == 2 }) else { return finish(false, "C has no second tab") }
-        let cp = c.list.items[1].id
+        let cp = c.list.items.first { $0.id != c0 }!.id  // the new tab (the list is newest first)
         c.togglePin(of: cp)
         guard await until(5, { self.entry(c, cp)?.isPinned == true }), let cpTab = entry(c, cp).flatMap({ c.engineTab($0) }) else { return finish(false, "no pin in C") }
         c.closeTab(cpTab)
@@ -193,7 +197,7 @@ extension SelfTest {
         guard let w = await openWindow("b.html") else { return nil }
         for _ in 1..<n { guard let _ = w.window.addTab(withURL: fixture("b.html"), activate: false) else { return nil } }
         guard await until(20, { w.list.items.count == n && w.window.tabs.count == n && w.list.items.allSatisfy { !$0.title.isEmpty } }) else { return nil }
-        let ids = w.list.items.map(\.id)
+        let ids = Array(w.list.items.map(\.id).reversed())  // opening order: t[0] is the window's first (active) tab; the list is newest first
         for (i, id) in ids.enumerated() { w.renameTab(id, to: "\(tag)\(i)") }
         return (w, ids)
     }
@@ -463,7 +467,7 @@ extension SelfTest {
         w3.list.setGroup(x[3], g3)
         w3.refresh()
         // The sources as the test knows them, before the merge.
-        guard w1.list.dayOrder == [.tab(u[0]), .group(g1)], w1.list.topOrder == [.tab(u[2])], w3.list.dayOrder == [.tab(x[0]), .group(g3)], Set(w2.list.dayOrder) == [.group(g2), .tab(extra)], w2.list.activeID == v[0] else {
+        guard w1.list.dayOrder == [.tab(u[0]), .group(g1)], w1.list.topOrder == [.tab(u[2])], w3.list.dayOrder == [.tab(x[0]), .group(g3)], w2.list.dayOrder == [.tab(extra), .group(g2)], w2.list.activeID == v[0] else {
             return finish(false, "the windows before the merge: \(w1.list.dayOrder) \(w1.list.topOrder) \(w2.list.dayOrder) \(w3.list.dayOrder)")
         }
         let groupOne = w1.group(withID: g1)!, w2Day = w2.list.dayOrder, w2Own = Set(w2.list.items.map(\.id))
@@ -512,8 +516,8 @@ extension SelfTest {
         guard groups == ["w1-group:w1-ka,w1-kb", "w2-group:w2-active", "w3-group:w3-ka,w3-kb"] || Set(groups) == ["w1-group:w1-ka,w1-kb", "w2-group:w2-active", "w3-group:w3-ka,w3-kb"] else { return finish(false, "phase 2: groups \(groups)") }
         guard let g1 = w.list.groups.first(where: { $0.name == "w1-group" }), g1.colorIndex == 3, g1.icon == "bolt" else { return finish(false, "phase 2: w1-group lost its color or icon") }
         let day = w.list.dayOrder.map { r -> String in switch r { case .tab(let id): w.item(withID: id)?.customTitle ?? "?"; case .group(let g): w.group(withID: g)?.name ?? "?" } }
-        guard day == ["w2-group", "w2-extra", "w1-day", "w1-group", "w3-day", "w3-group"] else { return finish(false, "phase 2: the day list is \(day)") }
-        finish(violations.isEmpty, "phase 2: after the relaunch one window holds the 12 merged tabs: tiles w2, w1, w3, the pinned row, and the day list w2-group, w2-extra, w1-day, w1-group, w3-day, w3-group with their groups \(violations)")
+        guard day == ["w2-extra", "w2-group", "w1-day", "w1-group", "w3-day", "w3-group"] else { return finish(false, "phase 2: the day list is \(day)") }
+        finish(violations.isEmpty, "phase 2: after the relaunch one window holds the 12 merged tabs: tiles w2, w1, w3, the pinned row, and the day list w2-extra, w2-group, w1-day, w1-group, w3-day, w3-group with their groups \(violations)")
     }
 
     // MARK: revive-window (T5b.3)

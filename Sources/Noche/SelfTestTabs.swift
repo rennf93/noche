@@ -84,7 +84,7 @@ extension SelfTest {
     func tabsKeys() async {
         guard await ready(), let ctl, let win else { return }
         for _ in 0..<3 { cmdT() }
-        guard await until(10, { rowCount == 4 && win.tabs.count == 4 && selected == 3 }) else {
+        guard await until(10, { rowCount == 4 && win.tabs.count == 4 && selected == 0 }) else {  // newest first: the newest tab is the top row
             return finish(false, "3x Cmd+T: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") actions=\(BrowserWindowController.actionCounts)")
         }
         guard win.activeTab === win.tabs.last else { return finish(false, "newest tab is not the engine's active tab") }
@@ -93,7 +93,7 @@ extension SelfTest {
             return finish(false, "Cmd+T acted more than once: rows=\(rowCount) engine tabs=\(win.tabs.count) actions=\(BrowserWindowController.actionCounts)")
         }
         var trail: [Int] = []
-        for (step, want) in [(nextTab, 0), (nextTab, 1), (previousTab, 0), (previousTab, 3)] as [(() -> Void, Int)] {
+        for (step, want) in [(previousTab, 3), (nextTab, 0), (nextTab, 1), (previousTab, 0)] as [(() -> Void, Int)] {
             step()
             guard await until(5, { selected == want }) else { return finish(false, "tab keys: selected=\(selected.map(String.init) ?? "nil") engine active \(win.tabs.firstIndex { $0 === win.activeTab }.map(String.init) ?? "nil") want \(want) after \(trail) actions \(BrowserWindowController.actionCounts) chrome commands \(BrowserWindowController.commandLog) keys \(keyLog)") }
             trail.append(want)
@@ -114,7 +114,7 @@ extension SelfTest {
         guard await until(10, { rowCount == 4 && win.tabs.count == 4 }) else { return finish(false, "New Tab row: rows=\(rowCount)") }
         click(ctl.sidebar.rows[0], middle: true)
         guard await until(10, { rowCount == 3 && win.tabs.count == 3 }) else { return finish(false, "middle click: rows=\(rowCount) engine tabs=\(win.tabs.count)") }
-        finish(maxOwnWindows == 1 && violations.isEmpty, "Cmd+T x3 -> 4 rows, newest active; next/previous wrap \(trail); Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max \(maxOwnWindows); actions \(BrowserWindowController.actionCounts) \(violations)")
+        finish(maxOwnWindows == 1 && violations.isEmpty, "Cmd+T x3 -> 4 rows, newest on top and active; previous/next wrap \(trail); Cmd+W closed one, row below active; row click, New Tab row, middle click; own windows max \(maxOwnWindows); actions \(BrowserWindowController.actionCounts) \(violations)")
     }
 
     func tabsRapid() async {
@@ -139,13 +139,14 @@ extension SelfTest {
         guard await until(10, { rowCount == 6 && win.tabs.count == 6 }) else { return finish(false, "chrome.tabs.create: rows=\(rowCount) reply=\(String(describing: created))") }
         try? await Task.sleep(for: .milliseconds(500))
         guard rowCount == 6, await extensionTabCount(first, want: 6) == 6 else { return finish(false, "after create: rows=\(rowCount)") }
-        let target = selected == 2 ? 3 : 2
+        // The extension numbers tabs in the engine's strip (opening order); the list is newest first, so the tab is found by identity.
+        let target = win.activeTab === win.tabs[1] ? 3 : 2
+        let want = win.tabs[target - 1]
         let reply = await extension_(first, #"{"what":"activate","n":\#(target)}"#)
-        guard await until(10, { selected == target - 1 }) else {
-            return finish(false, "chrome.tabs.update active: selected=\(selected.map(String.init) ?? "nil") want \(target - 1) reply=\(String(describing: reply))")
+        guard await until(10, { win.activeTab === want && ctl.list.items.first(where: { $0.engineID == want.identifier })?.id == ctl.list.activeID }) else {
+            return finish(false, "chrome.tabs.update active: selected=\(selected.map(String.init) ?? "nil") want the row of strip tab \(target - 1) reply=\(String(describing: reply))")
         }
-        _ = ctl
-        finish(violations.isEmpty, "5 tabs: extension count 5 equals rows; tabs.create added exactly one row (6); tabs.update(active) moved the selection to row \(target - 1) \(violations)")
+        finish(violations.isEmpty, "5 tabs: extension count 5 equals rows; tabs.create added exactly one row (6); tabs.update(active) moved the selection to the tab it named (strip tab \(target - 1), row \(selected.map(String.init) ?? "nil")) \(violations)")
     }
 
     func navigate() async {
@@ -186,8 +187,11 @@ extension SelfTest {
         opener.loadURL(fixture("link.html"))
         guard await until(10, { loads >= 2 }) else { return finish(false, "link page did not load") }
         guard await openTabs(3) else { return finish(false, "extra tabs never appeared") }
-        click(ctl.sidebar.rows[0])
-        guard await until(5, { selected == 0 }) else { return finish(false, "could not select the opener row") }
+        // The list is newest first: the opener is the bottom row, and the link's tab opens at the top of the list, not after its opener.
+        let openerRow = ctl.list.items.firstIndex { $0.engineID == opener.identifier } ?? 0
+        guard openerRow == 2 else { return finish(false, "the opener is row \(openerRow), want the bottom row (2)") }
+        click(ctl.sidebar.rows[openerRow])
+        guard await until(5, { selected == openerRow }) else { return finish(false, "could not select the opener row") }
         let rows = rowCount
         // A real mouse click on the link through DevTools input (the probe extension's debugger), not element.click().
         let spot = await evaluate(opener, "JSON.stringify((() => { const r = document.getElementById('l').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })())")
@@ -206,8 +210,8 @@ extension SelfTest {
         guard inPage else { return finish(false, "after the link's tab loaded, first responder is \(String(describing: responder)), not the page (the card took it and never gave it back)") }
         guard await pageTakesKeys(linked, page, "blank-link") else { return finish(false, "the page took no key in 15 s after the target=_blank tab loaded") }
         try? await Task.sleep(for: .milliseconds(500))
-        finish(rowCount == rows + 1 && selected == 1 && win.tabs.count == rows + 1 && ownWindows() == 1 && violations.isEmpty,
-               "target=_blank click: one new row at index \(selected.map(String.init) ?? "nil") (opener 0), active; the New Tab card is gone, the page holds first responder and takes keys; rows=\(rowCount) engine tabs=\(win.tabs.count) windows=\(ownWindows()) \(violations)")
+        finish(rowCount == rows + 1 && selected == 0 && win.tabs.count == rows + 1 && ownWindows() == 1 && violations.isEmpty,
+               "target=_blank click from the bottom row: one new row at index \(selected.map(String.init) ?? "nil") (the top, the opener is row 2), active; the New Tab card is gone, the page holds first responder and takes keys; rows=\(rowCount) engine tabs=\(win.tabs.count) windows=\(ownWindows()) \(violations)")
     }
 
     /// Cmd+L, the text, Return: the way a person navigates. False when the command bar did not take the text.
@@ -432,11 +436,11 @@ extension SelfTest {
         guard await until(10, { loads > before && tab.url.hasSuffix("beforeunload.html") }) else { return finish(false, "beforeunload.html did not load (\(tab.url))") }
         _ = await evaluate(tab, "document.body.click(); 1")  // a user gesture: without one Chrome closes the page without asking
         guard await openTabs(2) else { return finish(false, "second tab never appeared (rows=\(rowCount))") }
-        guard selected == 0, win.activeTab === tab else { return finish(false, "the page with the dialog is not selected (selected=\(selected.map(String.init) ?? "nil"))") }
+        guard selected == 1, win.activeTab === tab else { return finish(false, "the page with the dialog is not selected (row 1: the new tab is on top) (selected=\(selected.map(String.init) ?? "nil"))") }
         cmdW()
         guard await until(10, { NCWindow.testBeforeUnloadDialogs() == 1 }) else { return finish(false, "Cmd+W raised no beforeunload dialog (\(NCWindow.testBeforeUnloadDialogs()))") }
         try? await Task.sleep(for: .seconds(1))  // the cancellation reaches the window controller a turn later
-        guard rowCount == 2, win.tabs.count == 2, selected == 0, win.activeTab === tab else {
+        guard rowCount == 2, win.tabs.count == 2, selected == 1, win.activeTab === tab else {
             return finish(false, "after Stay: rows=\(rowCount) engine tabs=\(win.tabs.count) selected=\(selected.map(String.init) ?? "nil") active is the page \(win.activeTab === tab)")
         }
         NCWindow.testSet(beforeUnloadAnswer: 2)  // Leave

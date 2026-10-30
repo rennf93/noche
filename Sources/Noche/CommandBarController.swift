@@ -391,7 +391,7 @@ final class CommandBarController: NSObject, NSTextFieldDelegate {
         startRank(q, deleting: deleting)
         // The typed character is drawn now; rows follow when the ranking lands (the earlier rows stay until then).
         render()
-        let enabled = ((try? owner.app.writer?.store.setting("suggestRemote")) ?? nil) == "1"
+        let enabled = SettingKeys.bool("suggestRemote", stored: (try? owner.app.writer?.store.setting("suggestRemote")).flatMap { $0 })
         remote.request(typed, searchTemplate: owner.app.searchTemplate, enabled: enabled || BarHook.on("REMOTE_IGNORE_OFF")) { [weak self] rows in self?.remoteArrived(rows, for: typed) }
     }
 

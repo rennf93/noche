@@ -79,7 +79,7 @@ extension SelfTest {
 
     func persistRelaunch() async {
         let a = fixture(""), b = fixture("b.html"), l = fixture("link.html"), f = fixture("favicon.html")
-        let want = [[a, b, l], [b, a, l, f]], active = [1, 3]
+        let want = [[l, b, a], [f, l, a, b]], active = [1, 0], activate = [1, 3]  // newest first: want and active are list positions, activate is the engine strip index
         if phase == 1 {
             guard await ready(), let c1 = ctl else { return }
             _ = c1.window.addTab(withURL: b, activate: false); _ = c1.window.addTab(withURL: l, activate: false)
@@ -95,7 +95,7 @@ extension SelfTest {
             writer.flush()
             let icons = sqlite("SELECT count(*) FROM tab WHERE url LIKE '%favicon.html' AND faviconURL IS NOT NULL"), widths = sqlite("SELECT count(*) FROM window WHERE sidebarWidth IS NOT NULL")
             guard icons == "1", widths == "2" else { return finish(false, "phase 1: stored favicon rows \(icons) (want 1), windows with a sidebarWidth \(widths) (want 2)") }
-            c1.window.activateTab(c1.window.tabs[active[0]]); second.activateTab(second.tabs[active[1]])
+            c1.window.activateTab(c1.window.tabs[activate[0]]); second.activateTab(second.tabs[activate[1]])
             guard await until(10, { self.activeIndex(c1) == active[0] && self.activeIndex(c2) == active[1] }) else {
                 return finish(false, "phase 1: active tabs \(String(describing: activeIndex(c1))) and \(String(describing: activeIndex(c2)))")
             }
@@ -134,7 +134,7 @@ extension SelfTest {
         }
         if sqlite("SELECT count(*) FROM tab WHERE url LIKE '%favicon.html' AND faviconURL IS NOT NULL") != "1" { bad.append("favicon address lost across the relaunch") }
         if sqlite("SELECT count(*) FROM window WHERE sidebarWidth IS NOT NULL") != "2" { bad.append("sidebarWidth lost across the relaunch") }
-        finish(bad.isEmpty && violations.isEmpty, "phase 2: 2 windows with frames within 1 pt, tab urls in order, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow), lastActiveAt, favicon address and sidebarWidth kept \(bad) \(violations)")
+        finish(bad.isEmpty && violations.isEmpty, "phase 2: 2 windows with frames within 1 pt, tab urls newest first, active tabs 2 and 4, engine tabs equal rows (7, no extra NSWindow), lastActiveAt, favicon address and sidebarWidth kept \(bad) \(violations)")
     }
 
     func quitCloseRelaunch() async {
@@ -158,11 +158,11 @@ extension SelfTest {
         guard let item = reopenItem() else { return finish(false, "no Reopen Closed Tab menu item") }
         guard item.keyEquivalent == "t", item.keyEquivalentModifierMask == [.command, .shift] else { return finish(false, "wrong shortcut \(item.keyEquivalent) \(item.keyEquivalentModifierMask)") }
         _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
-        guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+        guard await until(20, { self.urls(c) == [l, b, a] }) else { return finish(false, "urls \(urls(c))") }
         guard !reopenEnabled else { return finish(false, "item enabled with an empty closed list") }
         shiftCmdT()
         try? await Task.sleep(for: .milliseconds(500))
-        guard urls(c) == [a, b, l], win.tabs.count == 3, app.controllers.count == 1 else { return finish(false, "the shortcut did something with an empty list: \(urls(c)) \(win.tabs.count)") }
+        guard urls(c) == [l, b, a], win.tabs.count == 3, app.controllers.count == 1 else { return finish(false, "the shortcut did something with an empty list: \(urls(c)) \(win.tabs.count)") }
         // A blank tab is never recorded as closed.
         cmdT()
         guard await until(10, { win.tabs.count == 4 && self.rowCount == 4 }) else { return finish(false, "Cmd+T made no tab") }
@@ -173,29 +173,40 @@ extension SelfTest {
         guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "tab B did not activate") }
         let idB = c.list.items[1].id
         cmdW()
-        guard await until(10, { self.urls(c) == [a, l] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+        guard await until(10, { self.urls(c) == [l, a] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
         guard reopenEnabled else { return finish(false, "item disabled after closing B") }
         shiftCmdT()
-        guard await until(15, { self.urls(c) == [a, b, l] && self.activeIndex(c) == 1 && win.tabs.count == 3 }) else {
+        guard await until(15, { self.urls(c) == [l, b, a] && self.activeIndex(c) == 1 && win.tabs.count == 3 }) else {
             return finish(false, "Shift+Cmd+T gave \(urls(c)) active \(String(describing: activeIndex(c))) tabs \(win.tabs.count), want [A, B, C] with B active")
         }
         guard c.list.items[1].id == idB else { return finish(false, "B came back with a new tab id") }
         guard !reopenEnabled else { return finish(false, "item enabled after the only closed tab was reopened") }
         shiftCmdT()
         try? await Task.sleep(for: .milliseconds(500))
-        guard urls(c) == [a, b, l], win.tabs.count == 3 else { return finish(false, "the shortcut did something with an empty list: \(urls(c))") }
-        // The list is the order of record: the engine's strip is now [A, C, B], the list [A, B, C].
+        guard urls(c) == [l, b, a], win.tabs.count == 3 else { return finish(false, "the shortcut did something with an empty list: \(urls(c))") }
+        // The list is the order of record (newest first). Close and reopen C (the top row): it comes back at index 0, the engine's strip is now
+        // [A, B, C] and the list [C, B, A], which cycle the other way round.
+        guard let cTab = win.tabs.first(where: { $0.url == l }) else { return finish(false, "no tab on link.html") }
+        win.activateTab(cTab)
+        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "C did not activate") }
+        let idC = c.list.items[0].id
+        cmdW()
+        guard await until(10, { self.urls(c) == [b, a] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on C left \(urls(c))") }
+        shiftCmdT()
+        guard await until(15, { self.urls(c) == [l, b, a] && self.activeIndex(c) == 0 && win.tabs.count == 3 }) else { return finish(false, "Shift+Cmd+T gave \(urls(c)) active \(String(describing: activeIndex(c))), want [C, B, A] with C active") }
+        guard c.list.items[0].id == idC, win.tabs.last?.url == l else { return finish(false, "C came back with a new tab id or the strip is in list order: \(win.tabs.map(\.url))") }
         win.activateTab(win.tabs[0])
-        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "A did not activate") }
+        guard await until(10, { self.activeIndex(c) == 2 }) else { return finish(false, "A did not activate") }
         nextTab()
-        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "Next Tab from A selected row \(String(describing: activeIndex(c))), want B (row 2)") }
-        win.activateTab(win.tabs[0])
-        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "A did not activate again") }
+        guard await until(10, { self.activeIndex(c) == 0 }) else { return finish(false, "Next Tab from A (the bottom row) selected row \(String(describing: activeIndex(c))), want C (the top row, the strip's next is B)") }
+        // Cmd+W on the middle row B: the list's successor is the row below (A), the strip's is the tab to the right of B (C). Pair reopen-closed CLOSE_STRIPORDER.
+        win.activateTab(win.tabs[1])
+        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate again") }
         cmdW()
-        guard await until(10, { self.urls(c) == [b, l] && win.tabs.count == 2 && self.activeIndex(c) == 0 }) else { return finish(false, "Cmd+W on A left \(urls(c)) active \(String(describing: activeIndex(c))), want B active in [B, C]") }
+        guard await until(10, { self.urls(c) == [l, a] && win.tabs.count == 2 && self.activeIndex(c) == 1 }) else { return finish(false, "Cmd+W on B left \(urls(c)) active \(String(describing: activeIndex(c))), want A (row 1, the row below B) active in [C, A]; the strip's next is C (row 0)") }
         cmdW()
-        guard await until(10, { self.urls(c) == [l] && win.tabs.count == 1 && self.activeIndex(c) == 0 }) else { return finish(false, "Cmd+W on B left \(urls(c)), want C active in [C]") }
-        finish(violations.isEmpty, "A B C, Cmd+W on B, Shift+Cmd+T restores B at index 1 and active with its id; disabled and inert with an empty list, blank tabs never recorded; Next Tab and the Cmd+W successor follow the list order, not the engine strip \(violations)")
+        guard await until(10, { self.urls(c) == [l] && win.tabs.count == 1 && self.activeIndex(c) == 0 }) else { return finish(false, "Cmd+W on A left \(urls(c)), want C active in [C]") }
+        finish(violations.isEmpty, "A B C opened in turn list newest first [C, B, A]; Cmd+W on B, Shift+Cmd+T restores B at index 1 and active with its id, C at index 0 likewise; disabled and inert with an empty list, blank tabs never recorded; Next Tab and the Cmd+W successor follow the list order, not the engine strip \(violations)")
     }
 
     func reopenClosedRelaunch() async {
@@ -203,19 +214,19 @@ extension SelfTest {
         if phase == 1 {
             guard await ready(), let c = ctl, let win else { return }
             _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
-            guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+            guard await until(20, { self.urls(c) == [l, b, a] }) else { return finish(false, "urls \(urls(c))") }
             win.activateTab(win.tabs[1])
             guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate") }
             cmdW()
-            guard await until(10, { self.urls(c) == [a, l] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+            guard await until(10, { self.urls(c) == [l, a] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
             return finish(violations.isEmpty, "phase 1: B closed, quitting \(violations)")
         }
         guard await until(20, { self.restoredUp(1) }), let c = ctl, let win else { return finish(false, "phase 2: no restored window") }
         let (tabs, windows) = await settledCounts()
-        guard urls(c) == [a, l], tabs == 2, windows == 1 else { return finish(false, "phase 2: urls \(urls(c)) engine tabs \(tabs) NSWindows \(windows)") }
+        guard urls(c) == [l, a], tabs == 2, windows == 1 else { return finish(false, "phase 2: urls \(urls(c)) engine tabs \(tabs) NSWindows \(windows)") }
         guard reopenEnabled else { return finish(false, "phase 2: Reopen Closed Tab disabled after a relaunch") }
         shiftCmdT()
-        guard await until(15, { self.urls(c) == [a, b, l] && self.activeIndex(c) == 1 && win.tabs.count == 3 }) else {
+        guard await until(15, { self.urls(c) == [l, b, a] && self.activeIndex(c) == 1 && win.tabs.count == 3 }) else {
             return finish(false, "phase 2: Shift+Cmd+T gave \(urls(c)) active \(String(describing: activeIndex(c)))")
         }
         finish(app.controllers.count == 1 && app.restored.first?.id == c.id && violations.isEmpty, "phase 2: after a relaunch Shift+Cmd+T restores B at index 1 in its original window, active \(violations)")
@@ -227,7 +238,7 @@ extension SelfTest {
         if phase == 1 {
             guard let kill = ProcessInfo.processInfo.environment["NOCHE_TEST_KILL_AT"], ["pending", "in-transaction"].contains(kill) else { return finish(false, "NOCHE_TEST_KILL_AT is not pending or in-transaction") }
             guard await ready(), await openTabs(2), let c = ctl, let win, let writer = app.writer else { return finish(false, "phase 1: no writer or window") }
-            guard activeIndex(c) == 0 else { return finish(false, "phase 1: active tab is \(String(describing: activeIndex(c)))") }
+            guard activeIndex(c) == 1 else { return finish(false, "phase 1: active tab is \(String(describing: activeIndex(c)))") }
             writer.flush()  // snapshot 1, synchronous and durable
             line("info", "phase1-ready: snapshot 1 written (2 tabs, first selected), killing at \(kill)")
             writer.armKill()
@@ -238,7 +249,7 @@ extension SelfTest {
         guard await until(20, { self.restoredUp(1) }), let c = ctl, let snap = app.restored.first else { return finish(false, "phase 2: nothing restored") }
         let n = snap.tabs.count
         let sel = snap.selectedTabID.flatMap { id in snap.tabs.firstIndex { $0.id == id } }
-        let which = n == 2 && sel == 0 ? "previous" : n == 3 && sel == 2 ? "new" : nil
+        let which = n == 2 && sel == 1 ? "previous" : n == 3 && sel == 0 ? "new" : nil  // newest first: the first tab is the bottom row, the new one the top
         guard let which else { return finish(false, "phase 2: a mixed snapshot: \(n) tabs, selected index \(String(describing: sel))") }
         let (tabs, windows) = await settledCounts()
         guard tabs == n, windows == 1, urls(c).count == n, activeIndex(c) == sel else {
@@ -270,22 +281,22 @@ extension SelfTest {
         guard await ready(), let c = ctl, let win else { return }
         let a = fixture(""), f = fixture("favicon.html"), l = fixture("link.html"), b = fixture("b.html")
         _ = win.addTab(withURL: f, activate: false); _ = win.addTab(withURL: l, activate: false)
-        guard await until(20, { self.urls(c) == [a, f, l] }) else { return finish(false, "urls \(urls(c))") }
+        guard await until(20, { self.urls(c) == [l, f, a] }) else { return finish(false, "urls \(urls(c))") }
         let idB = c.list.items[1].id
         win.activateTab(win.tabs[1])
         guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate") }
         cmdW()
-        guard await until(10, { self.urls(c) == [a, l] }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+        guard await until(10, { self.urls(c) == [l, a] }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
         shiftCmdT(); cmdT()   // one turn: the reopened tab and a Chrome-style new tab
         guard await until(15, { self.urls(c).count == 4 && win.tabs.count == 4 }) else { return finish(false, "after reopen and Cmd+T: \(urls(c))") }
         let row = c.list.items.first { $0.id == idB }
         let blank = c.list.items.filter { $0.id != idB && $0.url == "about:blank" }.count
-        guard row?.url == f, urls(c) == [a, f, l, "about:blank"], blank == 1 else { return finish(false, "reopen and Cmd+T in one turn: \(urls(c)), reopened row \(String(describing: row?.url))") }
+        guard row?.url == f, urls(c) == ["about:blank", l, f, a], blank == 1 else { return finish(false, "reopen and Cmd+T in one turn: \(urls(c)), reopened row \(String(describing: row?.url))") }
         // Now a popup between: close B again, reopen it, and let the page of C open b.html in a new tab.
         win.activateTab(win.tabs.first { $0.url == f } ?? win.tabs[1])
-        guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate again") }
+        guard await until(10, { self.activeIndex(c) == 2 }) else { return finish(false, "B did not activate again") }
         cmdW()
-        guard await until(10, { self.urls(c) == [a, l, "about:blank"] }) else { return finish(false, "second Cmd+W on B left \(urls(c))") }
+        guard await until(10, { self.urls(c) == ["about:blank", l, a] }) else { return finish(false, "second Cmd+W on B left \(urls(c))") }
         guard let cTab = win.tabs.first(where: { $0.url == l }) else { return finish(false, "no tab on link.html") }
         shiftCmdT()
         _ = await evaluate(cTab, "document.getElementById('l').click()")
@@ -318,19 +329,19 @@ extension SelfTest {
                "store unavailable (\(app.storeFallback ?? "no fallback")): one window on an in-memory store, launch not blocked \(violations)")
     }
 
-    /// Cmd+1 to Cmd+8 and Cmd+9 select by position in the list. After a reopen the list is [A, B, C] and the engine strip [A, C, B]:
+    /// Cmd+1 to Cmd+8 and Cmd+9 select by position in the list. After a reopen the list is [C, B, A] (newest first) and the engine strip [A, C, B]:
     /// Cmd+2 and Cmd+3 differ between the two, and so does Cmd+9 (C in the list, B in the strip).
     func tabChords() async {
         guard await ready(), let c = ctl, let win else { return }
         let a = fixture(""), b = fixture("b.html"), l = fixture("link.html")
         _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
-        guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+        guard await until(20, { self.urls(c) == [l, b, a] }) else { return finish(false, "urls \(urls(c))") }
         win.activateTab(win.tabs[1])
         guard await until(10, { self.activeIndex(c) == 1 }) else { return finish(false, "B did not activate") }
         cmdW()
-        guard await until(10, { self.urls(c) == [a, l] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
+        guard await until(10, { self.urls(c) == [l, a] && win.tabs.count == 2 }) else { return finish(false, "Cmd+W on B left \(urls(c))") }
         shiftCmdT()
-        guard await until(15, { self.urls(c) == [a, b, l] && win.tabs.count == 3 }) else { return finish(false, "reopen gave \(urls(c))") }
+        guard await until(15, { self.urls(c) == [l, b, a] && win.tabs.count == 3 }) else { return finish(false, "reopen gave \(urls(c))") }
         guard win.tabs[1].url != b else { return finish(false, "the strip is in list order, the check proves nothing: \(win.tabs.map(\.url))") }
         // The engine disables its own tab commands in this window, so the chords are Tabs menu items answered from the list; the key event goes to the main menu (menuOnly).
         let chords: [(String, UInt16, Int)] = [("1", 18, 0), ("2", 19, 1), ("3", 20, 2), ("9", 25, 2), ("2", 19, 1), ("1", 18, 0), ("9", 25, 2)]
@@ -342,18 +353,18 @@ extension SelfTest {
             }
             trail.append(want)
         }
-        finish(violations.isEmpty, "list [A, B, C] over engine strip [A, C, B]: Cmd+1, 2, 3 and Cmd+9 select list positions \(trail) \(violations)")
+        finish(violations.isEmpty, "list [C, B, A] over engine strip [A, C, B]: Cmd+1, 2, 3 and Cmd+9 select list positions \(trail) \(violations)")
     }
 
     /// Ctrl+Shift+Page Down and Page Up (Chromium's own chords for IDC_MOVE_TAB_NEXT and _PREVIOUS on Linux and Windows; the engine disables the
     /// commands here, so Noche answers the keys): one step in the list, nothing at the ends, the sidebar and the store follow.
     func moveTabRelaunch() async {
         let a = fixture(""), b = fixture("b.html"), l = fixture("link.html")
-        let titles = ["Noche App Fixture", "Link Page", "B Page"]
+        let titles = ["Link Page", "Noche App Fixture", "B Page"]
         if phase == 1 {
             guard await ready(), let c = ctl, let win else { return }
             _ = win.addTab(withURL: b, activate: false); _ = win.addTab(withURL: l, activate: false)
-            guard await until(20, { self.urls(c) == [a, b, l] }) else { return finish(false, "urls \(urls(c))") }
+            guard await until(20, { self.urls(c) == [l, b, a] }) else { return finish(false, "urls \(urls(c))") }
             let down = "\u{F72D}", up = "\u{F72C}"
             func run(_ forward: Bool, select: Int, want: [String]) async -> String? {
                 guard let pick = win.tabs.first(where: { $0.identifier == c.list.items[select].engineID }) else { return "no engine tab for list index \(select)" }
@@ -365,22 +376,22 @@ extension SelfTest {
                 return urls(c) == want ? nil : "\(forward ? "next" : "previous") from \(select) moved again: \(urls(c))"
             }
             let steps: [(Bool, Int, [String])] = [
-                (false, 0, [a, b, l]), (true, 2, [a, b, l]),                         // at the ends: nothing
-                (true, 1, [a, l, b]),                                                // B after C
-                (true, 2, [a, l, b]),                                                // B is last now
-                (false, 2, [a, b, l]), (true, 1, [a, l, b])]
+                (false, 0, [l, b, a]), (true, 2, [l, b, a]),                         // at the ends: nothing
+                (true, 1, [l, a, b]),                                                // B after A (the list is newest first)
+                (true, 2, [l, a, b]),                                                // B is last now
+                (false, 2, [l, b, a]), (true, 1, [l, a, b])]
             for (forward, select, want) in steps { if let bad = await run(forward, select: select, want: want) { return finish(false, "phase 1: \(bad)") } }
             win.activateTab(win.tabs.first { $0.url == b } ?? win.tabs[2])
             guard await until(10, { self.activeIndex(c) == 2 }) else { return finish(false, "phase 1: B not active at the end") }
             guard await until(5, { c.sidebar.rows.map(\.titleField.stringValue) == titles }) else { return finish(false, "phase 1: sidebar shows \(c.sidebar.rows.map(\.titleField.stringValue)), want \(titles)") }
             guard BrowserWindowController.actionCounts["moveTab"] == steps.count else { return finish(false, "phase 1: moveTab acted \(BrowserWindowController.actionCounts["moveTab"] ?? 0) times, want \(steps.count)") }
-            return finish(violations.isEmpty, "phase 1: B moved after C by Ctrl+Shift+Page Down, ends are no-ops, sidebar [A, C, B], quitting at once \(violations)")
+            return finish(violations.isEmpty, "phase 1: B moved after C by Ctrl+Shift+Page Down, ends are no-ops, sidebar [C, A, B], quitting at once \(violations)")
         }
         guard await until(20, { self.restoredUp(1) }), let c = ctl else { return finish(false, "phase 2: no restored window") }
         let (tabs, windows) = await settledCounts()
-        guard urls(c) == [a, l, b], activeIndex(c) == 2, tabs == 3, windows == 1 else { return finish(false, "phase 2: urls \(urls(c)) active \(String(describing: activeIndex(c))) engine tabs \(tabs) NSWindows \(windows), want [A, C, B], 2, 3, 1") }
+        guard urls(c) == [l, a, b], activeIndex(c) == 2, tabs == 3, windows == 1 else { return finish(false, "phase 2: urls \(urls(c)) active \(String(describing: activeIndex(c))) engine tabs \(tabs) NSWindows \(windows), want [C, A, B], 2, 3, 1") }
         guard await until(5, { c.sidebar.rows.map(\.titleField.stringValue) == titles }) else { return finish(false, "phase 2: sidebar shows \(c.sidebar.rows.map(\.titleField.stringValue)), want \(titles)") }
-        finish(violations.isEmpty, "phase 2: the order [A, C, B] and B active survived the relaunch, sidebar shows it \(violations)")
+        finish(violations.isEmpty, "phase 2: the order [C, A, B] and B active survived the relaunch, sidebar shows it \(violations)")
     }
 }
 #endif

@@ -172,6 +172,7 @@ final class SelfTest {
             case "close-all": await closeAll()
             case "warn-last-tab": await warnLastTab()
             case "new-tab-top": await newTabTop()
+            case "new-tab-top-relaunch": await newTabTopRelaunch()
             case "move-window": await moveWindow()
             case "merge-windows": await mergeWindows()
             case "revive-window": await reviveWindow()
@@ -344,10 +345,11 @@ final class SelfTest {
 
 
     /// Windows of this process that are real windows: macOS's own text-input window (TUINSWindow, 500x500, it appears whenever a text field
-    /// is being edited, as the command bar's is on every New Tab) is not one.
+    /// is being edited, as the command bar's is on every New Tab) and the suggestion popup it raises beside it (SPRoundedWindow, 402x363, never
+    /// visible here; SelfTestFind skips it the same way) are not.
     func ownWindows() -> Int {
         let pid = ProcessInfo.processInfo.processIdentifier
-        let textInput = Set(NSApp.windows.filter { NSStringFromClass(type(of: $0)).hasPrefix("TUI") }.map { Int($0.windowNumber) })
+        let textInput = Set(NSApp.windows.filter { let n = NSStringFromClass(type(of: $0)); return n.hasPrefix("TUI") || n == "SPRoundedWindow" }.map { Int($0.windowNumber) })
         let all = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
         return all.filter { w in
             guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, let b = w[kCGWindowBounds as String] as? NSDictionary,

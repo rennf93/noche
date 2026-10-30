@@ -253,7 +253,13 @@ public final class Store: Sendable {
     /// Upserts the row as recently closed (also revives it if a save tombstoned it first), then keeps the newest 25.
     /// Throws a foreign-key error if |windowID| was never saved; save the window first. See |save| for the ordering contract.
     public func recordClosed(_ tab: TabItem, windowID: UUID, index: Int) throws {
-        guard !tab.url.isEmpty, tab.url != "about:blank" else { return }
+        let empty = tab.url.isEmpty || tab.url == "about:blank"
+#if NOCHE_TESTHOOKS
+        let blank = empty && ProcessInfo.processInfo.environment["NOCHE_TEST_CLOSED_BLANK"] != "1"  // negative control: a blank tab goes on the closed list
+#else
+        let blank = empty
+#endif
+        guard !blank else { return }
         let t = now().timeIntervalSince1970
         try db.write { db in
             try db.execute(sql: """

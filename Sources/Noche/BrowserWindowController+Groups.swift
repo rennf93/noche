@@ -30,7 +30,7 @@ extension BrowserWindowController {
     }
 
     private func showAndRename(_ g: GroupID) {
-        if (try? app.writer?.store.setting("emojiForNewGroups")).flatMap({ $0 }) == "1", !BarHook.on("GRP_NOEMOJI") {  // the hook: no emoji
+        if flag("emojiForNewGroups"), !BarHook.on("GRP_NOEMOJI") {  // the hook: no emoji
             list.setGroupIcon(g, GroupEmoji.pick(list.groups.count - 1))
         }
         refreshNow()

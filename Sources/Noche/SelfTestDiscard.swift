@@ -20,8 +20,8 @@ extension SelfTest {
         let a = c.list.items[0]
         let bURL = fixture("b.html")
         _ = win.addTab(withURL: bURL, activate: false)
-        guard await until(20, { win.tabs.count == 2 && c.list.items.count == 2 && c.list.items[1].url == bURL && !c.list.items[1].isLoading }) else { return finish(false, "tab B never loaded (\(c.list.items.count) items)") }
-        let b = c.list.items[1]
+        guard await until(20, { win.tabs.count == 2 && c.list.items.count == 2 && c.list.items.first { $0.url == bURL }.map({ !$0.isLoading }) == true }) else { return finish(false, "tab B never loaded (\(c.list.items.count) items)") }
+        guard let b = c.list.items.first(where: { $0.url == bURL }) else { return finish(false, "no row for B") }  // the list is newest first: found by address
         guard c.list.activeID == a.id, let engine = b.engineID else { return finish(false, "tab A is not the selection or B has no engine id") }
         for (label, pinB) in [("row", false), ("tile", true)] {
             if pinB {
@@ -63,8 +63,8 @@ extension SelfTest {
         let idleURL = fixture("b.html"), audioURL = fixture("audio.html")
         let loadingURL = "http://127.0.0.1:\(slow.port)/slow.html"
         for u in [idleURL, audioURL, loadingURL] { _ = win.addTab(withURL: u, activate: false) }
-        guard await until(25, { win.tabs.count == 4 && c.list.items.count == 4 && c.list.items[1].url == idleURL && c.list.items[2].url == audioURL && c.list.items[3].url.hasPrefix("http://127.0.0.1:\(slow.port)/") }) else { return finish(false, "the tabs did not arrive (\(c.list.items.map(\.url)))") }
-        let idle = c.list.items[1], audio = c.list.items[2], loading = c.list.items[3]
+        guard await until(25, { win.tabs.count == 4 && c.list.items.count == 4 && c.list.items.contains { $0.url == idleURL } && c.list.items.contains { $0.url == audioURL } && c.list.items.contains { $0.url.hasPrefix("http://127.0.0.1:\(slow.port)/") } }) else { return finish(false, "the tabs did not arrive (\(c.list.items.map(\.url)))") }
+        let idle = c.list.items.first { $0.url == idleURL }!, audio = c.list.items.first { $0.url == audioURL }!, loading = c.list.items.first { $0.url.hasPrefix("http://127.0.0.1:\(slow.port)/") }!  // the list is newest first: found by address
         guard c.list.activeID == active.id else { return finish(false, "the first tab is not the selection") }
         guard await until(10, { self.entry(c, loading.id)?.isLoading == true }) else { return finish(false, "the slow page tab never reports loading") }
         let tabAudio = c.engineTab(audio)!
@@ -93,18 +93,19 @@ extension SelfTest {
     }
 
     /// `discard-hang`: a background page that never answers (a spinning main thread) must not hold the sweep: it returns within a few seconds,
-    /// the spinning tab is not discarded (it cannot say whether it plays media), and the idle tab after it in the list is. A second sweep
+    /// the spinning tab is not discarded (it cannot say whether it plays media), and the idle tab after it in the list (newest first) is. A second sweep
     /// started while one runs does nothing.
     func discardHang() async {
         guard await ready(), let c = ctl, let win else { return }
         let active = c.list.items[0]
         let spinURL = fixture("b.html").replacingOccurrences(of: "127.0.0.1", with: "localhost")  // another site, so another renderer process
         let idleURL = fixture("b.html")
-        _ = win.addTab(withURL: spinURL, activate: false)
-        guard await until(20, { win.tabs.count == 2 && c.list.items.count == 2 && c.list.items[1].url == spinURL && !c.list.items[1].isLoading }) else { return finish(false, "the spin tab did not load (\(c.list.items.map(\.url)))") }
+        // The list is newest first: the idle tab opens first so that it comes after the spinning one in the list, as the sweep must still reach it.
         _ = win.addTab(withURL: idleURL, activate: false)
-        guard await until(20, { win.tabs.count == 3 && c.list.items.count == 3 && c.list.items[2].url == idleURL && !c.list.items[2].isLoading }) else { return finish(false, "the idle tab did not load") }
-        let spin = c.list.items[1], idle = c.list.items[2]
+        guard await until(20, { win.tabs.count == 2 && c.list.items.count == 2 && c.list.items.first { $0.url == idleURL }.map({ !$0.isLoading }) == true }) else { return finish(false, "the idle tab did not load (\(c.list.items.map(\.url)))") }
+        _ = win.addTab(withURL: spinURL, activate: false)
+        guard await until(20, { win.tabs.count == 3 && c.list.items.count == 3 && c.list.items.first { $0.url == spinURL }.map({ !$0.isLoading }) == true }) else { return finish(false, "the spin tab did not load") }
+        let spin = c.list.items.first { $0.url == spinURL }!, idle = c.list.items.first { $0.url == idleURL }!  // the list is newest first: found by address
         // 15 s of a busy main thread, so the page frees itself before the app quits.
         _ = await evaluate(c.engineTab(spin)!, "setTimeout(() => { const t = Date.now(); while (Date.now() - t < 15000) {} }, 0); 1")
         BrowserWindowController.discardCalls = []
@@ -135,8 +136,8 @@ extension SelfTest {
         for (label, url, play, inChild) in cases {
             _ = win.addTab(withURL: url, activate: false)
             let n = c.list.items.count + 1
-            guard await until(20, { win.tabs.count == n && c.list.items.count == n && c.list.items[n - 1].url == url && !c.list.items[n - 1].isLoading }) else { return finish(false, "\(label): the page did not load") }
-            let item = c.list.items[n - 1], tab = c.engineTab(item)!
+            guard await until(20, { win.tabs.count == n && c.list.items.count == n && c.list.items.first { $0.url == url }.map({ !$0.isLoading }) == true }) else { return finish(false, "\(label): the page did not load") }
+            let item = c.list.items.first { $0.url == url }!, tab = c.engineTab(item)!  // the list is newest first: found by address
             try? await Task.sleep(for: .milliseconds(1500))  // the frame's own load
             guard await c.isPlayingMedia(tab) == false else { return finish(false, "\(label): reads as playing before anything plays") }
             if inChild {

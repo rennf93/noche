@@ -56,11 +56,14 @@ public enum SettingKeys {
     public static let downloadsRemoved = "downloadsRemoved"
     public static let newWindowProfile = "newWindowProfileId"
 
-    /// A bool key: the stored value when it is valid, else the table's default.
-    public static func bool(_ name: String, stored: String?) -> Bool {
+    /// Any key: the stored value when it is valid for the key, else the table's default.
+    public static func value(_ name: String, stored: String?) -> String {
         let k = key(name)!
-        return (stored.flatMap { k.isValid($0) ? $0 : nil } ?? k.defaultValue) == "1"
+        return stored.flatMap { k.isValid($0) ? $0 : nil } ?? k.defaultValue
     }
+
+    /// A bool key: the stored value when it is valid, else the table's default.
+    public static func bool(_ name: String, stored: String?) -> Bool { value(name, stored: stored) == "1" }
 
     /// A text key: the stored value, else the table's default.
     public static func text(_ name: String, stored: String?) -> String { stored ?? key(name)!.defaultValue }

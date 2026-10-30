@@ -413,8 +413,8 @@ extension SelfTest {
             guard await ready(), let c = ctl, let win, let writer = app.writer else { return }
             _ = win.addTab(withURL: page, activate: false)
             guard await until(20, { c.list.items.count == 2 && c.list.items.allSatisfy { !$0.title.isEmpty } }) else { return finish(false, "phase 1: titles \(c.list.items.map(\.title))") }
-            let t = c.list.items.map(\.id)
-            let pageTitles = c.list.items.map(\.title)
+            let t = Array(c.list.items.map(\.id).reversed())  // A, then B (the list is newest first)
+            let pageTitles = c.list.items.reversed().map(\.title)
             guard pageTitles == ["Noche App Fixture", "B Page"] else { return finish(false, "phase 1: page titles \(pageTitles)") }
             // The tab menu's Rename...: the field starts on the shown title.
             guard let m = await tabMenu(c, t[1]) else { return finish(false, "phase 1: no tab menu") }

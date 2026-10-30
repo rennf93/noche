@@ -600,13 +600,13 @@ extension SelfTest {
         c.newGroupWithTab(d)
         guard await until(5, { c.list.groups.count == 1 }), let g = c.list.groups.first?.id, c.sidebar.groupRow(g).map({ $0.renameField.cancel(); return true }) == true else { return finish(false, "phase 1: no group") }
         c.moveToGroup(e, g)
-        let start = "grid=[a^] top=[] day=[b c G+[d e] f]"
+        let start = "grid=[a^] top=[] day=[f G+[d e] c b]"  // new tabs open at the top: the list is newest first
         guard listShape(c) == start else { return finish(false, "phase 1: the starting list is \(listShape(c)), want \(start)") }
         try? await Task.sleep(for: .seconds(1))  // the setup's own saves and the pages' last updates are over: only a drop can change the store now
         guard await until(5, { self.storedShape(c) == start }) else { return finish(false, "phase 1: the store holds \(String(describing: storedShape(c))) for the starting list \(start)") }
         let ops: [(String, DragItem, DropTarget, String)] = [
-            ("a reorder (f to the top of the day list)", .tab(f), .day(0), "grid=[a^] top=[] day=[f b c G+[d e]]"),
-            ("a join (c to the end of the folder)", .tab(cc), .group(g, Int.max), "grid=[a^] top=[] day=[f b G+[d e c]]"),
+            ("a reorder (b to the top of the day list)", .tab(b), .day(0), "grid=[a^] top=[] day=[b f G+[d e] c]"),
+            ("a join (c to the end of the folder)", .tab(cc), .group(g, Int.max), "grid=[a^] top=[] day=[b f G+[d e c]]"),
             ("a pin into the grid (b at slot 1)", .tab(b), .grid(1), "grid=[a^ b^] top=[] day=[f G+[d e c]]"),
             ("a tile unpinned under the divider (a at day 1)", .tab(a), .day(1), "grid=[b^] top=[] day=[f a G+[d e c]]"),
             ("a folder moved to the persistent area", .group(g), .persistent(0), "grid=[b^] top=[G^+[d e c]] day=[f a]")]

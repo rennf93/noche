@@ -145,8 +145,10 @@ extension SelfTest {
             let js = "document.title = \(String(data: (try? JSONSerialization.data(withJSONObject: [t])) ?? Data(), encoding: .utf8) ?? "[]")[0]"
             _ = await evaluate(win.tabs[i], js)
         }
-        guard await until(10, { (0..<4).allSatisfy { ctl.sidebar.rows[safe: $0]?.titleField.stringValue == titles[$0] } }) else {
-            return finish(false, "row titles never updated: \((0..<4).map { ctl.sidebar.rows[safe: $0]?.titleField.stringValue.count ?? -1 })")
+        // The list is newest first: the row of engine tab i is found by identity.
+        func row(of i: Int) -> Int? { ctl.list.items.firstIndex { $0.engineID == win.tabs[i].identifier } }
+        guard await until(10, { (0..<4).allSatisfy { row(of: $0).flatMap { r in ctl.sidebar.rows[safe: r]?.titleField.stringValue } == titles[$0] } }) else {
+            return finish(false, "row titles never updated: \((0..<4).map { row(of: $0).flatMap { r in ctl.sidebar.rows[safe: r]?.titleField.stringValue.count } ?? -1 })")
         }
         var bad: [String] = []
         for (i, row) in ctl.sidebar.rows.enumerated() {
@@ -307,14 +309,16 @@ extension SelfTest {
         expect("reload", ctl.toolbar.reload, "Reload")
         for (i, name) in ["Close", "Minimize", "Zoom"].enumerated() { expect("window button \(name)", ctl.sidebar.lights[i], name) }
         // Favicon: a page with one shows it, the next page without one brings the placeholder back.
-        click(rows[0])
-        _ = await until(5, { selected == 0 })
+        // The list is newest first: the first tab's row is found by identity.
+        guard let own = ctl.list.items.firstIndex(where: { $0.engineID == tab.identifier }) else { return finish(false, "no row for the first tab \(bad)") }
+        click(rows[own])
+        _ = await until(5, { selected == own })
         var before = loads
         tab.loadURL(fixture("favicon.html"))
-        guard await until(15, { loads > before && !rows[0].showsPlaceholder }) else { return finish(false, "the favicon of favicon.html never reached its row \(bad)") }
+        guard await until(15, { loads > before && !rows[own].showsPlaceholder }) else { return finish(false, "the favicon of favicon.html never reached its row \(bad)") }
         before = loads
         tab.loadURL(fixture("b.html"))
-        guard await until(15, { loads > before && rows[0].showsPlaceholder }) else { return finish(false, "the row kept the previous favicon after a page without one \(bad)") }
+        guard await until(15, { loads > before && rows[own].showsPlaceholder }) else { return finish(false, "the row kept the previous favicon after a page without one \(bad)") }
         // The toolbar address is a button for VoiceOver: its press action opens the command bar on the loaded page.
         expect("address", ctl.toolbar.address, "Address")
         _ = await until(5, { !ctl.newTabShown && win.activeTab?.url.hasSuffix("b.html") == true })

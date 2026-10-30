@@ -46,12 +46,26 @@ extension BrowserWindowController {
                 added.groupID = saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
             }
         }
-        // A tab the engine appended (no tab after it in the strip that the list knows: a burst of tabs arrives after later ones joined the strip; none
-        // restored or reopened) opens at the top of the day list unless addNewTabsToTop is off. A popup or a reopened tab in the middle keeps its place.
-        let appended = at.map { i in !strip[(i + 1)...].contains { ids[$0.identifier] != nil } } ?? true
-        let toTop = pending == nil && appended && (BarHook.on("NEWTAB_ALWAYSTOP") || (flag("addNewTabsToTop") && !BarHook.on("NEWTAB_APPEND")))
-        list.insertNew(added, opener: before.flatMap { ids[$0.identifier] }, addToTop: toTop, activate: active)
-        if let at = pending?.index { list.move(added.id, to: at) }  // the index is inside the tab's own container (|containerIndex|)
+        // With addNewTabsToTop on, every new tab whose place the app did not choose opens at the top of the day list, wherever its opener sits in
+        // the strip (Cmd+T, a link, target=_blank, window.open, a burst). A restored, reopened or moved-in tab (pending) and a group join keep theirs.
+        let placedTop = pending == nil && groupJoins[tab.identifier] == nil && flag("addNewTabsToTop")
+        let placedAfter = before.flatMap { ids[$0.identifier] }
+#if NOCHE_TESTHOOKS
+        var toTop = placedTop, after = placedAfter
+        // Negative controls, each one regression, scoped by the kind of tab the check is opening: the tab goes after its opener unless it is last in the strip
+        // (the rule before the setting reached every kind), or is appended; a tab joins the group of the active one; a restored tab opens as a new one.
+        let kind = Self.newTabKind.uppercased()
+        if BarHook.on("NEWTAB_OLD_" + kind), at != strip.count - 1 { toTop = false }
+        if BarHook.on("NEWTAB_APPEND_" + kind) { toTop = false }
+        if Self.newTabKind == "group", BarHook.on("NEWTAB_GROUPAFTER") { toTop = false; after = list.activeID }
+        if BarHook.on("NEWTAB_RESTORETOP"), pending?.index == nil, restore != nil { toTop = true }
+        if BarHook.on("NEWTAB_ALWAYSTOP") { toTop = pending == nil }
+        if BarHook.on("NEWTAB_APPEND") { toTop = false }
+#else
+        let toTop = placedTop, after = placedAfter
+#endif
+        list.insertNew(added, opener: after, addToTop: toTop, activate: active)
+        if let at = pending?.index, !BarHook.on("NEWTAB_REOPENTOP") { list.move(added.id, to: at) }  // the index is inside the tab's own container (|containerIndex|)
         if let join = groupJoins.removeValue(forKey: tab.identifier) { joinGroup(added.id, join) }
         if let restore {
             if !restoreStarted {

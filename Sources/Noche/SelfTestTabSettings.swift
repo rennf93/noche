@@ -67,7 +67,28 @@ extension SelfTest {
         guard await until(15, { win.tabs.count == 1 && c.list.items.count == 1 && c.list.items[0].url == "about:blank" }), c.list.activeID == c.list.items.first?.id else {
             return finish(false, "Close All on 3 day tabs left \(win.tabs.count) engine tabs, list \(c.list.items.map(\.url)), want one blank tab")
         }
-        finish(violations.isEmpty, "Close All Tabs (Shift+Cmd+K): 7 day tabs asked once and a refusal closed none; accepted, it closed the 7 and kept the pinned tab and the group of 2; disabled with no day tab; 5 day tabs closed with no question; with only day tabs left it opened one blank tab \(violations)")
+
+        // A lone blank tab: Close All is enabled and swaps it for a new blank, and adds no row to the closed list, as Cmd+W on a blank tab adds none
+        // (the store keeps no tab with an empty or blank address).
+        func closedCount() -> Int { ((try? writer.store.closedTabs(matching: "")) ?? []).count }
+        let closedBefore = closedCount()
+        let lone = c.list.items[0].id
+        menuItem("Close All Tabs")?.menu?.update()
+        guard menuItem("Close All Tabs")?.isEnabled == true else { return finish(false, "Close All Tabs is disabled on a lone blank tab") }
+        closeAllKey()
+        guard await until(15, { win.tabs.count == 1 && c.list.items.count == 1 && c.list.items[0].id != lone && c.list.items[0].url == "about:blank" }) else {
+            return finish(false, "Close All on a lone blank tab left \(win.tabs.count) engine tabs, list \(c.list.items.map(\.url)), want a new blank tab")
+        }
+        await settle()
+        guard closedCount() == closedBefore else { return finish(false, "Close All on a lone blank tab put \(closedCount() - closedBefore) rows on the closed list, want none (Cmd+W on a blank tab adds none)") }
+        // The reference: Cmd+W on a second blank tab adds none either.
+        _ = win.addTab(withURL: "about:blank", activate: true)
+        guard await until(15, { win.tabs.count == 2 && c.list.items.count == 2 }) else { return finish(false, "a second blank tab never appeared") }
+        _ = key("w", code: 13, menuOnly: true)
+        guard await until(15, { win.tabs.count == 1 && c.list.items.count == 1 }) else { return finish(false, "Cmd+W on a blank tab left \(win.tabs.count) engine tabs") }
+        await settle()
+        guard closedCount() == closedBefore else { return finish(false, "Cmd+W on a blank tab put \(closedCount() - closedBefore) rows on the closed list, want none") }
+        finish(violations.isEmpty, "Close All Tabs (Shift+Cmd+K): 7 day tabs asked once and a refusal closed none; accepted, it closed the 7 and kept the pinned tab and the group of 2; disabled with no day tab; 5 day tabs closed with no question; with only day tabs left it opened one blank tab; on a lone blank tab it is enabled, swaps it for a new blank and adds no closed-list row, like Cmd+W on a blank tab \(violations)")
     }
 
     /// Cmd+W asks before closing the last tab of the profile: no other tab in any window, live or dormant, and a pinned last tab is not it (it stays as a
@@ -150,7 +171,94 @@ extension SelfTest {
         guard c.list.dayOrder.suffix(2) == [.tab(f), .tab(g)] else { return finish(false, "with addNewTabsToTop=0 the day list is \(order()), want the new tabs at the end in opening order") }
         guard setSetting("addNewTabsToTop", "1"), let h = await add(7) else { return finish(false, "tabs never appeared with the setting on again") }
         guard c.list.dayOrder.first == .tab(h) else { return finish(false, "with the setting stored as 1 again the day list is \(order()), want the new tab first") }
-        finish(violations.isEmpty, "addNewTabsToTop: default on opens new tabs at the top of the day list (under a pinned tile); stored as 0 they open at the end in opening order; stored as 1 again at the top, read when each tab opens \(violations)")
+        // Every kind of new tab, with the setting on and then stored as 0: where each lands. On, every tab whose place the app did not choose goes to the
+        // top of the day list, wherever its opener sits; off, after its opener (or at the end); a reopened tab returns to its own index either way.
+        func day() -> [TabID] { c.list.dayOrder.compactMap { if case .tab(let t) = $0 { t } else { nil } } }
+        func arrive(_ n: Int, _ kind: String, _ act: () -> Void) async -> [TabID]? {
+            let before = Set(c.list.items.map(\.id)), count = c.list.items.count
+            BrowserWindowController.newTabKind = kind
+            defer { BrowserWindowController.newTabKind = "" }
+            act()
+            guard await until(20, { c.list.items.count == count + n && win.tabs.count == count + n }) else { return nil }
+            let fresh = Set(c.list.items.map(\.id)).subtracting(before)
+            return win.tabs.compactMap { t in c.list.items.first { $0.engineID == t.identifier }?.id }.filter { fresh.contains($0) }  // in arrival order
+        }
+        func kinds(_ top: Bool) async -> String? {
+            let mode = top ? "addNewTabsToTop on" : "addNewTabsToTop=0"
+            // Cmd+T.
+            guard let t = await arrive(1, "cmdt", { _ = self.cmdT() }) else { return "\(mode): Cmd+T opened no tab" }
+            guard top ? day().first == t[0] : day().last == t[0] else { return "\(mode): Cmd+T put the tab at day position \(day().firstIndex(of: t[0]) ?? -1) of \(day().count), want \(top ? "the top (0)" : "the end")" }
+            // A link opened in a new background tab from a middle tab (a middle click or Cmd+click), then a window.open popup from the same tab.
+            let m = day()[1]
+            guard let mItem = c.list.items.first(where: { $0.id == m }), let mTab = c.engineTab(mItem) else { return "\(mode): no middle tab" }
+            let loadsBefore = loads
+            mTab.loadURL(fixture("link.html"))
+            guard await until(15, { loads > loadsBefore && self.entry(c, m)?.url.hasSuffix("link.html") == true && self.entry(c, m)?.isLoading == false }) else { return "\(mode): the middle tab never loaded link.html" }
+            let at = day().firstIndex(of: m)!
+            guard let l = await arrive(1, "link", { Task { _ = await self.evaluate(mTab, "document.getElementById('l').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true, view: window })); 1") } }) else { return "\(mode): the link opened no tab" }
+            guard top ? day().first == l[0] : day().firstIndex(of: l[0]) == day().firstIndex(of: m)! + 1 else { return "\(mode): a link opened in a background tab from the middle tab (day position \(at)) landed at \(day().firstIndex(of: l[0]) ?? -1), want \(top ? "the top (0)" : "right after its opener")" }
+            guard let p = await arrive(1, "popup", { Task { _ = await self.evaluate(mTab, "window.open(location.origin + '/b.html'); 1") } }) else { return "\(mode): window.open opened no tab" }
+            guard top ? day().first == p[0] : day().firstIndex(of: p[0]) == day().firstIndex(of: l[0])! + 1 else { return "\(mode): a window.open popup from the middle tab landed at \(day().firstIndex(of: p[0]) ?? -1), want \(top ? "the top (0)" : "right after the tab before it in the engine's strip (the opener's link tab)")" }
+            // A burst of three.
+            guard let burst = await arrive(3, "burst", { for _ in 0..<3 { _ = win.addTab(withURL: self.fixture(""), activate: false) } }) else { return "\(mode): the burst of 3 did not arrive" }
+            guard top ? Array(day().prefix(3)) == burst.reversed() : Array(day().suffix(3)) == burst else { return "\(mode): a burst of 3 landed at \(burst.map { day().firstIndex(of: $0) ?? -1 }) in arrival order, want \(top ? "the top, newest first" : "the end, in arrival order")" }
+            // A new tab while a group is the active item: the tab is a day tab, not a member.
+            let member = day()[3]
+            guard let g = c.list.createGroup(with: member) else { return "\(mode): no group" }
+            c.refresh(); c.changed()
+            guard await select(c, member), c.list.activeID == member else { return "\(mode): the group's tab did not activate" }
+            guard let n = await arrive(1, "group", { _ = self.cmdT() }) else { return "\(mode): Cmd+T with a group active opened no tab" }
+            guard self.entry(c, n[0])?.groupID == nil, top ? day().first == n[0] : day().last == n[0] else { return "\(mode): a new tab with a group active is in group \(String(describing: self.entry(c, n[0])?.groupID)) at day position \(day().firstIndex(of: n[0]) ?? -1), want a day tab \(top ? "at the top" : "at the end")" }
+            _ = g
+            // Reopen Closed Tab on a middle day tab: the same index back.
+            let victim = day()[2], order = c.list.dayOrder
+            guard await select(c, victim) else { return "\(mode): the middle day tab did not activate" }
+            cmdW()
+            guard await until(15, { c.list.items.count == win.tabs.count && self.entry(c, victim) == nil }) else { return "\(mode): Cmd+W did not close the middle day tab" }
+            BrowserWindowController.newTabKind = "reopen"
+            shiftCmdT()
+            guard await until(15, { self.entry(c, victim) != nil && win.tabs.count == c.list.items.count }) else { BrowserWindowController.newTabKind = ""; return "\(mode): Reopen Closed Tab brought nothing back" }
+            BrowserWindowController.newTabKind = ""
+            guard c.list.dayOrder == order else { return "\(mode): Reopen Closed Tab of day position 2 put it at \(day().firstIndex(of: victim) ?? -1), want the same index and the order unchanged (\(order.count) rows)" }
+            return nil
+        }
+        guard setSetting("addNewTabsToTop", "1") else { return finish(false, "could not store the setting as 1") }
+        if let bad = await kinds(true) { return finish(false, bad) }
+        guard setSetting("addNewTabsToTop", "0") else { return finish(false, "could not store the setting as 0 again") }
+        if let bad = await kinds(false) { return finish(false, bad) }
+        finish(violations.isEmpty, "addNewTabsToTop: default on opens new tabs at the top of the day list (under a pinned tile); stored as 0 they open at the end in opening order; stored as 1 again at the top, read when each tab opens; on, Cmd+T, a link opened in a background tab and a window.open popup from a middle tab, a burst of 3 and a new tab with a group active all open at the top (a day tab, never a member), off, after the opener or at the end; Reopen Closed Tab of a middle day tab returns it to the same index with the setting on and off \(violations)")
+    }
+    /// Phase 1: with the default two windows' worth of order: window 1 opens four tabs with `addNewTabsToTop` on (the newest first), then the setting is stored
+    /// as 0 and window 2 opens four with it off (opening order); the app quits at once. Phase 2: both windows come back in the same day order (restored tabs
+    /// keep their place, they are not new tabs).
+    func newTabTopRelaunch() async {
+        let a = fixture(""), u = (1...4).map { fixture("b.html?\($0)") }, w = fixture("b.html?w"), v = (1...3).map { fixture("b.html?v\($0)") }
+        let onWant = [u[3], u[2], u[1], u[0], a], offWant = [w] + v
+        if phase == 1 {
+            guard await ready(), let c1 = ctl, let w1 = win else { return }
+            guard (try? app.writer?.store.setting("addNewTabsToTop")).flatMap({ $0 }) == nil else { return finish(false, "phase 1: addNewTabsToTop is set: this check starts from the default (on)") }
+            for (i, x) in u.enumerated() {
+                _ = w1.addTab(withURL: x, activate: i == 3)
+                guard await until(15, { c1.list.items.count == i + 2 && w1.tabs.count == i + 2 }) else { return finish(false, "phase 1: tab \(i + 1) never appeared") }
+            }
+            guard urls(c1) == onWant else { return finish(false, "phase 1: with the setting on the window lists \(urls(c1)), want the newest first \(onWant)") }
+            guard setSetting("addNewTabsToTop", "0") else { return finish(false, "phase 1: could not store the setting") }
+            let second = app.newWindow(url: w, frame: SelfTest.persistFrames[1])
+            guard let c2 = app.controllers.last, c2.window === second, await until(20, { c2.nsWindow != nil && c2.list.items.count == 1 }) else { return finish(false, "phase 1: no second window") }
+            for (i, x) in v.enumerated() {
+                _ = second.addTab(withURL: x, activate: false)
+                guard await until(15, { c2.list.items.count == i + 2 && second.tabs.count == i + 2 }) else { return finish(false, "phase 1: second window tab \(i + 1) never appeared") }
+            }
+            guard urls(c2) == offWant else { return finish(false, "phase 1: with the setting stored as 0 the second window lists \(urls(c2)), want opening order \(offWant)") }
+            app.writer?.flush()
+            return finish(violations.isEmpty, "phase 1: window 1 opened 4 tabs with the setting on (newest first), window 2 4 with it stored as 0 (opening order), quitting \(violations)")
+        }
+        guard await until(30, { self.restoredUp(2) }), let c1 = app.controllers.first(where: { $0.list.items.contains { $0.url == a } }), let c2 = app.controllers.first(where: { $0 !== c1 }) else { return finish(false, "phase 2: \(app.controllers.count) windows restored, want 2") }
+        guard await until(20, { c1.list.items.count == 5 && c2.list.items.count == 4 }) else { return finish(false, "phase 2: \(c1.list.items.count) and \(c2.list.items.count) tabs, want 5 and 4") }
+        _ = await until(20, { self.urls(c1) == onWant && self.urls(c2) == offWant })  // a restored tab's address is its saved one until the page reports
+        guard urls(c1) == onWant else { return finish(false, "phase 2: the window opened with the setting on lists \(urls(c1)) after the relaunch, want \(onWant)") }
+        guard urls(c2) == offWant else { return finish(false, "phase 2: the window opened with the setting off lists \(urls(c2)) after the relaunch, want \(offWant)") }
+        finish(violations.isEmpty, "phase 2: the day order of both windows (newest first with the setting on, opening order with it off) is the same after the relaunch \(violations)")
     }
 }
 #endif

@@ -68,6 +68,18 @@ final class SettingKeysTests: XCTestCase {
         let args = ["Noche", "--selftest-setting", "addNewTabsToTop=0", "--selftest-setting", "warnBeforeClosingLastTab=0", "--selftest-setting", "autoGroupMeetings=1", "--selftest-setting", "addNewTabsToTop=2"]
         XCTAssertEqual(SettingKeys.flagSettings(args).map { "\($0.0)=\($0.1)" }, ["addNewTabsToTop=0", "warnBeforeClosingLastTab=0", "autoGroupMeetings=1"])
     }
+    func testValueReadersTakeTheTableDefault() {
+        for (stored, want) in [(nil, "preserve"), ("close", "close"), ("preserve", "preserve"), ("bogus", "preserve"), ("", "preserve"), ("0", "preserve"), ("1", "preserve")] as [(String?, String)] {
+            XCTAssertEqual(SettingKeys.value("quitBehavior", stored: stored), want, "quitBehavior \(stored ?? "nil")")
+        }
+        for name in ["suggestRemote", "emojiForNewGroups"] {
+            XCTAssertFalse(SettingKeys.bool(name, stored: nil), name)
+            XCTAssertFalse(SettingKeys.bool(name, stored: "0"), name)
+            XCTAssertFalse(SettingKeys.bool(name, stored: "x"), name)
+            XCTAssertTrue(SettingKeys.bool(name, stored: "1"), name)
+        }
+        XCTAssertTrue(SettingKeys.bool("hapticReorder", stored: "junk"))
+    }
     func testDownloadsRemovedAndNewWindowProfileAreInTheTable() {
         XCTAssertEqual(SettingKeys.key(SettingKeys.downloadsRemoved)?.defaultValue, "")
         XCTAssertEqual(SettingKeys.key(SettingKeys.newWindowProfile)?.defaultValue, "")

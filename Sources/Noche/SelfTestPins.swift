@@ -209,18 +209,18 @@ extension SelfTest {
             win.activeTab?.loadURL(a)
             guard await until(15, { c.list.items.first.flatMap { c.engineTab($0)?.favicon } != nil }) else { return finish(false, "phase 1: A never got its favicon") }
             for u in [b, l, f] { _ = win.addTab(withURL: u, activate: false) }
-            guard await until(20, { self.urls(c) == [a, b, l, f] }) else { return finish(false, "phase 1: urls \(urls(c))") }
-            let ids = c.list.items.map(\.id)
+            guard await until(20, { self.urls(c) == [f, l, b, a] }) else { return finish(false, "phase 1: urls \(urls(c))") }
+            let ids = Array(c.list.items.map(\.id).reversed())  // A B C F in opening order (the list is newest first)
             for id in ids.prefix(2) {
                 guard await select(c, id) else { return finish(false, "phase 1: a tab did not activate") }
                 pinKey()
                 guard await pinned(c, id, true) else { return finish(false, "phase 1: Shift+Cmd+D did not pin") }
             }
-            guard c.list.createGroup(with: ids[3], name: "G") != nil else { return finish(false, "phase 1: no group") }
+            guard c.list.createGroup(with: ids[2], name: "G") != nil else { return finish(false, "phase 1: no group") }
             c.refresh(); c.changed()
             guard c.list.activeID == ids[1], c.list.groups.count == 1 else { return finish(false, "phase 1: active or groups wrong") }
             writer.flush()
-            return finish(violations.isEmpty, "phase 1: A and B pinned (B selected), C a day tab, F in group G; saved \(violations)")
+            return finish(violations.isEmpty, "phase 1: A and B pinned (B selected), F a day tab, C in group G; saved \(violations)")
         }
         guard await until(held ? 25 : 30, { self.restoredUp(1) }), let c = ctl, let win else { return finish(false, "phase 2: no restored window") }
         let items = c.list.items
@@ -237,9 +237,9 @@ extension SelfTest {
         guard await until(5, { self.tile(0)?.faviconView.alphaValue == ChromeStyle.dormantAlpha && self.tile(1)?.faviconView.alphaValue == 1 }) else { return finish(false, "phase 2: tile alphas \(tile(0)?.faviconView.alphaValue ?? -1), \(tile(1)?.faviconView.alphaValue ?? -1)") }
         guard await until(10, { self.tile(0)?.showsPlaceholder == false }) else { return finish(false, "phase 2: the dormant tile of A shows the globe, want its saved favicon") }
         if held {
-            guard c.list.items[3].engineID == nil, c.list.items[3].url == f else { return finish(false, "phase 2: the held-back tab is \(String(describing: c.list.items[3])), want dormant at \(f)") }
+            guard c.list.items[3].engineID == nil, c.list.items[3].url == l else { return finish(false, "phase 2: the held-back tab is \(String(describing: c.list.items[3])), want dormant at \(l)") }
         }
-        finish(violations.isEmpty, "phase 2: A dormant, B (selected pin), C\(held ? "" : " and F") live; \(win.tabs.count) engine tabs; pins and group G\(held ? " survive the fallback, the held-back F is a dormant child" : " back") \(violations)")
+        finish(violations.isEmpty, "phase 2: A dormant, B (selected pin), F\(held ? "" : " and C") live; \(win.tabs.count) engine tabs; pins and group G\(held ? " survive the fallback, the held-back C is a dormant child" : " back") \(violations)")
     }
 
     // MARK: reopen (T3.5)

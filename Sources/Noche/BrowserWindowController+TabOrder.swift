@@ -57,7 +57,7 @@ extension BrowserWindowController {
         if let blank = keepEngineTab(closing: active) {
             closeNext[active.identifier] = blank
         } else {
-            let open = orderedTabs().filter { !isClosing($0) }
+            let open = (BarHook.on("CLOSE_STRIPORDER") ? window.tabs : orderedTabs()).filter { !isClosing($0) }  // the hook: the engine strip's order
             if let i = open.firstIndex(where: { $0 === active }) {
                 closeNext[active.identifier] = i + 1 < open.count ? open[i + 1] : (i > 0 ? open[i - 1] : nil)
             }

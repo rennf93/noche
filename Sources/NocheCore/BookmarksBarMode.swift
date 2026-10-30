@@ -5,7 +5,7 @@ public enum BookmarksBarMode: String, CaseIterable, Sendable {
     case always, newTabOnly, never
     public static let settingKey = "bookmarksBar"
 
-    public init(stored: String?) { self = stored.flatMap(Self.init(rawValue:)) ?? .newTabOnly }
+    public init(stored: String?) { self = Self(rawValue: SettingKeys.value(Self.settingKey, stored: stored)) ?? .newTabOnly }
 
     public func visible(onNewTab: Bool) -> Bool {
         switch self {

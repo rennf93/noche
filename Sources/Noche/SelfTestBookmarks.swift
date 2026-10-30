@@ -146,10 +146,12 @@ extension SelfTest {
         addMark("Alpha", fixture("b.html"))
         addMark("Beta", fixture("link.html"))
         if let mine = try? store.addFolder(title: "Mine", parentId: barRoot()!.id) { addMark("Child", fixture(""), in: mine) }
-        func onPage() async -> Bool { ctl.selectRow(0); return await until(10, { !ctl.newTabShown && win.activeTab === win.tabs.first }) }
+        // The list is newest first: the page's row and the New Tab row are found by identity.
+        func row(of tab: NCTab?) -> Int { ctl.list.items.firstIndex { $0.engineID == tab?.identifier } ?? 0 }
+        func onPage() async -> Bool { ctl.selectRow(row(of: win.tabs.first)); return await until(10, { !ctl.newTabShown && win.activeTab === win.tabs.first }) }
         func onNewTab() async -> Bool {
-            if rowCount < 2 { ctl.newTab() }
-            ctl.selectRow(1)
+            if rowCount < 2 { ctl.newTab(); _ = await until(10, { rowCount == 2 && win.tabs.count == 2 }) }
+            ctl.selectRow(row(of: win.tabs.last))
             return await until(15, { ctl.newTabShown && rowCount == 2 })
         }
         guard app.barMode == .newTabOnly, (try? store.setting(BookmarksBarMode.settingKey)) == nil else { return finish(false, "the default is \(app.barMode), stored \(String(describing: try? store.setting(BookmarksBarMode.settingKey)))") }
@@ -541,7 +543,7 @@ extension SelfTest {
             t.loadURL(u)
             _ = await until(15, { loads > before })
         }
-        guard await until(15, { ctl.list.items.map(\.title) == ["Noche App Fixture", "B Page", "Link Page"] }) else { return finish(false, "tab titles \(ctl.list.items.map(\.title))") }
+        guard await until(15, { ctl.list.items.map(\.title) == ["Link Page", "B Page", "Noche App Fixture"] }) else { return finish(false, "tab titles \(ctl.list.items.map(\.title))") }
         func openMenu() async -> ContextMenus.Pending? {
             ContextMenus.dismiss(choosing: nil)
             let sidebar = ctl.sidebar
@@ -572,11 +574,11 @@ extension SelfTest {
         ed.done.performClick(nil)
         guard await until(3, { folders().map(\.title) == ["Trip"] }), let trip = folders().first else { return finish(false, "Save added \(folders().map(\.title)), want Trip") }
         let kids = (try? store.bookmarkChildren(of: trip.id)) ?? []
-        guard kids.map(\.url) == targets.map { Optional($0) }, kids.map(\.title) == ["Noche App Fixture", "B Page", "Link Page"], kids.map(\.position) == [0, 1, 2], ed.isHidden else {
+        guard kids.map(\.url) == targets.reversed().map { Optional($0) }, kids.map(\.title) == ["Link Page", "B Page", "Noche App Fixture"], kids.map(\.position) == [0, 1, 2], ed.isHidden else {
             return finish(false, "the folder holds \(kids.map { "\($0.title) \($0.url ?? "nil") @\($0.position)" }), card hidden \(ed.isHidden)")
         }
         guard await until(3, { chipTitles() == ["Trip"] }) else { return finish(false, "the bar (\(chipTitles())) does not show Trip") }
-        finish(violations.isEmpty, "Bookmark All Tabs opened the folder card (New Folder selected, parent Bookmarks Bar, hidden terms \(terms.text)), Cancel saved nothing, Save added Trip with the 3 tabs in order \(violations)")
+        finish(violations.isEmpty, "Bookmark All Tabs opened the folder card (New Folder selected, parent Bookmarks Bar, hidden terms \(terms.text)), Cancel saved nothing, Save added Trip with the 3 tabs in the sidebar order (newest first) \(violations)")
     }
 }
 #endif
