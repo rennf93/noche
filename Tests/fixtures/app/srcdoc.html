@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Srcdoc Page</title></head>
+<body><iframe id="f" srcdoc="&lt;audio id=a loop&gt;&lt;/audio&gt;"></iframe>
+<script>
+// A srcdoc frame is same-origin with this page: the page can give its audio element one second of silent 8 kHz mono PCM to play.
+const n = 8000, b = new DataView(new ArrayBuffer(44 + n));
+const s = (o, t) => { for (let i = 0; i < t.length; i++) b.setUint8(o + i, t.charCodeAt(i)); };
+s(0, 'RIFF'); b.setUint32(4, 36 + n, true); s(8, 'WAVEfmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+b.setUint32(24, 8000, true); b.setUint32(28, 8000, true); b.setUint16(32, 1, true); b.setUint16(34, 8, true); s(36, 'data'); b.setUint32(40, n, true);
+for (let i = 0; i < n; i++) b.setUint8(44 + i, 128);
+const f = document.getElementById('f'), url = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+const put = () => { f.contentDocument.getElementById('a').src = url; };
+if (f.contentDocument.readyState === 'complete' && f.contentDocument.getElementById('a')) put(); else f.addEventListener('load', put);
+</script></body></html>

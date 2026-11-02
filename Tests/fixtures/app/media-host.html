@@ -1,4 +1,9 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Media Host</title></head>
-<body><iframe id="f" width="300" height="100"></iframe>
-<script>document.getElementById('f').src = new URLSearchParams(location.search).get('src');</script></body></html>
+<body><div id="h"></div><iframe id="f" width="300" height="100"></iframe>
+<script>
+// ?src is the frame's address; ?shadow=1 puts the frame inside an open shadow root of #h.
+const q = new URLSearchParams(location.search), f = document.getElementById('f');
+if (q.get('shadow')) document.getElementById('h').attachShadow({ mode: 'open' }).appendChild(f);
+f.src = q.get('src');
+</script></body></html>

@@ -152,6 +152,7 @@ extension SelfTest {
             var playing = false
             for _ in 0..<50 where !playing { playing = await c.isPlayingMedia(tab) == true; if !playing { try? await Task.sleep(for: .milliseconds(100)) } }
             guard playing else { return finish(false, "\(label): a playing unmuted element is not seen as playing") }
+            if label == "a same-origin frame" { guard BrowserWindowController.lastPlayingPath == "script" else { return finish(false, "\(label): the page script's same-origin walk did not find it (found by the \(BrowserWindowController.lastPlayingPath) walk)") } }
         }
         finish(true, "a playing unmuted element is seen in an open shadow root, a same-origin frame and a cross-origin frame, and not before it plays")
     }
@@ -217,64 +218,140 @@ extension SelfTest {
         return ran
     }
 
-    /// `discard-frames` (M1.6 Task 7b): the media question asks every frame of the page. Same-site cross-origin frames (a.sub.localhost and
-    /// b.sub.localhost are two origins of one site; the frame map proves which process each frame runs in), cross-origin frames nested in
-    /// out-of-process frames and a same-site frame inside one are asked through their own execution contexts; a frame that cannot answer
-    /// makes the answer unknown; and a discard happens with no child session still attached.
+    /// `discard-frames` (M1.6 Task 7b): the media question asks every frame and every session of the page. Same-site cross-origin frames
+    /// (a.sub.localhost and b.sub.localhost are two origins of one site; the frame map proves which process each frame runs in), cross-origin
+    /// frames nested in out-of-process frames and a same-site frame inside one, a frame in an open shadow root and a srcdoc frame are asked; a
+    /// session whose tree cannot be read, a frame that cannot answer and a page whose frames answer too slowly make the answer unknown; a
+    /// session that attaches late is asked; a tab used while the page answered is not discarded; a discard happens with no child session attached.
     func discardFrames() async {
         guard await ready(), let c = ctl, let win else { return }
         func u(_ host: String, _ path: String) -> String { fixture(path).replacingOccurrences(of: "127.0.0.1", with: host) }
         func host(_ src: String) -> String { fixture("media-host.html?src=" + src) }
-        let urlA = u("a.sub.localhost", "media-host.html?src=" + u("b.sub.localhost", "audio.html"))
-        let urlB = host(u("localhost", "media-host.html?src=" + u("sub.localhost", "audio.html")))
-        let urlC = host(u("a.sub.localhost", "media-host.html?src=" + u("b.sub.localhost", "audio.html")))
-        let urlD = host(u("localhost", "media-host.html?src=" + u("sub.localhost", "b.html")))
-        let urlE = host(u("localhost", "audio.html"))
+        let urls: [(String, String)] = [
+            ("A", u("a.sub.localhost", "media-host.html?src=" + u("b.sub.localhost", "audio.html"))),
+            ("B", host(u("localhost", "media-host.html?src=" + u("sub.localhost", "audio.html")))),
+            ("C", host(u("a.sub.localhost", "media-host.html?src=" + u("b.sub.localhost", "audio.html")))),
+            ("D", host(u("localhost", "media-host.html?src=" + u("sub.localhost", "b.html")))),
+            ("S", fixture("media-host.html?shadow=1&src=" + u("localhost", "audio.html"))),
+            ("R", fixture("srcdoc.html")),
+            ("W", host(u("localhost", "b.html"))),
+        ]
         let active = c.list.items[0]
         var ids: [String: TabItem] = [:], tabs: [String: NCTab] = [:]
-        for (name, url) in [("A", urlA), ("B", urlB), ("C", urlC), ("D", urlD), ("E", urlE)] {
+        func load(_ name: String, _ url: String) async -> Bool {
             _ = win.addTab(withURL: url, activate: false)
             let n = c.list.items.count + 1
-            guard await until(20, { win.tabs.count == n && c.list.items.count == n && c.list.items.first { $0.url == url }.map({ !$0.isLoading }) == true }) else { return finish(false, "tab \(name): the page did not load") }
+            guard await until(20, { win.tabs.count == n && c.list.items.count == n && c.list.items.first { $0.url == url }.map({ !$0.isLoading }) == true }) else { return false }
             let item = c.list.items.first { $0.url == url }!  // the list is newest first: found by address
             ids[name] = item
             tabs[name] = c.engineTab(item)!
+            return true
         }
+        // E, a paused out-of-process iframe, alone with the active tab: discarded by a sweep with no child session attached when discard() runs (T7.11).
+        guard await load("E", host(u("localhost", "audio.html"))) else { return finish(false, "tab E: the page did not load") }
+        try? await Task.sleep(for: .milliseconds(1500))  // the frame's own load
+        let later = Date().addingTimeInterval(3 * 3600)
+        BrowserWindowController.discardCalls = []
+        BrowserWindowController.discardSessions = []
+        let first = await c.discardIdleTabs(now: later)
+        guard first == 1, BrowserWindowController.discardCalls == [ids["E"]!.id], await until(10, { self.entry(c, ids["E"]!.id)?.isDiscarded == true }) else { return finish(false, "the paused out-of-process iframe tab was not the one discard: \(first) discarded, attempts \(BrowserWindowController.discardCalls.count), discarded \(String(describing: entry(c, ids["E"]!.id)?.isDiscarded))") }
+        guard BrowserWindowController.discardSessions == [0] else { return finish(false, "discard() reached the engine with child sessions attached: \(BrowserWindowController.discardSessions)") }
+        for (name, url) in urls { guard await load(name, url) else { return finish(false, "tab \(name): the page did not load") } }
         try? await Task.sleep(for: .milliseconds(1500))  // the frames' own loads
         // Which process each frame runs in, read from the frame map and the sessions: A's frames share one process (no child session), the others have out-of-process frames.
         let mapA = await frameMap(tabs["A"]!), mapB = await frameMap(tabs["B"]!), mapC = await frameMap(tabs["C"]!)
         guard mapA.frames.count == 2, mapA.attached == 0 else { return finish(false, "A: want two frames in one process (no child session), got \(mapA.frames.count) frames and \(mapA.attached) child sessions: \(mapA.frames.map(\.url))") }
         guard mapB.frames.count == 3, mapB.attached == 2 else { return finish(false, "B: want three frames and two child sessions (a frame nested in an out-of-process frame), got \(mapB.frames.count) and \(mapB.attached)") }
         guard mapC.frames.count == 3, mapC.attached >= 1, mapC.attached <= 2 else { return finish(false, "C: want three frames and a child session or two, got \(mapC.frames.count) and \(mapC.attached)") }
-        let cases: [(String, String, String)] = [("A", "b.sub.localhost", "same-site cross-origin frame"), ("B", "sub.localhost", "cross-origin frame nested in an out-of-process frame"), ("C", "b.sub.localhost", "same-site frame inside an out-of-process frame")]
+        let play = "document.getElementById('a').play().catch(e => 0); 1"
+        let cases: [(String, String, String)] = [("A", "b.sub.localhost", "same-site cross-origin frame"), ("B", "sub.localhost", "cross-origin frame nested in an out-of-process frame"), ("C", "b.sub.localhost", "same-site frame inside an out-of-process frame"), ("S", "localhost", "cross-origin frame inside an open shadow root")]
+        func playsSoon(_ tab: NCTab) async -> Bool {
+            var playing = false
+            for _ in 0..<50 where !playing { playing = await c.isPlayingMedia(tab) == true; if !playing { try? await Task.sleep(for: .milliseconds(100)) } }
+            return playing
+        }
         for (name, frameHost, label) in cases {
             let tab = tabs[name]!
             guard await c.isPlayingMedia(tab) == false else { return finish(false, "\(label): reads as playing, or unknown, before anything plays") }
-            guard await runInFrame(tab, host: frameHost, file: "audio.html", js: "document.getElementById('a').play().catch(e => 0); 1") else { return finish(false, "\(label): the frame's script did not run") }
-            var playing = false
-            for _ in 0..<50 where !playing { playing = await c.isPlayingMedia(tab) == true; if !playing { try? await Task.sleep(for: .milliseconds(100)) } }
-            guard playing else { return finish(false, "\(label): a playing unmuted element is not seen as playing") }
+            guard await runInFrame(tab, host: frameHost, file: "audio.html", js: play) else { return finish(false, "\(label): the frame's script did not run") }
+            guard await playsSoon(tab) else { return finish(false, "\(label): a playing unmuted element is not seen as playing") }
         }
-        // D: the innermost frame's page spins, so it cannot say: unknown, not discarded.
+        // A srcdoc frame (same-origin with its page): the page script reaches it, and says so.
+        guard await c.isPlayingMedia(tabs["R"]!) == false else { return finish(false, "a srcdoc frame: reads as playing, or unknown, before anything plays") }
+        guard await evaluate(tabs["R"]!, "document.getElementById('f').contentDocument.getElementById('a').play().catch(e => 0); 1") != nil else { return finish(false, "a srcdoc frame: the page script did not run") }
+        guard await playsSoon(tabs["R"]!) else { return finish(false, "a srcdoc frame: a playing unmuted element is not seen as playing") }
+        guard BrowserWindowController.lastPlayingPath == "script" else { return finish(false, "a srcdoc frame: the playing element was found by the \(BrowserWindowController.lastPlayingPath) walk, want the page script") }
+        // Isolated worlds over time (M4): 50 questions on A ask its frame through |Page.createIsolatedWorld| each time; the world must be one.
+        BrowserWindowController.isolatedContexts = [:]
+        BrowserWindowController.testFailTree = false
+        let sessionsBefore = tabs["A"]!.childSessionIds.count
+        for _ in 0..<50 { _ = await c.isPlayingMedia(tabs["A"]!) }
+        let worlds = BrowserWindowController.isolatedContexts
+        // A plays, so its question ends at the first answer; the same-site frame is asked as a non-root frame of the top tree.
+        line("info", "isolated worlds after 50 questions on A: \(worlds.map { "\($0.key.prefix(8)) -> \($0.value.count) context(s)" }.sorted()), child sessions before \(sessionsBefore) after \(tabs["A"]!.childSessionIds.count)")
+        guard !worlds.isEmpty, worlds.values.allSatisfy({ $0.count == 1 }) else { return finish(false, "50 questions made more than one isolated world per frame: \(worlds.mapValues(\.count))") }
+        // A session whose frame tree cannot be read (an injected error): unknown, nothing is discarded (W, paused, would be).
+        BrowserWindowController.discardCalls = []
+        BrowserWindowController.testFailTree = true
+        let blind = await c.discardIdleTabs(now: later)
+        BrowserWindowController.testFailTree = false
+        guard BrowserWindowController.discardCalls.isEmpty, blind == 0, entry(c, ids["W"]!.id)?.isDiscarded == false else { return finish(false, "a session whose frame tree gave an error: a tab with a paused out-of-process iframe was offered to the engine to discard (\(blind) discarded)") }
+        // The attach that lists the child sessions gives an error (an injected one): unknown, nothing is discarded.
+        BrowserWindowController.testFailAttach = true
+        let attachBlind = await c.discardIdleTabs(now: later)
+        let attachAnswer = await c.isPlayingMedia(tabs["B"]!)
+        BrowserWindowController.testFailAttach = false
+        guard BrowserWindowController.discardCalls.isEmpty, attachBlind == 0, attachAnswer == nil else { return finish(false, "an attach that gave an error: \(attachBlind) discarded (attempts \(BrowserWindowController.discardCalls.count)), the question on B says \(String(describing: attachAnswer)), want unknown (nil)") }
+        // A session that attaches after the first walk is asked too (every session is held back from the first walk; B's innermost plays).
+        BrowserWindowController.testHideLate = true
+        let lateAnswer = await c.isPlayingMedia(tabs["B"]!)
+        BrowserWindowController.testHideLate = false
+        guard lateAnswer == true else { return finish(false, "a session that attached after the first walk: the question says \(String(describing: lateAnswer)), want playing") }
+        // W: its frame's page spins for 2.5 s, so the sweep waits on it; the tab is selected and left again meanwhile, so it is not discarded.
+        // D: its innermost frame spins for 25 s, so it cannot say (unknown), within the question's deadline.
         guard await runInFrame(tabs["D"]!, host: "sub.localhost", file: "b.html", js: "setTimeout(() => { const t = Date.now(); while (Date.now() - t < 25000) {} }, 0); 1") else { return finish(false, "D: the frame's script did not run") }
-        try? await Task.sleep(for: .milliseconds(300))
+        guard await runInFrame(tabs["W"]!, host: "localhost", file: "b.html", js: "setTimeout(() => { const t = Date.now(); while (Date.now() - t < 2500) {} }, 0); 1") else { return finish(false, "W: the frame's script did not run") }
+        BrowserWindowController.discardCalls = []
+        BrowserWindowController.discardSessions = []
+        let box = SweepBox()
+        Task { @MainActor in box.n = await c.discardIdleTabs(now: later); box.done = true }
+        try? await Task.sleep(for: .milliseconds(400))
+        guard await select(c, ids["W"]!.id), await select(c, active.id) else { return finish(false, "W could not be selected and left") }
+        guard await until(30, { box.done }) else { return finish(false, "the sweep did not return in 30 s") }
+        let tried = BrowserWindowController.discardCalls
+        for name in ["A", "B", "C", "D", "S", "R"] { guard !tried.contains(ids[name]!.id), entry(c, ids[name]!.id)?.isDiscarded == false else { return finish(false, "tab \(name) was offered to the engine to discard") } }
+        guard !tried.contains(ids["W"]!.id), entry(c, ids["W"]!.id)?.isDiscarded == false else { return finish(false, "the tab used while the page answered was discarded") }
+        guard box.n == 0, tried.isEmpty else { return finish(false, "the sweep with W in use discarded \(box.n) tabs (attempts \(tried.count))") }
+        // D alone: the question gives unknown within its deadline.
         let started = Date()
         let busy = await c.isPlayingMedia(tabs["D"]!)
         let took = Date().timeIntervalSince(started)
         guard busy == nil else { return finish(false, "a frame that cannot answer: the question says \(String(describing: busy)), want unknown (nil)") }
         guard took < 8 else { return finish(false, "a frame that cannot answer: the question took \(took) s, want under 8") }
-        // The sweep: three tabs playing and the one that cannot say are kept; E (a paused out-of-process iframe) is discarded with no child session attached.
+        // The tab is closed while its frame is being asked: the question ends, the sweep goes on past it to the last tab (seven questions: W, R, S, D, C, B, A; W, idle again, is discarded), nothing stays attached.
         BrowserWindowController.discardCalls = []
-        BrowserWindowController.discardSessions = []
-        let later = Date().addingTimeInterval(3 * 3600)
-        let n = await c.discardIdleTabs(now: later)
-        let tried = BrowserWindowController.discardCalls
-        for name in ["A", "B", "C", "D"] { guard !tried.contains(ids[name]!.id), entry(c, ids[name]!.id)?.isDiscarded == false else { return finish(false, "tab \(name) was offered to the engine to discard") } }
-        guard n == 1, tried == [ids["E"]!.id], await until(10, { self.entry(c, ids["E"]!.id)?.isDiscarded == true }) else { return finish(false, "the paused out-of-process iframe tab was not the one discard: \(n) discarded, attempts \(tried.count), discarded \(String(describing: entry(c, ids["E"]!.id)?.isDiscarded))") }
-        guard BrowserWindowController.discardSessions == [0] else { return finish(false, "discard() reached the engine with child sessions attached: \(BrowserWindowController.discardSessions)") }
-        guard entry(c, active.id)?.isDiscarded == false else { return finish(false, "the active tab was discarded") }
-        finish(true, "a same-site cross-origin frame (one process), a cross-origin frame nested in an out-of-process frame and a same-site frame inside one are seen playing and kept; a frame that cannot answer gives unknown within \(String(format: "%.1f", took)) s and is kept; a paused out-of-process iframe tab is discarded with 0 child sessions attached")
+        BrowserWindowController.mediaQuestions = 0
+        let box2 = SweepBox()
+        Task { @MainActor in box2.n = await c.discardIdleTabs(now: later); box2.done = true }
+        try? await Task.sleep(for: .milliseconds(800))
+        let doomed = tabs["D"]!
+        doomed.close()
+        guard await until(20, { box2.done }) else { return finish(false, "the sweep did not return in 20 s after the tab being asked was closed") }
+        guard box2.n == 1, BrowserWindowController.discardCalls == [ids["W"]!.id], BrowserWindowController.mediaQuestions == 7, doomed.childSessionIds.isEmpty, await until(10, { win.tabs.count == 8 }) else { return finish(false, "a tab closed while its frame was being asked: \(box2.n) discarded, attempts \(BrowserWindowController.discardCalls.count), \(BrowserWindowController.mediaQuestions) questions (want 7), \(doomed.childSessionIds.count) child sessions, \(win.tabs.count) engine tabs") }
+        // Ten frames, each answering after 1.6 s from a timer, one after the other (16 s unbounded, over 3x the deadline on any machine): the question stops at its deadline with unknown.
+        guard await load("F", fixture("spin-frames.html?n=10")) else { return finish(false, "F: the page did not load") }
+        try? await Task.sleep(for: .milliseconds(2500))
+        BrowserWindowController.testFrameDelay = 1.6
+        let t0 = Date()
+        let slow = await c.isPlayingMedia(tabs["F"]!)
+        let slowTook = Date().timeIntervalSince(t0)
+        BrowserWindowController.testFrameDelay = 0
+        guard slow == nil else { return finish(false, "ten slow frames: the question says \(String(describing: slow)), want unknown (nil)") }
+        guard slowTook < BrowserWindowController.mediaQuestionDeadline + 1.5 else { return finish(false, "ten slow frames: the question took \(String(format: "%.1f", slowTook)) s, want under the deadline \(BrowserWindowController.mediaQuestionDeadline) s plus 1.5") }
+        guard tabs["F"]!.childSessionIds.isEmpty else { return finish(false, "ten slow frames: \(tabs["F"]!.childSessionIds.count) child sessions were still attached after the question") }
+        finish(true, "same-site, nested, shadow-root and srcdoc frames are seen playing; a session with no readable tree and a frame that cannot answer (\(String(format: "%.1f", took)) s) give unknown; a late session is asked; a tab used meanwhile is kept; a closed tab ends its question; ten slow frames stop at the deadline (\(String(format: "%.1f", slowTook)) s); a paused out-of-process iframe tab is discarded with 0 child sessions attached")
     }
+
 }
 
 final class SweepBox: @unchecked Sendable { var n = 0, done = false }

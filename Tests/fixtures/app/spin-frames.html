@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Spin Frames</title></head>
+<body><script>
+// ?n frames, each from its own host f1.localhost ... (each a site of its own, so its own renderer process), each serving b.html.
+const n = Number(new URLSearchParams(location.search).get('n') || 8);
+for (let i = 1; i <= n; i++) { const f = document.createElement('iframe'); f.src = 'http://f' + i + '.localhost:' + location.port + '/b.html'; document.body.appendChild(f); }
+</script></body></html>

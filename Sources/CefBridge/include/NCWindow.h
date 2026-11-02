@@ -225,6 +225,8 @@ NC_EXPORT NS_SWIFT_UI_ACTOR
 - (void)attachChildTargets:(BOOL)on timeout:(NSTimeInterval)timeout completion:(void (^)(NSArray<NSString *> *sessionIds, NSString *_Nullable error))completion;
 /// The flat sessions attached now (the tab's own auto attach and any a child session's auto attach made), nested ones included.
 @property (nonatomic, readonly) NSArray<NSString *> *childSessionIds;
+/// Child session ids the app has already logged as gone, once each; the set belongs to the tab and goes with it.
+@property (nonatomic, readonly) NSMutableSet<NSString *> *loggedStaleSessions;
 /// Any DevTools method with |paramsJSON| (a JSON object) on a flat |sessionId| (nil: the tab's own page) and a |timeout| in seconds (0: none).
 /// |resultJSON| is the JSON of the whole `result` object (not only a Runtime value); on a timeout it is nil and the error is "timed out"
 /// (a late reply is dropped), on a CDP error nil and the CDP message. The completion runs exactly once.

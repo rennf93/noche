@@ -66,6 +66,7 @@ typedef void (^NCEvalCompletion)(NSString* _Nullable json, NSString* _Nullable e
   CefRefPtr<CefRegistration> _registration;
   NSMutableDictionary<NSNumber*, NCEvalCompletion>* _pending;
   NSMutableDictionary<NSString*, NSNumber*>* _childSessions;  // flat sessions of attached iframe targets (every session's, nested ones too)
+  NSMutableSet<NSString*>* _loggedStale;                      // child session ids the app already said are gone (dies with the tab)
   NSMutableSet<NSNumber*>* _wholeResult;                      // ids of |callDevToolsMethod:| calls: their reply is the whole |result|
   int _nextId;
   NSInteger _faviconGeneration;
@@ -105,6 +106,7 @@ static BOOL g_force_html_fullscreen = NO;
     _pending = [NSMutableDictionary dictionary];
     _childSessions = [NSMutableDictionary dictionary];
     _wholeResult = [NSMutableSet set];
+    _loggedStale = [NSMutableSet set];
   }
   return self;
 }
@@ -248,6 +250,8 @@ static BOOL g_force_html_fullscreen = NO;
         completion:^(NSString* json, NSString* error) { completion(error ? @[] : [self->_childSessions allKeys], error); }];
 }
 
+- (NSMutableSet<NSString*>*)loggedStaleSessions { return _loggedStale; }
+
 - (NSArray<NSString*>*)childSessionIds { return [_childSessions allKeys]; }
 
 - (void)callDevToolsMethod:(NSString*)method
@@ -258,6 +262,10 @@ static BOOL g_force_html_fullscreen = NO;
   id params = [NSJSONSerialization JSONObjectWithData:[paramsJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
   if (![params isKindOfClass:NSDictionary.class]) {
     dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"bad params"); });
+    return;
+  }
+  if (!_browser) {  // nothing is sent, so no id is taken
+    dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"tab closed"); });
     return;
   }
   const int rid = _nextId + 1;  // the id |sendMethod:| is about to use

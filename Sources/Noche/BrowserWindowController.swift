@@ -154,7 +154,6 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var leftAt: [TabID: Date] = [:]
     var discardTimer: Timer?
     var sweeping = false   // a discard sweep is running (its media questions are asynchronous)
-    var staleSessionsLogged = Set<String>()   // child sessions a media question found gone, said once each
 #if NOCHE_TESTHOOKS
     /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
     /// every time it moved, and where Copy URL writes.
@@ -163,6 +162,16 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     static var discardCalls: [TabID] = []
     /// Test support: how many child sessions were attached to the tab at each |discardCalls| entry (T7.11: none).
     static var discardSessions: [Int] = []
+    /// Test support for the media question: a child session's frame tree gives an error (an injected one), the last child session is hidden from
+    /// the first walk (it "attaches late"), which path last answered "playing" ("script": the page script, "frame": a frame walk), and every
+    /// execution context |Page.createIsolatedWorld| gave, by frame id.
+    static var testFailTree = false, testHideLate = false, testFailAttach = false
+    static var lastPlayingPath = ""
+    /// Seconds each frame's or child session's answer waits on a timer (0: no wait).
+    static var testFrameDelay: TimeInterval = 0
+    /// How many media questions were asked (the closed-tab step counts how far a sweep got).
+    static var mediaQuestions = 0
+    static var isolatedContexts: [String: Set<Int>] = [:]
     static var commandLog: [Int] = []
     static var pasteboard = NSPasteboard.general
     /// Print, Inspect Elements and JavaScript Console are counted but not run (a hidden run must not raise print or DevTools windows).
