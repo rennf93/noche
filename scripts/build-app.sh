@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # usage: build-app.sh [--product <SwiftPM product>] [--app-name <name>] [--release]
 # NOCHE_TESTHOOKS=1 (read by Package.swift, inherited from the environment) compiles the self-test harness into the app.
+# That variant keeps its own SwiftPM scratch folder (.build/hooks) and bundle (build/hooks/<name>.app), so it never rebuilds the plain app.
 # Sandbox is on by default; NOCHE_NO_SANDBOX=1 opts out. --release omits the dev-only NocheDevBuild plist key.
 set -euo pipefail
 
@@ -35,15 +36,17 @@ if [ "${NOCHE_NO_SANDBOX:-}" = 1 ]; then echo "sandbox: off (NOCHE_NO_SANDBOX=1)
 
 "$ROOT/scripts/build-cef-wrapper.sh"
 cd "$ROOT"
-BIN="$(swift build -c release --show-bin-path)"
+SCRATCH=(); OUT="$ROOT/build"
+if [ "${NOCHE_TESTHOOKS:-}" = 1 ]; then SCRATCH=(--scratch-path "$ROOT/.build/hooks"); OUT="$ROOT/build/hooks"; fi
+BIN="$(swift build -c release ${SCRATCH[@]+"${SCRATCH[@]}"} --show-bin-path)"
 # SwiftPM does not track the wrapper archive, so a rebuilt wrapper needs a forced relink.
 for b in "$PRODUCT" NocheHelper; do
   [ ! "$ROOT/build/cef/libcef_dll_wrapper.a" -nt "$BIN/$b" ] || rm -f "$BIN/$b"
 done
-swift build -c release --product "$PRODUCT"
-swift build -c release --product NocheHelper
+swift build -c release ${SCRATCH[@]+"${SCRATCH[@]}"} --product "$PRODUCT"
+swift build -c release ${SCRATCH[@]+"${SCRATCH[@]}"} --product NocheHelper
 
-APP="$ROOT/build/$NAME.app"
+APP="$OUT/$NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
 cp "$BIN/$PRODUCT" "$APP/Contents/MacOS/$NAME"
@@ -60,7 +63,7 @@ fi
 # The built-in site list for command bar suggestions (hand-written, see Resources/App/Sites.json).
 mkdir -p "$APP/Contents/Resources"
 cp "$ROOT/Resources/App/Sites.json" "$APP/Contents/Resources/Sites.json"
-ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+ditto --clone "$FRAMEWORK" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 # helper suffix : bundle id suffix
 for variant in ":" " (Alerts):.alerts" " (GPU):.gpu" " (Renderer):.renderer"; do

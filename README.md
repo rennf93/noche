@@ -33,6 +33,6 @@ Run the app with `scripts/run.sh`, not `open build/Noche.app`: it copies the bun
 
 Noche's engine is CEF 156 built from source on an external volume; see [engine/README.md](engine/README.md).
 
-App self-tests (`scripts/app-test.sh hidden close-last quit-many`) build Noche.app with `NOCHE_TESTHOOKS=1` and drive it hidden through `--selftest <check>`; see the header of that script.
+App self-tests (`scripts/app-test.sh hidden close-last quit-many`) build Noche.app with `NOCHE_TESTHOOKS=1` (into `build/hooks/`, scratch folder `.build/hooks`; the plain `build/Noche.app` is left alone) and drive it hidden through `--selftest <check>`; see the header of that script.
 
 Engine probes (`scripts/probe-engine.sh <check>...`) build and run `Probes/EngineProbe` against the vendored CEF; see the header of that script.

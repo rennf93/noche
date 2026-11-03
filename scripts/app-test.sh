@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: app-test.sh <check>...   (a11y-labels quit-100 quit-early quit-with-context-menu quit-menu-late quit-menu-stuck window-frame no-window close-beforeunload chromium-restore-relaunch chromium-restore-crash-relaunch persist-relaunch quit-close-relaunch quit-close-dirty-relaunch window-close-cancel reopen-closed reopen-closed-relaunch crash-mid-write corrupt-store reopen-identity frame-storm store-unavailable tab-chords move-tab-relaunch history-record cb-layout cb-open cb-motion cb-go cb-escape cb-arrows cb-inline cb-switch-tab cb-outside cb-nonet cb-nonet-default cb-history hidden close-last quit-many web-insets layout tabs-keys tabs-rapid ext-count navigate blank-link long-title load-error menu-diff menu-disabled menu-actions sidebar-toggle sidebar-scroll shortcuts-once eval-async devtools-any-path no-zombie-tab devtools-quit devtools-close-tab load-error-link focus-return newtab-surface ctx-page ctx-tab ctx-sidebar find zoom find-selection find-restart find-nav find-engine find-escape find-escape-page find-escape-guards zoom-engine pw-on bridge-dl bridge-perm dl-list dl-controls dl-tab-close dl-quit-relaunch dl-ring perm-prompt perm-remember perm-remember-relaunch perm-no-bubble perm-dismiss perm-guards perm-forget perm-iframe title-throttle title-flush history-window bm-add bm-bar bm-open bm-manager bm-suggest bm-all-tabs cb-readpath cb-reopen perm-origins perm-dismiss-id window-front quit-gap-close-relaunch quit-gap-tab-relaunch history-cap title-window-close window-recency dl-remove-relaunch bm-bar-relaunch history-dock dl-restored-cancel-relaunch dl-restored-silent-relaunch dl-cancel-slow bm-dupes bm-menu-lazy dl-clear-write dl-reuse dl-file-missing dl-rows bm-remove-undo cb-reopen-late dl-file-stats cb-reopen-reqlate bm-undo-valid sidebar-geometry sidebar-columns sidebar-scale min-width min-width-relaunch pin-toggle pin-dormant pin-reset pin-launch pin-launch-held reopen-container pin-reveal discard-click discard-policy discard-hang discard-media discard-frames groups group-colors group-menus rename-tab group-icons group-restore-relaunch group-rename-scroll rename-focus drag-reorder drag-autoexpand drag-cancel drag-property drag-haptic drag-relaunch move-window merge-windows revive-window search-tabs ctrl-tab shortcuts-order close-all warn-last-tab new-tab-top new-tab-top-relaunch cleanup auto-cleanup)
-# Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1), serves Tests/fixtures/app on a free localhost port and
+# Builds Noche.app with the self-test hooks (NOCHE_TESTHOOKS=1) into build/hooks/ (its own .build/hooks scratch folder, so the plain build/Noche.app is never touched), serves Tests/fixtures/app on a free localhost port and
 # runs `Noche --selftest <check> --selftest-url <url>` once per check by direct exec (never `open`). Prints the app's
 # NOCHE_TEST lines and exits 0 only if every check printed "pass", exited 0 and never hit the shutdown watchdog.
 # Profile: ~/Library/Application Support/Noche Test (wiped before each check), never the dev profile.
@@ -20,10 +20,20 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP="$ROOT/build/hooks/Noche.app"
+BIN="$APP/Contents/MacOS/Noche"
+# The plain app (build/Noche.app, never built here) must hold no test hooks: prints the NOCHE_TEST string count and fails when it is not 0.
+plain_hook_strings() {
+  local P="$ROOT/build/Noche.app/Contents/MacOS/Noche" N=0
+  [ ! -e "$P" ] || N="$(strings "$P" | grep -c NOCHE_TEST || true)"
+  echo "$N"; [ "$N" = 0 ]
+}
 # --negative: run each check with its negative-control switch and expect it to FAIL (exit 0 only when all expected-FAIL ones do).
 # devtools-quit with NOCHE_TEST_DEVTOOLS_LAST=1 is recorded only: the engine crash it targets has not reproduced in a hidden run.
 if [ "${1:-}" = "--negative" ]; then
   BAD=0
+  # One hooks build for the whole loop; the nested calls (NOCHE_APPTEST_PREBUILT=1, set only below) skip it and fail when the binary is missing.
+  NOCHE_TESTHOOKS=1 "$ROOT/scripts/build-app.sh" >&2 || { echo "NEGATIVE hooks build failed"; exit 1; }
   # An expected FAIL counts only when the check itself printed `NOCHE_TEST <check> fail <detail>` and the app exited 1 on its own
   # verdict: a build failure, crash, timeout, missing binary or crash report is a failure of --negative, not the expected one.
   # The lines this script adds itself (watchdog, no-output, exit-rc=, frontmost, crash report, helpers) are not the check's own.
@@ -34,7 +44,7 @@ if [ "${1:-}" = "--negative" ]; then
   for PAIR in "${PAIR_LIST[@]}"; do
     set -- $PAIR
     NEG_OUT="$(mktemp)"
-    if env "$2" NOCHE_APPTEST_KEEP_HOOKS=1 "$0" "$1" >"$NEG_OUT" 2>/dev/null; then RES=pass; else RES=fail; fi
+    if env "$2" NOCHE_APPTEST_PREBUILT=1 "$0" "$1" >"$NEG_OUT" 2>/dev/null; then RES=pass; else RES=fail; fi
     OWN="$(grep -E "^NOCHE_TEST $1 fail " "$NEG_OUT" | grep -vE "$SCRIPT_LINES" | head -1 || true)"
     OTHER="$(grep -E "$SCRIPT_LINES" "$NEG_OUT" | grep -vE "^NOCHE_TEST $1 fail exit-rc=1 watchdog=0\$" | head -1 || true)"
     rm -f "$NEG_OUT"
@@ -47,8 +57,9 @@ if [ "${1:-}" = "--negative" ]; then
       *) echo "NEGATIVE $1 with $2: $RES (recorded, not asserted)" ;;
     esac
   done
-  # The app left on disk is the plain one.
-  env -u NOCHE_TESTHOOKS "$ROOT/scripts/build-app.sh" >&2 || { echo "NEGATIVE plain rebuild failed"; BAD=1; }
+  # The plain app was never rebuilt here; it must still hold no test hooks.
+  [ -e "$ROOT/build/Noche.app/Contents/MacOS/Noche" ] || echo "NOCHE_TEST plain-app info absent"
+  PLAIN_N="$(plain_hook_strings)" || { echo "NEGATIVE plain app holds $PLAIN_N NOCHE_TEST strings"; BAD=1; }
   exit "$BAD"
 fi
 [ $# -gt 0 ] || { echo "usage: app-test.sh <check>... | --negative" >&2; exit 2; }
@@ -57,9 +68,11 @@ for C in "$@"; do
 done
 PROFILE="$HOME/Library/Application Support/Noche Test"
 [ -n "$HOME" ] && [ -n "$PROFILE" ] && [[ "$PROFILE" == */"Noche Test" ]] || { echo "refusing to run: bad PROFILE '$PROFILE'" >&2; exit 2; }
-APP="$ROOT/build/Noche.app"
-BIN="$APP/Contents/MacOS/Noche"
-NOCHE_TESTHOOKS=1 "$ROOT/scripts/build-app.sh" >&2
+if [ "${NOCHE_APPTEST_PREBUILT:-}" = 1 ]; then
+  [ -x "$BIN" ] || { echo "NOCHE_TEST prebuilt fail hooks binary missing: $BIN"; exit 1; }
+else
+  NOCHE_TESTHOOKS=1 "$ROOT/scripts/build-app.sh" >&2
+fi
 
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 # The server's access log is the independent record of the requests cb-nonet counts (the app reads it through NOCHE_TEST_SERVER_LOG).
@@ -241,8 +254,9 @@ for CHECK in "$@"; do
   done
 done
 rm -rf "$PROFILE"
-# The app left on disk is the plain one (no test hooks), unless --negative asked to keep the hook build between runs.
-if [ "${NOCHE_APPTEST_KEEP_HOOKS:-}" != 1 ]; then
-  env -u NOCHE_TESTHOOKS "$ROOT/scripts/build-app.sh" >&2 || { echo "NOCHE_TEST plain-rebuild fail"; FAILED=1; }
+# The plain app is never rebuilt here; it must still hold no test hooks (--negative checks once after its loop).
+if [ "${NOCHE_APPTEST_PREBUILT:-}" != 1 ]; then
+  [ -e "$ROOT/build/Noche.app/Contents/MacOS/Noche" ] || echo "NOCHE_TEST plain-app info absent"
+  PLAIN_N="$(plain_hook_strings)" || { echo "NOCHE_TEST plain-app fail build/Noche.app holds $PLAIN_N NOCHE_TEST strings"; FAILED=1; }
 fi
 exit "$FAILED"

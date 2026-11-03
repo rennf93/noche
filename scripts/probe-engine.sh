@@ -30,7 +30,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 for C in "$@"; do
   [[ "$C" =~ ^[a-z0-9-]+$ ]] || { echo "bad check name: $C" >&2; exit 2; }
 done
-APP="$ROOT/build/Noche Probe.app"
+APP="$ROOT/build/${NOCHE_TESTHOOKS:+hooks/}Noche Probe.app" # a NOCHE_TESTHOOKS=1 build lands in build/hooks (build-app.sh)
 BIN="$APP/Contents/MacOS/Noche Probe"
 if [ -n "${NOCHE_PROBE_STUB_BIN:-}" ]; then BIN="$NOCHE_PROBE_STUB_BIN"
 else NOCHE_PROBES=1 "$ROOT/scripts/build-app.sh" --product EngineProbe --app-name "Noche Probe" >&2; fi
