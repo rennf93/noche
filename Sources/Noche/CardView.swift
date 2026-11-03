@@ -47,6 +47,14 @@ final class BackdropView: NSView {
 final class ChromeOverlayView: NSView {
     override var isFlipped: Bool { true }
     var onResize: (() -> Void)?
+    /// The pointer left the window (the hover reveal hides the sidebar then).
+    var onExit: (() -> Void)?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseExited(with event: NSEvent) { onExit?() }
     override func hitTest(_ point: NSPoint) -> NSView? {
         let v = super.hitTest(point)
         return v === self ? nil : v

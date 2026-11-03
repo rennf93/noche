@@ -86,7 +86,7 @@ extension BrowserWindowController {
 
     /// Undo of a run: one store transaction takes the tabs out of the archive and each comes back dormant to the container it left, at its index
     /// (a group that is gone since means the day list), in the reverse of the order they left so every index is what it was. A tab whose id is in the list
-    /// already stays archived (the store and the list agree) and the others are restored. Each restored tab is stamped as used now (the run's clock), so the next
+    /// is skipped (it is not restored again), and the next window save writes its row live (the upsert sets `archivedAt = NULL`); the others are restored. Each restored tab is stamped as used now (the run's clock), so the next
     /// hourly run does not archive it again.
     func undoCleanup(_ run: [ArchivedTab]) {
         let ids = run.map(\.item.id).filter { item(withID: $0) == nil }

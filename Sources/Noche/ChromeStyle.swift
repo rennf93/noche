@@ -114,6 +114,18 @@ enum ChromeStyle {
     static let showDuration: TimeInterval = 0.110
     static let hideDuration: TimeInterval = 0.125
     static let overshootBack: CGFloat = 0.55             // ease-out-back constant: peak at 1.0103, 1.96 pt on a 191 pt slide
+    /// The curve of both slides (the card's and the hover reveal's) at |t| in 0...1: ease-out-back for a show, cubic ease-out for a hide.
+    static func eased(_ t: Double, overshoot: Bool) -> CGFloat {
+        let u = CGFloat(t) - 1
+        return overshoot ? 1 + (overshootBack + 1) * u * u * u + overshootBack * u * u : 1 + u * u * u
+    }
+    // M1.6 Task 8: the hover reveal (spec row 107). B: the sidebar's panel while it overlays the page (the page is not vibrancy, so the sidebar needs a fill of its own).
+    static let revealFill = NSColor(hex: 0x181818)
+    static let revealStrip: CGFloat = 6                  // P: the strip at the window's left edge (x 0 to 6) that reveals; the card's inset
+    static let revealDwell: TimeInterval = 0.150         // P: the pointer rests in the strip this long
+    static let revealHideDelay: TimeInterval = 0.400     // P: the pointer is away from the sidebar (widened by revealMargin) this long
+    static let revealMargin: CGFloat = 8                 // P
+    static let revealAnswerWait: TimeInterval = 0.300    // B: the page's answer to "is a text field focused" is waited for this long
 
     /// A tinted SF Symbol.
     static func symbol(_ name: String, size: CGFloat, color: NSColor) -> NSImage? {
@@ -196,14 +208,16 @@ struct ChromeLayout {
     /// The bookmarks bar's height when it pushes the page down (0 when hidden, and on the New Tab surface, where it sits over the surface).
     var barHeight: CGFloat = 0
     var barShown = false
+    /// How far the hover reveal has slid the sidebar in (0 hidden, 1 on screen): the sidebar sits where the card or the reveal puts it, whichever is further in.
+    var reveal: CGFloat = 0
 
     var card: CGRect {
         CGRect(x: cardX, y: ChromeStyle.inset, width: size.width - ChromeStyle.inset - cardX, height: size.height - 2 * ChromeStyle.inset)
     }
     var toolbar: CGRect { CGRect(x: cardX, y: ChromeStyle.inset, width: card.width, height: ChromeStyle.toolbarHeight) }
-    /// The sidebar slides with the card: x -197 when the card is at 6, 0 when it is at 197.
+    /// The sidebar slides with the card: x -197 when the card is at 6, 0 when it is at 197 (or when the hover reveal has it on screen over the page).
     var sidebar: CGRect {
-        let s = (cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset)
+        let s = max((cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset), reveal)
         return CGRect(x: -ChromeStyle.sidebarWidth + ChromeStyle.sidebarWidth * s, y: 0, width: ChromeStyle.sidebarWidth, height: size.height)
     }
     /// What the bar takes at the top of the card on every surface it shows on (over the New Tab surface too, where it pushes nothing).

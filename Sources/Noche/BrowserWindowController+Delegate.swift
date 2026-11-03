@@ -299,6 +299,7 @@ extension BrowserWindowController {
 
     func windowDidClose(_ window: NCWindow) {
         animationTimer?.invalidate()
+        reveal.teardown()
         discardTimer?.invalidate()
         madeCommandBar?.teardown()
         madeSwitcher?.teardown()

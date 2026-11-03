@@ -169,6 +169,7 @@ final class SelfTest {
             case "search-tabs": await searchTabs()
             case "ctrl-tab": await ctrlTabCheck()
             case "shortcuts-order": await shortcutsOrder()
+            case "hover-reveal": await hoverReveal()
             case "cleanup": await cleanup()
             case "auto-cleanup": await autoCleanup()
             case "close-all": await closeAll()

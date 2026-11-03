@@ -152,6 +152,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var cardX = ChromeStyle.sidebarWidth
     var animation: (start: TimeInterval, from: CGFloat, to: CGFloat, duration: TimeInterval, overshoot: Bool)?
     var animationTimer: Timer?
+    /// The hover reveal of the hidden sidebar (Task 8).
+    lazy var reveal = SidebarRevealController(owner: self)
     /// When each tab last stopped being the active one: a tab used for hours is idle from when it was left, not from when it was selected.
     var leftAt: [TabID: Date] = [:]
     var discardTimer: Timer?
@@ -269,7 +271,11 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         host.addSubview(overlay, positioned: .above, relativeTo: nil)
         border.frame = overlay.bounds
         border.autoresizingMask = [.width, .height]
+        overlay.addSubview(reveal.backing)
         overlay.addSubview(sidebar)
+        overlay.addSubview(reveal.strip)
+        overlay.onExit = { [weak self] in self?.reveal.pointerLeft() }
+        reveal.start()
         overlay.addSubview(toolbar)
         findBar.isHidden = true
         overlay.addSubview(findBar)
@@ -320,7 +326,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 
     func applyLayout() {
         guard installed else { return }
-        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX, barHeight: barPushesPage && !BarHook.on("BM_NOPUSH") ? ChromeStyle.bookmarksBarHeight : 0, barShown: barVisible)
+        let layout = ChromeLayout(size: overlay.bounds.size, cardX: cardX, barHeight: barPushesPage && !BarHook.on("BM_NOPUSH") ? ChromeStyle.bookmarksBarHeight : 0, barShown: barVisible, reveal: reveal.progress)
         backdrop.card.frame = layout.card
         bookmarksBar.frame = layout.bookmarksBar
         bookmarksBar.isHidden = !barVisible
@@ -329,7 +335,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         toolbar.frame = layout.toolbar
         findBar.frame = layout.findBar
         permissionPrompt.frame = layout.permissionPrompt
-        sidebar.frame = layout.sidebar
+        placeSidebar()
+        reveal.strip.frame = CGRect(x: 0, y: 0, width: ChromeStyle.revealStrip, height: layout.size.height)
         window.webInsets = layout.webInsets
         updateNewTabFrame()
         commandBar.relayout()
@@ -372,6 +379,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         toggleEnd = 0
 #endif
         sidebarHidden.toggle()
+        reveal.toggled()
         changed()
         let to: CGFloat = sidebarHidden ? ChromeStyle.inset : ChromeStyle.sidebarWidth
         if !sidebarHidden { sidebar.setTrafficLightsHidden(false) }
@@ -393,9 +401,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     func tick() {
         guard let a = animation else { return }
         let t = min(1, (ProcessInfo.processInfo.systemUptime - a.start) / a.duration)
-        let u = CGFloat(t) - 1
-        let c = ChromeStyle.overshootBack
-        let eased = a.overshoot ? 1 + (c + 1) * u * u * u + c * u * u : 1 + u * u * u  // ease-out-back for show, cubic ease-out for hide
+        let eased = ChromeStyle.eased(t, overshoot: a.overshoot)
         cardX = t >= 1 ? a.to : a.from + (a.to - a.from) * eased
         applyLayout()
         if t >= 1 {
@@ -405,7 +411,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
 #endif
             animationTimer?.invalidate()
             animationTimer = nil
-            if sidebarHidden { sidebar.setTrafficLightsHidden(true) }
+            if !sidebarHidden { reveal.toggleFinished() }
+            if sidebarHidden, reveal.progress == 0 { sidebar.setTrafficLightsHidden(true) }
         }
     }
 

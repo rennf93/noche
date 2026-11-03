@@ -26,7 +26,7 @@ extension BrowserWindowController {
 
     /// One DevTools call bounded by |mediaQueryTimeout| and by |end|, the question's deadline: the whole `result` object, or the error
     /// ("timed out" on a timeout, "deadline" when |end| has passed).
-    private func cdp(_ tab: NCTab, _ method: String, _ params: [String: Any] = [:], session: String? = nil, until end: Date = .distantFuture) async -> (result: [String: Any]?, error: String?) {
+    func cdp(_ tab: NCTab, _ method: String, _ params: [String: Any] = [:], session: String? = nil, until end: Date = .distantFuture) async -> (result: [String: Any]?, error: String?) {
         let budget = BarHook.on("DISCARD_NODEADLINE") ? Self.mediaQueryTimeout : min(Self.mediaQueryTimeout, end.timeIntervalSinceNow)
         if budget <= 0 { return (nil, "deadline") }
 #if NOCHE_TESTHOOKS
