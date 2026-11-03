@@ -43,7 +43,7 @@ extension BrowserWindowController {
             added.lastActiveAt = saved.lastActiveAt   // a restored tab keeps its stamp
             if pending?.index != nil {                 // a reopened tab keeps its pin, group and titles too
                 added.isPinned = saved.isPinned; added.inGrid = saved.inGrid; added.pinnedURL = saved.pinnedURL
-                added.groupID = saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
+                added.groupID = BarHook.on("REOPEN_NOGROUP") ? nil : saved.groupID; added.customTitle = saved.customTitle; added.customIcon = saved.customIcon
             }
         }
         // With addNewTabsToTop on, every new tab whose place the app did not choose opens at the top of the day list, wherever its opener sits in

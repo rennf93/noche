@@ -18,7 +18,7 @@ final class SelfTest {
     static func limit(of check: String) -> TimeInterval { check == "quit-100" ? 90 : check == "discard-frames" ? 120 : 40 }
 
     /// Names ending in -relaunch, and the two store checks that script their own phase 1 ending (crash-mid-write) or phase 2 start (corrupt-store).
-    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") || check == "move-window" || check == "merge-windows" }
+    static func isTwoPhase(_ check: String) -> Bool { check.hasSuffix("-relaunch") || check == "cb-history" || check == "crash-mid-write" || check == "corrupt-store" || check.hasPrefix("pin-launch") || check == "move-window" || check == "merge-windows" || check == "auto-cleanup" }
 
     static func parse(_ args: [String]) -> Options? {
         guard let i = args.firstIndex(of: "--selftest"), i + 1 < args.count else { return nil }
@@ -169,6 +169,8 @@ final class SelfTest {
             case "search-tabs": await searchTabs()
             case "ctrl-tab": await ctrlTabCheck()
             case "shortcuts-order": await shortcutsOrder()
+            case "cleanup": await cleanup()
+            case "auto-cleanup": await autoCleanup()
             case "close-all": await closeAll()
             case "warn-last-tab": await warnLastTab()
             case "new-tab-top": await newTabTop()

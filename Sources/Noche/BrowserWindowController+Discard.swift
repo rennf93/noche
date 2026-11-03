@@ -11,9 +11,11 @@ extension BrowserWindowController {
     /// How long the page may take to answer a media question (B: README builder calls); a page that cannot say is not discarded.
     static let mediaQueryTimeout: TimeInterval = 3
 
-    /// How long one whole media question (every session and frame of the page) may take (B: README builder calls); past it the answer is nil,
-    /// so a sweep takes at most this per tab. 5 s: a page with about 20 frames answers in well under a second (about 3 calls of some
-    /// milliseconds per frame), a single frame may use up to |mediaQueryTimeout|, and the deadline is the larger part of two of those.
+    /// How long one whole media question (every session and frame of the page) may take (B: README builder calls); past it the answer is nil.
+    /// The asking stops at this deadline, but the detach that follows is awaited: a sweep takes at most this plus 3 s per attached session and 3 s
+    /// more for the last call (5 + 3 x (sessions + 1) s per tab, as docs/app/README.md says). 5 s: a page with about 20 frames answers in well
+    /// under a second (about 3 calls of some milliseconds per frame), a single frame may use up to |mediaQueryTimeout|, and the deadline is the
+    /// larger part of two of those.
     static let mediaQuestionDeadline: TimeInterval = 5
 
     /// The setting's value in seconds (default 120 minutes; a stored value outside the key's range is the default).

@@ -364,6 +364,24 @@ public final class Store: Sendable {
         }
     }
 
+    /// Takes several tabs out of the archive in one transaction (an Undo of a cleanup run); the ones that are not archived are left out of the result.
+    /// The result is in |ids| order.
+    public func restoreArchived(ids: [TabID]) throws -> [ArchivedTab] {
+        let t = now().timeIntervalSince1970
+        return try db.write { db in
+            var out: [ArchivedTab] = []
+            for id in ids {
+                let rows = TabRow.all().live().filter(Column("id") == id.raw.uuidString && Column("archivedAt") != nil && Column("closedAt") == nil)
+                guard let a = try rows.fetchOne(db).flatMap(Self.archivedTab) else { continue }
+                _ = try rows.updateAll(db, Column("archivedAt").set(to: nil), Column("updatedAt").set(to: t))
+                var tab = a.tab
+                tab.archivedAt = nil
+                out.append(ArchivedTab(tab: tab, windowID: a.windowID, faviconURL: a.faviconURL))
+            }
+            return out
+        }
+    }
+
     /// Archived tabs matching |query| (same matching and ranking as Search Tabs; empty: all), newest archived first within a rank.
     public func archivedTabs(matching query: String) throws -> [ArchivedTab] {
         let all = try db.read { db in
@@ -382,10 +400,10 @@ public final class Store: Sendable {
         return ArchivedTab(tab: item, windowID: w, faviconURL: r.faviconURL)
     }
 
-    /// Tombstones the archived tabs older than |archiveRetention|; returns how many.
+    /// Tombstones the archived tabs older than |archiveRetention| at |date| (default: the store's clock); returns how many.
     @discardableResult
-    public func tombstoneExpiredArchive() throws -> Int {
-        let t = now().timeIntervalSince1970
+    public func tombstoneExpiredArchive(asOf date: Date? = nil) throws -> Int {
+        let t = (date ?? now()).timeIntervalSince1970
         return try db.write { db in
             try TabRow.all().live().filter(Column("archivedAt") != nil && Column("archivedAt") < t - Self.archiveRetention)
                 .updateAll(db, Column("deletedAt").set(to: t), Column("updatedAt").set(to: t))

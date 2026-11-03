@@ -128,7 +128,7 @@ enum MenuTable {
             app("Close Tab", "file.closeTab", #selector(AppDelegate.closeTab(_:))),
             app("Close All Tabs", "file.closeAllTabs", #selector(AppDelegate.closeAllTabs(_:)),
                 enabled: { $0.window.map { !$0.closableDayTabs.isEmpty || BarHook.on("CLOSEALL_ENABLED") } ?? false }),  // disabled when there are no day tabs
-            later("Clean Up Tabs", "file.cleanUpTabs", "M1.6"),
+            app("Clean Up Tabs", "file.cleanUpTabs", #selector(AppDelegate.cleanUpTabs(_:))),
             sep,
             app("Share...", "file.share", #selector(AppDelegate.share(_:)),
                 enabled: { $0.window?.activeTab.map { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") } ?? false }),

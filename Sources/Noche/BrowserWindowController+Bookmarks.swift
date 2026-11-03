@@ -25,6 +25,12 @@ extension BrowserWindowController {
         bookmarksBar.set(bar.flatMap { try? store.bookmarkChildren(of: $0.id) } ?? [])
         if !bookmarkEditor.isHidden, case .added(let id) = bookmarkEditor.mode, !bookmarkExists(id) { bookmarkEditor.hide() }
         if !bookmarkEditor.isHidden, case .edit(let id) = bookmarkEditor.mode, !bookmarkExists(id) { bookmarkEditor.hide() }
+        syncToast()
+    }
+
+    /// A toast whose Undo no longer applies (the bookmark tree changed since the Remove) goes.
+    func syncToast() {
+        if !toast.isHidden, !toast.isValid(), !BarHook.on("TOAST_NOEXPIRE") { toast.hide() }  // the hook: an expired toast stays
     }
 
     private func bookmarkExists(_ id: String) -> Bool {
@@ -116,6 +122,8 @@ extension BrowserWindowController {
                 bookmarkUndo.setActionName("Remove Bookmark")
                 bookmarkUndo.endUndoGrouping()
                 bookmarkUndoRevision = app.bookmarksRevision
+                // The toast's Undo is the card's undo and expires with it (`bookmarkUndoValid`).
+                if !BarHook.on("TOAST_NOBM") { toast.show(taken.count == 1 ? "Bookmark removed" : "\(taken.count) bookmarks removed", valid: { [weak self] in self?.bookmarkUndoValid == true }) { [weak self] in self?.undo(nil) } }
             }
         case .folder: break
         }

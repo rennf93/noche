@@ -40,6 +40,8 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     let permissionPrompt = PermissionPromptView(frame: .zero)
     let bookmarksBar = BookmarksBarView(frame: .zero)
     let bookmarkEditor = BookmarkEditView(frame: .zero)
+    /// The shared toast (tab cleanup, the Cmd+D card's Remove): one at a time, with Undo.
+    let toast = ToastView(frame: .zero)
     /// What Bookmark All Tabs saves (the tabs when the card opened), and the tab the Cmd+D card belongs to.
     var bookmarkTabs: [(title: String, url: String)] = []
     var bookmarkEditorTab: Int?
@@ -154,12 +156,16 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
     var leftAt: [TabID: Date] = [:]
     var discardTimer: Timer?
     var sweeping = false   // a discard sweep is running (its media questions are asynchronous)
+    var cleaning = false   // a cleanup run is asking its candidates' pages (Task 7c)
+    var cleanupRuns = 0    // cleanup runs of this window that went through the guard (a run that found nothing counts)
 #if NOCHE_TESTHOOKS
     /// Test support: how many times each Noche action ran (all windows), the Chrome commands received, where the card was
     /// every time it moved, and where Copy URL writes.
     static var actionCounts: [String: Int] = [:]
     /// Test support: every tab the discard policy asked the engine to discard (the engine refuses some itself, so the policy is read here).
     static var discardCalls: [TabID] = []
+    /// Test support (cleanup): the tabs cleanup asked the engine to close, in order; a dormant tab never appears.
+    static var archiveCloseCalls: [TabID] = []
     /// Test support: how many child sessions were attached to the tab at each |discardCalls| entry (T7.11: none).
     static var discardSessions: [Int] = []
     /// Test support for the media question: a child session's frame tree gives an error (an injected one), the last child session is hidden from
@@ -271,6 +277,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         setUpPermissionPrompt()
         overlay.addSubview(bookmarksBar)
         overlay.addSubview(bookmarkEditor)
+        overlay.addSubview(toast)
         setUpBookmarks()
         overlay.addSubview(border)
         setUpFind()
@@ -318,6 +325,7 @@ final class BrowserWindowController: NSObject, NCWindowDelegate {
         bookmarksBar.frame = layout.bookmarksBar
         bookmarksBar.isHidden = !barVisible
         bookmarkEditor.frame = layout.bookmarkEditor
+        toast.frame = layout.toast
         toolbar.frame = layout.toolbar
         findBar.frame = layout.findBar
         permissionPrompt.frame = layout.permissionPrompt

@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 #endif
     private(set) var controllers: [BrowserWindowController] = []
     let downloads = DownloadsController()
+    /// Automatic tab cleanup (M1.6 Task 7c); it starts once the windows are being restored.
+    lazy var cleanup = CleanupService(app: self)
     lazy var history = HistoryWindowController(app: self)
     /// Built on first use (a bookmark change before that has no window to reload).
     var madeBookmarksWindow: BookmarksWindowController?
@@ -114,6 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NCDownloads.shared.start(observer: downloads)
         ChromeCommand.resolve()
         restoreWindows(startupURL: url, startupFrame: frame)
+#if NOCHE_TESTHOOKS
+        if selfTestOptions != nil { cleanup.presenting = { false } }  // what the owner's Mac is showing must not decide a test; auto-cleanup injects its own
+#endif
+        if smoke == nil { cleanup.start() }  // a smoke run shares the owner's profile and archives nothing
 
         if let smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + smoke.timeout) { [weak self] in
@@ -288,6 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func previousTab(_ s: Any?) { active?.selectPreviousTab() }
     @objc func searchTabs(_ s: Any?) { active?.toggleSearchTabs() }
     @objc func closeAllTabs(_ s: Any?) { active?.closeAllTabs() }
+    @objc func cleanUpTabs(_ s: Any?) { active?.cleanUpTabsCommand() }
     @objc func copyURLMarkdown(_ s: Any?) { active?.copyURLMarkdown() }
     @objc func printPage(_ s: Any?) { active?.printPage() }
     @objc func inspectElements(_ s: Any?) { active?.chromeCommand("IDC_DEV_TOOLS_INSPECT", note: "inspectElements") }

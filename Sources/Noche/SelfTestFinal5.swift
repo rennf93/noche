@@ -63,9 +63,12 @@ extension SelfTest {
             ed.remove.performClick(nil)
             guard await until(3, { copies().isEmpty }) else { return finish(false, "\(name): Remove left \(copies().count) copies") }
             guard enabled("undo:") else { return finish(false, "\(name): Undo reads disabled right after Remove") }
+            guard !ctl.toast.isHidden, ctl.toast.label.stringValue == "Bookmark removed" else { return finish(false, "\(name): the toast is not shown after Remove") }
             change()
             let before = copies().count
             guard !enabled("undo:") else { return finish(false, "after \(name) the card's Undo still reads enabled") }
+            // The toast's Undo expires with the same rule: it went with the change, and a click that reaches it restores nothing.
+            guard ctl.toast.isHidden else { return finish(false, "after \(name) the toast is still shown ('\(ctl.toast.label.stringValue)'): its Undo must expire with the card's") }
             undo()
             guard copies().count == before else { return finish(false, "after \(name) Undo restored \(copies().count - before) bookmark(s) of the page") }
             if i == 0 { for c in copies() { app.deleteBookmark(c.id) } }

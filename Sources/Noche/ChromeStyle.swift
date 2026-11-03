@@ -183,6 +183,8 @@ enum ChromeStyle {
     static let chipMaxWidth: CGFloat = 180                       // builder call: a long title is cut here
     // M1.5 builder call: the Cmd+D card (title, folder popup, Done and Remove), a card under the toolbar at the card's top right.
     static let bookmarkEditWidth: CGFloat = 340, bookmarkEditHeight: CGFloat = 156
+    /// The shared toast (M1.6 Task 7c): a 320 x 44 pill, centered at the bottom of the card, 16 pt above the card's bottom edge (B).
+    static let toastWidth: CGFloat = 320, toastHeight: CGFloat = 44, toastBottom: CGFloat = 16
     static let bookmarkEditTop: CGFloat = 8, bookmarkEditRight: CGFloat = 12
 }
 
@@ -224,6 +226,11 @@ struct ChromeLayout {
     var permissionPrompt: CGRect {
         let w = min(ChromeStyle.permissionWidth, max(0, card.width - 2 * ChromeStyle.permissionLeft))
         return CGRect(x: card.minX + ChromeStyle.permissionLeft, y: ChromeStyle.webTop + barOffset + ChromeStyle.permissionTop, width: w, height: ChromeStyle.permissionHeight)
+    }
+    /// The toast: centered at the bottom of the card; it narrows with a narrow card (12 pt from each edge).
+    var toast: CGRect {
+        let w = min(ChromeStyle.toastWidth, max(0, card.width - 24))
+        return CGRect(x: card.midX - w / 2, y: card.maxY - ChromeStyle.toastBottom - ChromeStyle.toastHeight, width: w, height: ChromeStyle.toastHeight)
     }
     /// The web view sits 1 pt inside the card border, below the divider.
     var webInsets: NSEdgeInsets {

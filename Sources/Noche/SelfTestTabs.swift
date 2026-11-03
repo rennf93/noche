@@ -418,6 +418,7 @@ extension SelfTest {
             return finish(false, "Shift+Cmd+K left \(rowCount) rows, \(win.tabs.count) engine tabs, list \(ctl.list.items.map(\.url))")
         }
         await settle(); verify("Shift+Cmd+K", "closeAllTabs")
+        reset(); key("k", code: 40, [.command, .option], chars: "k"); await settle(); verify("Opt+Cmd+K", "cleanUpTabs")
         let reloaded = loads
         win.activeTab?.loadURL(fixture(""))
         _ = await until(10, { loads > reloaded })

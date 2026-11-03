@@ -165,6 +165,44 @@ final class StoreSidebarTests: XCTestCase {
         XCTAssertNil(try store.restoreArchived(id: TabID()))
     }
 
+    func testRestoreArchivedManyIsOneTransactionInOrderAndSkipsTheOthers() throws {
+        let store = try makeStore()
+        var l = TabList()
+        let a = tab(1), b = tab(2), c = tab(3)
+        for t in [a, b, c] { l.insertNew(t, opener: nil, addToTop: false, activate: false) }
+        try store.save(snapshot(l))
+        try store.archive(ids: [a.id, b.id], at: Date(timeIntervalSince1970: 1_900_000))
+        let back = try store.restoreArchived(ids: [b.id, c.id, a.id, TabID()])  // c was never archived
+        XCTAssertEqual(back.map(\.tab.id), [b.id, a.id])
+        XCTAssertTrue(back.allSatisfy { $0.tab.archivedAt == nil })
+        XCTAssertEqual(try store.archivedTabs(matching: ""), [])
+        XCTAssertEqual(try store.restoreArchived(ids: [a.id]), [])
+    }
+
+    /// Retention (T7.4): an archived tab is tombstoned once it is older than |archiveRetention| at the clock given, whatever else is set.
+    func testRetentionTombstonesAtTheInjectedClock() throws {
+        let c = Clock()
+        let store = try makeStore(c)
+        var l = TabList()
+        let old = tab(1), fresh = tab(2), edge = tab(3)
+        for t in [old, fresh, edge] { l.insertNew(t, opener: nil, addToTop: false, activate: false) }
+        try store.save(snapshot(l))
+        let base = Date(timeIntervalSince1970: 3_000_000)
+        try store.archive(ids: [old.id], at: base)
+        try store.archive(ids: [edge.id], at: base.addingTimeInterval(3600))
+        try store.archive(ids: [fresh.id], at: base.addingTimeInterval(10 * day))
+        let limit = base.addingTimeInterval(Store.archiveRetention)
+        XCTAssertEqual(try store.tombstoneExpiredArchive(asOf: limit), 0)  // exactly 30 days old stays
+        XCTAssertEqual(try store.tombstoneExpiredArchive(asOf: limit.addingTimeInterval(1)), 1)
+        XCTAssertEqual(Set(try store.archivedTabs(matching: "").map(\.tab.id)), [edge.id, fresh.id])
+        XCTAssertEqual(try store.tombstoneExpiredArchive(asOf: limit.addingTimeInterval(3601)), 1)
+        XCTAssertEqual(try store.archivedTabs(matching: "").map(\.tab.id), [fresh.id])
+        XCTAssertEqual(try store.tombstoneExpiredArchive(asOf: limit.addingTimeInterval(3601)), 0)  // idempotent
+        c.t = base.timeIntervalSince1970 + 41 * day  // the store's own clock when none is given
+        XCTAssertEqual(try store.tombstoneExpiredArchive(), 1)
+        XCTAssertEqual(try store.archivedTabs(matching: ""), [])
+    }
+
     func testAResaveOfARestoredTabClearsArchivedAt() throws {
         let store = try makeStore()
         var l = TabList()

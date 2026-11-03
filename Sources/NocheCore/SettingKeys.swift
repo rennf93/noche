@@ -47,6 +47,8 @@ public enum SettingKeys {
         SettingKey(name: "warnBeforeClosingLastTab", type: .bool, defaultValue: "1"),
         // "Automatically group tabs for meetings" (G4): the key only, nothing reads it until M1.8 (Settings) and M3 (calendar access).
         SettingKey(name: "autoGroupMeetings", type: .bool, defaultValue: "0"),
+        // "Clean up tabs I haven't used in" (M1.6 Task 7c, spec row 101): tabs unused for this long are archived; "never" archives nothing. M1.8's Settings popup builds on these values.
+        SettingKey(name: "cleanupThreshold", type: .choice(["1d", "7d", "30d", "never"]), defaultValue: "7d"),
         // Finished downloads the person removed from the list, one "engine id|address" per line (DownloadsController).
         SettingKey(name: downloadsRemoved, type: .text, defaultValue: ""),
         // The profile "New windows open with" (ProfileStore): a profile id; empty means the first live profile.
@@ -76,6 +78,16 @@ public enum SettingKeys {
         let k = key("discardAfterMinutes")!
         if let stored, k.isValid(stored), let n = Int(stored) { return n }
         return Int(k.defaultValue)!
+    }
+
+    /// The cleanup threshold in seconds: the stored value when it is valid, else the default (7 days). Nil is Never.
+    public static func cleanupThreshold(stored: String?) -> TimeInterval? {
+        switch value("cleanupThreshold", stored: stored) {
+        case "1d": 86_400
+        case "30d": 30 * 86_400
+        case "never": nil
+        default: 7 * 86_400
+        }
     }
 
     public static func key(_ name: String) -> SettingKey? { all.first { $0.name == name } }

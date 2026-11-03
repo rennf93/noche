@@ -32,10 +32,19 @@ extension SelfTest {
         ed.remove.performClick(nil)
         guard await until(3, { copies().isEmpty }) else { return finish(false, "Remove left \(copies().count) copies: \(layout())") }
         let removed = layout()
+        // The shared toast (T7.7) shows with Undo; its Undo is the card's undo.
+        guard !ctl.toast.isHidden, ctl.toast.label.stringValue == "3 bookmarks removed" else { return finish(false, "after Remove the toast is \(ctl.toast.isHidden ? "hidden" : "'\(ctl.toast.label.stringValue)'"), want '3 bookmarks removed'") }
+        ctl.toast.undo.performClick(nil)
+        guard await until(3, { layout() == before }) else { return finish(false, "after the toast's Undo the folders hold \(layout()), want \(before) (after Remove: \(removed))") }
+        guard ctl.toast.isHidden, !ctl.bookmarkUndo.canUndo else { return finish(false, "after the toast's Undo the toast is hidden \(ctl.toast.isHidden), an undo action is left \(ctl.bookmarkUndo.canUndo)") }
+        // Edit > Undo does the same.
+        guard cmdD(), await until(5, { !ed.isHidden && { if case .edit = ed.mode { return true } else { return false } }() }) else { return finish(false, "the Cmd+D after the toast's Undo showed no edit card") }
+        ed.remove.performClick(nil)
+        guard await until(3, { copies().isEmpty }) else { return finish(false, "the second Remove left \(copies().count) copies: \(layout())") }
         guard NSApp.sendAction(NSSelectorFromString("undo:"), to: ctl, from: nil) else { return finish(false, "Edit > Undo reached nothing after Remove") }
         guard await until(3, { layout() == before }) else { return finish(false, "after Undo the folders hold \(layout()), want \(before) (after Remove: \(removed))") }
         guard !ctl.bookmarkUndo.canUndo else { return finish(false, "one Remove left more than one undo action") }
-        finish(violations.isEmpty, "Remove took 3 copies of the page in two folders, one Undo brought them back in place: \(before) \(violations)")
+        finish(violations.isEmpty, "Remove took 3 copies of the page in two folders and showed the toast '3 bookmarks removed'; its Undo and Edit > Undo each brought them back in place: \(before) \(violations)")
     }
 
     // MARK: cb-reopen-late

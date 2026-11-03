@@ -29,6 +29,16 @@ final class SettingKeysTests: XCTestCase {
         for m in BookmarksBarMode.allCases { XCTAssertTrue(SettingKeys.isValid(BookmarksBarMode.settingKey, m.rawValue)) }
         XCTAssertFalse(SettingKeys.isValid("unknown", "1"))
     }
+    func testCleanupThreshold() {
+        XCTAssertEqual(SettingKeys.key("cleanupThreshold")?.defaultValue, "7d")
+        for v in ["1d", "7d", "30d", "never"] { XCTAssertTrue(SettingKeys.isValid("cleanupThreshold", v)) }
+        XCTAssertFalse(SettingKeys.isValid("cleanupThreshold", "2d") || SettingKeys.isValid("cleanupThreshold", ""))
+        let day = 86_400.0
+        for (stored, want) in [(nil, 7 * day), ("1d", day), ("7d", 7 * day), ("30d", 30 * day), ("never", nil), ("bogus", 7 * day), ("", 7 * day)] as [(String?, Double?)] {
+            XCTAssertEqual(SettingKeys.cleanupThreshold(stored: stored), want, "stored \(stored ?? "nil")")
+        }
+        XCTAssertEqual(SettingKeys.flagSettings(["--selftest-setting", "cleanupThreshold=30d", "--selftest-setting", "cleanupThreshold=5d"]).map { "\($0.0)=\($0.1)" }, ["cleanupThreshold=30d"])
+    }
     func testDiscardAfterMinutes() {
         let k = SettingKeys.key("discardAfterMinutes")
         XCTAssertEqual(k?.defaultValue, "120")
