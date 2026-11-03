@@ -217,7 +217,7 @@ struct ChromeLayout {
     var toolbar: CGRect { CGRect(x: cardX, y: ChromeStyle.inset, width: card.width, height: ChromeStyle.toolbarHeight) }
     /// The sidebar slides with the card: x -197 when the card is at 6, 0 when it is at 197 (or when the hover reveal has it on screen over the page).
     var sidebar: CGRect {
-        let s = max((cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset), reveal)
+        let s = max((cardX - ChromeStyle.inset) / (ChromeStyle.sidebarWidth - ChromeStyle.inset), BarHook.on("REVEAL_NOCLAMP") ? reveal : min(1, reveal))  // the show curve overshoots 1: the sidebar stays at 0 (the hook: it follows the overshoot)
         return CGRect(x: -ChromeStyle.sidebarWidth + ChromeStyle.sidebarWidth * s, y: 0, width: ChromeStyle.sidebarWidth, height: size.height)
     }
     /// What the bar takes at the top of the card on every surface it shows on (over the New Tab surface too, where it pushes nothing).

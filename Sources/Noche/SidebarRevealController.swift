@@ -14,6 +14,8 @@ final class RevealStripView: NSView {
     }
     override func mouseEntered(with event: NSEvent) { onMove?(convert(event.locationInWindow, from: nil).x) }
     override func mouseMoved(with event: NSEvent) { onMove?(convert(event.locationInWindow, from: nil).x) }
+    /// Leaving the strip is a move to where the pointer went: a dwell still pending must not fire for a pointer that is gone, whatever the monitor sees.
+    override func mouseExited(with event: NSEvent) { if !BarHook.on("REVEAL_NOEXIT") { onMove?(convert(event.locationInWindow, from: nil).x) } }  // the hook: the exit is ignored
 }
 
 /// The sidebar's panel while it overlays the page: the page is no vibrancy, so rows drawn straight over it would show it through.
@@ -112,7 +114,9 @@ final class SidebarRevealController {
         }
         switch policy.update(now: ProcessInfo.processInfo.systemUptime, x: x, held: held, editing: editing == true && !BarHook.on("REVEAL_EDIT")) {
         case .reveal: show()
-        case .hide: slide(to: 0)
+        case .hide:
+            if !BarHook.on("REVEAL_NORESET") { editing = nil; asked = false; visit += 1 }  // the hook: the next visit reuses the last answer
+            slide(to: 0)
         case .none: break
         }
         if let d = policy.deadline {

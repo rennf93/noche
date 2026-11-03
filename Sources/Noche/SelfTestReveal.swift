@@ -49,6 +49,27 @@ extension SelfTest {
         await wait(300)
         expect(away() && ctl.sidebar.lights.allSatisfy(\.isHidden), "550 ms after leaving the sidebar it is at \(x()), lights hidden \(ctl.sidebar.lights.allSatisfy(\.isHidden))")
 
+        // A pointer that left the strip before the dwell ended (the strip's exit handler, called directly) reveals nothing.
+        ctl.reveal.pointerMoved(toX: 3)
+        await wait(50)
+        if let ns = ctl.nsWindow, let ev = NSEvent.enterExitEvent(with: .mouseExited, location: NSPoint(x: 300, y: 300), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                                  windowNumber: ns.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) { ctl.reveal.strip.mouseExited(with: ev) } else { bad.append("no exit event") }
+        await wait(300)
+        expect(away(), "the pointer left the strip 50 ms in: the sidebar is at \(x()) 350 ms later")
+        await settle()
+
+        // A fast re-entry after a hide asks the page again: a text field focused while it was revealed blocks the next reveal.
+        ctl.reveal.pointerMoved(toX: 3)
+        await wait(330)
+        _ = await evaluate(tab, "document.body.innerHTML = '<input id=\"j\">'; document.getElementById('j').focus(); 1")
+        ctl.reveal.pointerMoved(toX: 300)
+        _ = await until(2, { away() && ctl.reveal.progress == 0 })
+        ctl.reveal.pointerMoved(toX: 3)  // no event outside the strip in between
+        await wait(400)
+        expect(away(), "re-entering the strip at once after a hide with a text field focused: the sidebar is at \(x())")
+        _ = await evaluate(tab, "document.activeElement.blur(); 1")
+        await settle()
+
         // Only the strip: x 10 reveals nothing.
         ctl.reveal.pointerMoved(toX: 10)
         await wait(400)
@@ -76,6 +97,26 @@ extension SelfTest {
         }, off: { _ = await evaluate(tab, "document.activeElement.blur(); 1") })
         expect(!ContextMenus.tracking && ctl.sidebar.drag == nil, "a guard was left on")
 
+        // Cmd+S in the show's overshoot (progress above 1): the sidebar does not move at the start, and the last frame of the card's slide moves it by under 1 pt (the card's own
+        // overshoot is smooth there; a sidebar held at the overshoot until `toggleFinished` snaps back by about 2 pt).
+        ctl.reveal.pointerMoved(toX: 3)
+        var over = false
+        let seen = Date().addingTimeInterval(1)
+        while !over && Date() < seen { over = ctl.reveal.progress > 1.003; if !over { await wait(1) } }  // the overshoot lasts about 40 ms: `until` polls too slowly
+        let before = x()
+        cmdS()
+        let started = abs(x() - before)
+        var last = x()
+        let stop = Date().addingTimeInterval(2)
+        while ctl.toggleEnd == 0 && Date() < stop { last = x(); await wait(2) }
+        let snap = abs(x() - last)
+        expect(over, "the reveal never showed an overshoot (progress \(ctl.reveal.progress))")
+        expect(started <= 0.5, "Cmd+S in the overshoot: the sidebar moved \(started) pt at once")
+        expect(snap <= 1, "Cmd+S in the overshoot: the sidebar snapped \(snap) pt when the card arrived")
+        cmdS()
+        _ = await until(3, { ctl.sidebarHidden && ctl.animation == nil && ctl.toggleEnd > 0 })
+        await settle()
+
         // Everything off again: the reveal works, and Cmd+S while revealed makes it permanent: the card slides in and the sidebar never moves left.
         ctl.reveal.pointerMoved(toX: 3)
         await wait(330)
@@ -88,7 +129,7 @@ extension SelfTest {
         expect(left > -0.01, "Cmd+S while revealed: the sidebar jumped to \(left)")
         expect(!ctl.sidebarHidden && ctl.cardX == 197 && onScreen() && ctl.reveal.progress == 0 && !ctl.reveal.policy.revealed && lightsShown() && ctl.reveal.backing.isHidden,
                "Cmd+S while revealed ended with hidden \(ctl.sidebarHidden), card \(ctl.cardX), sidebar \(x()), progress \(ctl.reveal.progress), revealed \(ctl.reveal.policy.revealed)")
-        expect(BrowserWindowController.actionCounts["toggleSidebar"] == 2, "the reveal toggled the sidebar: \(BrowserWindowController.actionCounts)")
+        expect(BrowserWindowController.actionCounts["toggleSidebar"] == 4, "the reveal toggled the sidebar: \(BrowserWindowController.actionCounts)")
         finish(bad.isEmpty && violations.isEmpty, "click at x 3 reaches the page, 150 ms dwell then x 0 by 330 ms with the card at 6 and the lights shown, hidden 550 ms after leaving the margin, no reveal with a menu, a drag, a button or a text field, Cmd+S makes it permanent \(bad) \(violations)")
     }
 }
