@@ -116,12 +116,17 @@ extension SelfTest {
             guard await run(toast: false, label), archivedSet().isEmpty, c.list.items.map(\.id) == itemsBefore else { return finish(false, "\(label): archived \(archivedSet().count), list changed \(c.list.items.map(\.id) != itemsBefore)") }
         }
         stage("never and 30d")
-        // 7 days again, nothing injected: the frame tab can answer (nothing plays) and is archived with the others; the audio tab stays. Restoring the grouped tab from
-        // Search Tabs puts it back in its group (at the end).
+        // 7 days again: Undo stamped the four tabs as used (the run's clock), so they stay; the frame tab, which could not answer before and can now (nothing plays),
+        // is the only one archived.
         guard setSetting("cleanupThreshold", "7d") else { return finish(false, "could not store the setting") }
         guard await run(toast: true, "7 days again") else { return }
-        guard archivedSet() == toArchive.union([cross]) else { return finish(false, "7 days with every page answering: archived \(archivedSet().map { entry(c, $0)?.customTitle ?? "?" }), want the four and the frame tab") }
-        guard c.toast.label.stringValue == "5 tabs archived" else { return finish(false, "the toast reads '\(c.toast.label.stringValue)', want '5 tabs archived'") }
+        guard archivedSet() == [cross] else { return finish(false, "7 days after Undo: archived \(archivedSet().count) tabs (\(toArchive.filter { archivedSet().contains($0) }.count) of the undone four), want only the frame tab: the undone tabs keep their old stamps and are archived again") }
+        guard c.toast.label.stringValue == "1 tab archived", toArchive.allSatisfy({ entry(c, $0) != nil }) else { return finish(false, "the toast reads '\(c.toast.label.stringValue)', want '1 tab archived' with the undone four still listed") }
+        // The grouped tab is old again: archived, then restored from Search Tabs, it goes back in its group (at the end).
+        c.list.markActive(grp, at: now.addingTimeInterval(-8 * day))
+        c.list.markActive(c.list.items.first { $0.url == fixture("") }!.id, at: now)
+        c.refresh(); c.changed()
+        guard await run(toast: true, "7 days, the grouped tab old again"), archivedSet() == [cross, grp] else { return finish(false, "7 days with the grouped tab old again: archived \(archivedSet().count) tabs, want the frame tab and the grouped tab") }
         card.open()
         card.setQuery("zgrp")
         guard card.results.map(\.id) == [grp] else { return finish(false, "Search Tabs for 'zgrp' lists \(card.results.map(\.title))") }
@@ -129,18 +134,22 @@ extension SelfTest {
         guard await until(20, { self.entry(c, grp)?.engineID != nil && win.tabs.count == engineBefore - 3 }), entry(c, grp)?.groupID == g, c.list.items.filter({ $0.groupID == g }).map(\.id) == [six, grp] else {
             return finish(false, "restoring the grouped tab from Search Tabs: group \(String(describing: entry(c, grp)?.groupID)) want \(g), members \(c.list.items.filter { $0.groupID == g }.compactMap(\.customTitle)), want [zsix, zgrp]")
         }
-        stage("restored from search")
         // 1 day: the setting is read at each run; the 6 and the exactly 7 day tabs go now (the restored one was used just now).
         guard setSetting("cleanupThreshold", "1d") else { return finish(false, "could not store the setting") }
         guard await run(toast: true, "1 day"), archivedSet().isSuperset(of: [six, seven]), !archivedSet().contains(grp), !archivedSet().contains(pin), !archivedSet().contains(audio), c.toast.label.stringValue == "2 tabs archived" else {
             return finish(false, "1 day: \(archivedSet().count) tabs archived in all, toast '\(c.toast.label.stringValue)', want the 6 and the 7 day tabs only (2)")
         }
+        // A command that finds a pass running waits for it and runs right after (never a silent nothing): two passes, both counted.
+        let busyBefore = c.cleanupRuns
+        Task { @MainActor in _ = await c.cleanUpTabs(now: now, toast: false) }
+        cleanUpKey()
+        guard await until(15, { c.cleanupRuns == busyBefore + 2 }) else { return finish(false, "a command pressed while a pass was running made \(c.cleanupRuns - busyBefore) pass(es) in all, want 2 (it must wait and run, not do nothing)") }
         // The toast's lifetime: its timer hides it.
         c.toast.show("lifetime") {}
         guard let timer = c.toast.timer, timer.isValid, abs(timer.fireDate.timeIntervalSinceNow - ToastView.lifetime) < 1 else { return finish(false, "a new toast has no lifetime timer") }
         timer.fire()
         guard c.toast.isHidden else { return finish(false, "the toast stayed after its lifetime ended") }
-        finish(violations.isEmpty, "Opt+Cmd+K at 7 days archived only the 8 day day tab, the grouped one (group kept), the dormant one (no close call) and the discarded one, none on the closed list, and skipped the 6 day, the exactly 7 day, the pinned, the active, the audio and an unanswerable frame tab; the toast read '4 tabs archived' and Search Tabs found each; Undo put them back dormant at their indexes; Never and 30 days archived nothing with no toast; 7 days with every page answering archived the frame tab too and a restore from Search Tabs put the grouped tab back in its group; 1 day archived the 6 and 7 day tabs; the toast hides after \(Int(ToastView.lifetime)) s \(violations)")
+        finish(violations.isEmpty, "Opt+Cmd+K at 7 days archived only the 8 day day tab, the grouped one (group kept), the dormant one (no close call) and the discarded one, none on the closed list, and skipped the 6 day, the exactly 7 day, the pinned, the active, the audio and an unanswerable frame tab; the toast read '4 tabs archived' and Search Tabs found each; Undo put them back dormant at their indexes; Never and 30 days archived nothing with no toast; 7 days again left the undone four alone (Undo stamps them) and archived the frame tab, which can answer now; the grouped tab, old again, came back to its group from Search Tabs; a command pressed during a pass waited and ran; 1 day archived the 6 and 7 day tabs; the toast hides after \(Int(ToastView.lifetime)) s \(violations)")
     }
 
     // MARK: auto-cleanup

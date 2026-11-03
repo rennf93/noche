@@ -25,7 +25,12 @@ extension BrowserWindowController {
     /// the rows, the tabs leave the list and each engine tab closes without a closed-list entry. |toast| shows the count with Undo. Returns how many.
     @discardableResult
     func cleanUpTabs(now: Date, toast showToast: Bool) async -> Int {
-        guard installed, !restoring, !app.closing, let writer = app.writer, !cleaning else { return 0 }
+        // A pass already running (the hourly job, the command) finishes first and this one runs right after it: never skipped, never silent (the hook: the old guard).
+        while cleaning {
+            if BarHook.on("CLEANUP_NOWAITBUSY") { return 0 }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard installed, !restoring, !app.closing, let writer = app.writer else { return 0 }
         let threshold = cleanupThreshold  // nil is Never: no candidate, the run still counts
         cleaning = true
         defer { cleaning = false; cleanupRuns += 1 }
@@ -80,12 +85,19 @@ extension BrowserWindowController {
     }
 
     /// Undo of a run: one store transaction takes the tabs out of the archive and each comes back dormant to the container it left, at its index
-    /// (a group that is gone since means the day list), in the reverse of the order they left so every index is what it was.
+    /// (a group that is gone since means the day list), in the reverse of the order they left so every index is what it was. A tab whose id is in the list
+    /// already stays archived (the store and the list agree) and the others are restored. Each restored tab is stamped as used now (the run's clock), so the next
+    /// hourly run does not archive it again.
     func undoCleanup(_ run: [ArchivedTab]) {
-        guard let store = app.writer?.store, let back = try? store.restoreArchived(ids: run.map(\.item.id)) else { return }
+        let ids = run.map(\.item.id).filter { item(withID: $0) == nil }
+        guard let store = app.writer?.store, let back = try? store.restoreArchived(ids: ids) else { return }
+        let stamp = app.cleanup.now()
         let byID = Dictionary(back.map { ($0.tab.id, $0) }, uniquingKeysWith: { a, _ in a })
         for a in run.reversed() {
-            guard let r = byID[a.item.id], list.insertNew(r.tab, opener: nil, addToTop: true, activate: false) else { continue }
+            guard let r = byID[a.item.id] else { continue }
+            var tab = r.tab
+            if !BarHook.on("CLEANUP_NOSTAMP") { tab.lastActiveAt = stamp }  // the hook: the restored tab keeps its old stamp
+            guard list.insertNew(tab, opener: nil, addToTop: true, activate: false) else { continue }
             if !BarHook.on("CLEANUP_UNDOTOP") { list.move(a.item.id, to: a.index) }  // the hook: the tab stays where the restore put it (the top of the day list)
             if let icon = r.faviconURL { faviconSeeds[a.item.id] = (r.tab.url, icon); loadDormantIcon(a.item.id) }
         }
